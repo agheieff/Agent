@@ -93,7 +93,10 @@ class AutonomousAgent:
             return "", str(e), 1
 
     def extract_commands(self, response: str) -> List[str]:
-        """Extract commands from the response with improved code block handling"""
+        """Extract commands from the response with improved debugging"""
+        print("\n=== Extracting commands from response ===")
+        print(f"Response text: {response[:200]}...")  # Print start of response
+        
         commands = []
         lines = response.split('\n')
         in_code_block = False
@@ -102,6 +105,7 @@ class AutonomousAgent:
         
         for line in lines:
             stripped = line.strip()
+            print(f"Processing line: {stripped[:50]}...")  # Debug each line
             
             # Handle code block markers
             if stripped.startswith('```'):
@@ -112,19 +116,22 @@ class AutonomousAgent:
                         if block_text:
                             block_commands = [cmd.strip() for cmd in block_text.split('\n') if cmd.strip()]
                             commands.extend(block_commands)
+                            print(f"Found commands in block: {block_commands}")
                     current_block = []
                     in_code_block = False
                     current_language = None
+                    print("Exiting code block")
                 else:
                     # Start of code block
                     in_code_block = True
-                    # Extract language if specified
                     lang_spec = stripped[3:].strip().lower()
                     current_language = lang_spec if lang_spec else None
-                    continue  # Skip the opening marker
+                    print(f"Entering code block with language: {current_language}")
+                    continue
             elif in_code_block:
-                if stripped:  # Only add non-empty lines
+                if stripped:
                     current_block.append(stripped)
+                    print(f"Added to current block: {stripped}")
         
         # Handle unclosed code blocks
         if in_code_block and current_block and current_language in ['bash', 'shell', 'sh', None]:
@@ -132,37 +139,48 @@ class AutonomousAgent:
             if block_text:
                 block_commands = [cmd.strip() for cmd in block_text.split('\n') if cmd.strip()]
                 commands.extend(block_commands)
+                print(f"Found commands in unclosed block: {block_commands}")
         
-        return [cmd for cmd in commands if cmd]  # Filter out any empty commands
+        print(f"\nExtracted commands: {commands}")
+        return [cmd for cmd in commands if cmd]
 
     async def think_and_act(self, prompt: str, system: str) -> str:
-        """Process a thought and execute any necessary actions with improved conversation handling"""
+        """Process a thought and execute any necessary actions with improved debugging"""
+        print("\n=== Starting think_and_act ===")
         if not self.current_conversation_id:
             self.start_conversation()
 
         # Load conversation history
         history = self.memory.load_conversation(self.current_conversation_id)
+        print(f"Loaded conversation history: {len(history)} messages")
         
         # Add user prompt to history
         history.append({"role": "user", "content": prompt})
+        print(f"Added user prompt: {prompt[:100]}...")
         
         # Get initial response
+        print("Getting LLM response...")
         response = await self.llm.get_response(prompt, system, history)
         if not response:
-            self.logger.error("Failed to get LLM response")
-            return "Failed to process request"
+            error_msg = "Failed to get LLM response"
+            print(error_msg)
+            return error_msg
+
+        print(f"Got response: {response[:200]}...")
 
         # Extract any commands
         commands = self.extract_commands(response)
+        print(f"Extracted {len(commands)} commands")
         
         # Save the initial response to history
         history.append({"role": "assistant", "content": response})
         
         if commands:
+            print("\n=== Executing commands ===")
             # Execute each command and get immediate feedback
             command_responses = []
             for cmd in commands:
-                self.logger.info(f"Executing command: {cmd}")
+                print(f"\nExecuting command: {cmd}")
                 stdout, stderr, code = await self.execute(cmd)
                 
                 # Format command result
@@ -180,14 +198,18 @@ class AutonomousAgent:
             
             # Save conversation state
             self.memory.save_conversation(self.current_conversation_id, history)
+            print("Saved conversation with command results")
             
             # Return full response with command outputs
-            return response + "\n" + "\n".join(command_responses)
+            full_response = response + "\n" + "\n".join(command_responses)
+            print(f"Returning full response: {len(full_response)} chars")
+            return full_response
         else:
             # No commands to execute, just save the conversation
             self.memory.save_conversation(self.current_conversation_id, history)
+            print("No commands to execute, saved conversation")
             return response
-
+    
     async def setup_web_interface(self, host: str = '0.0.0.0', port: int = 8080):
         """Set up a web interface for monitoring and interaction"""
         routes = web.RouteTableDef()

@@ -1,6 +1,4 @@
-"""
-core/enhanced_agent.py - Enhanced version of the autonomous agent with additional capabilities
-"""
+# core/agent.py
 import asyncio
 import logging
 import json
@@ -13,9 +11,25 @@ from core.llm_client import AnthropicClient
 from core.memory_manager import MemoryManager
 from core.system_control import SystemControl
 
-class EnhancedAutonomousAgent(AutonomousAgent):
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('agent.log'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+class AutonomousAgent:
     def __init__(self, api_key: Optional[str] = None, system_user: str = 'claude'):
-        super().__init__(api_key, system_user)
+        self.llm = AnthropicClient(api_key)
+        self.memory = MemoryManager()
+        self.system = SystemControl(user=system_user)
+        self.current_conversation_id = None
+        self.logger = logger
         self.scheduler = AsyncIOScheduler()
         self.http_session = None
         self.token_count = 0
@@ -30,19 +44,22 @@ class EnhancedAutonomousAgent(AutonomousAgent):
         self.setup_cost_monitoring()
 
     def setup_persistent_storage(self):
-        """Set up enhanced persistent storage"""
+        """Set up persistent storage directories"""
         storage_paths = [
             'memory/tasks',
             'memory/logs',
             'memory/metrics',
             'memory/web',
-            'memory/context'
+            'memory/context',
+            'memory/conversations',
+            'memory/docs',
+            'memory/config'
         ]
         for path in storage_paths:
             os.makedirs(path, exist_ok=True)
 
     def setup_task_scheduling(self):
-        """Initialize task scheduler with common maintenance tasks"""
+        """Initialize task scheduler with maintenance tasks"""
         self.scheduler.add_job(
             self.cleanup_old_conversations,
             'interval',
@@ -57,23 +74,137 @@ class EnhancedAutonomousAgent(AutonomousAgent):
     def setup_cost_monitoring(self):
         """Initialize API cost monitoring"""
         self.token_count = self.load_token_count()
-        
-    async def initialize_with_prompt(self, prompt: str) -> str:
-        """Initialize a new conversation with a custom prompt"""
-        conv_id = self.start_conversation()
-        system_prompt = self.load_system_prompt()
-        response = await self.think_and_act(prompt, system_prompt)
-        return conv_id, response
 
-    async def schedule_task(self, task_func, trigger, **trigger_args):
-        """Schedule a task with the scheduler"""
-        job = self.scheduler.add_job(
-            task_func,
-            trigger,
-            **trigger_args
-        )
-        self.save_scheduled_task(job.id, task_func.__name__, trigger, trigger_args)
-        return job.id
+    def start_conversation(self) -> str:
+        """Start a new conversation and return its ID"""
+        self.current_conversation_id = self.memory.create_conversation()
+        return self.current_conversation_id
+
+    async def execute(self, command: str) -> Tuple[str, str, int]:
+        """Execute a system command and return the results"""
+        self.logger.info(f"Executing command: {command}")
+        try:
+            result = await self.system.execute_command(command)
+            self.logger.info(f"Command result: {result[2]}")
+            return result
+        except Exception as e:
+            self.logger.error(f"Command execution failed: {e}")
+            return "", str(e), 1
+
+    async def think_and_act(self, prompt: str, system: str) -> str:
+        """Process a thought and execute any necessary actions"""
+        if not self.current_conversation_id:
+            self.start_conversation()
+
+        # Load conversation history
+        history = self.memory.load_conversation(self.current_conversation_id)
+        
+        # Get LLM response
+        self.logger.info("Getting LLM response")
+        response = await self.llm.get_response(prompt, system, history)
+        
+        if not response:
+            self.logger.error("Failed to get LLM response")
+            return "Failed to process request"
+
+        # Save conversation history
+        history.extend([
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": response}
+        ])
+        self.memory.save_conversation(self.current_conversation_id, history)
+
+        # Extract and execute commands
+        commands = self.extract_commands(response)
+        if commands:
+            results = []
+            for cmd in commands:
+                stdout, stderr, code = await self.execute(cmd)
+                result = {
+                    'command': cmd,
+                    'stdout': stdout,
+                    'stderr': stderr,
+                    'code': code,
+                    'timestamp': datetime.now().isoformat()
+                }
+                results.append(result)
+                
+                # Save command results
+                history.append({
+                    "role": "system",
+                    "content": f"Command execution result:\n{str(result)}"
+                })
+            
+            self.memory.save_conversation(self.current_conversation_id, history)
+            
+            # Analyze results
+            result_prompt = f"Command execution results:\n{str(results)}\n\nPlease analyze these results and determine next steps."
+            analysis = await self.llm.get_response(result_prompt, system, history)
+            
+            if analysis:
+                history.append({
+                    "role": "assistant",
+                    "content": analysis
+                })
+                self.memory.save_conversation(self.current_conversation_id, history)
+                response += f"\n\nAnalysis of results:\n{analysis}"
+            
+        # Update token count
+        self.token_count += len(prompt + response) // 4
+        self.save_token_count()
+            
+        return response
+
+    def extract_commands(self, response: str) -> List[str]:
+        """Extract commands from the response"""
+        commands = []
+        lines = response.split('\n')
+        in_code_block = False
+        current_block = []
+        current_language = None
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            if stripped.startswith('```'):
+                if in_code_block:
+                    if current_language in ['bash', 'shell', 'sh', None]:
+                        block_text = '\n'.join(current_block).strip()
+                        if block_text:
+                            block_commands = [cmd.strip() for cmd in block_text.split('\n') if cmd.strip()]
+                            commands.extend(block_commands)
+                    current_block = []
+                    in_code_block = False
+                    current_language = None
+                else:
+                    in_code_block = True
+                    if len(stripped) > 3:
+                        current_language = stripped[3:].strip().lower()
+            elif in_code_block:
+                current_block.append(line)
+                
+        self.logger.info(f"Extracted {len(commands)} commands: {commands}")
+        return commands
+
+    async def analyze_conversation(self, conversation_id: Optional[str] = None) -> str:
+        """Analyze the conversation history and provide insights"""
+        conv_id = conversation_id or self.current_conversation_id
+        if not conv_id:
+            return "No conversation to analyze"
+            
+        history = self.memory.load_conversation(conv_id)
+        if not history:
+            return "Conversation history is empty"
+            
+        analysis_prompt = """Please analyze this conversation history and provide insights on:
+        1. Key decisions and actions taken
+        2. Success rate of executed commands
+        3. Overall progress toward goals
+        4. Potential areas for improvement
+        """
+        
+        analysis = await self.llm.get_response(analysis_prompt, "", history)
+        return analysis
 
     async def setup_web_server(self, port: int = 8080):
         """Set up a simple web server for external interaction"""
@@ -91,6 +222,36 @@ class EnhancedAutonomousAgent(AutonomousAgent):
         site = web.TCPSite(runner, 'localhost', port)
         await site.start()
 
+    async def initialize_with_prompt(self, prompt: str) -> Tuple[str, str]:
+        """Initialize a new conversation with a custom prompt"""
+        conv_id = self.start_conversation()
+        response = await self.think_and_act(prompt, '')
+        return conv_id, response
+
+    async def monitor_system_resources(self):
+        """Monitor system resource usage"""
+        cmd = "top -b -n 1 | head -n 20"
+        stdout, stderr, code = await self.execute(cmd)
+        self.logger.info(f"System resources:\n{stdout}")
+
+    def cleanup_old_conversations(self):
+        """Clean up old conversation files to manage storage"""
+        # TODO: Implement cleanup of conversations older than X days
+        pass
+
+    def save_token_count(self):
+        """Save the current token count to persistent storage"""
+        with open('memory/metrics/token_count.txt', 'w') as f:
+            f.write(str(self.token_count))
+
+    def load_token_count(self) -> int:
+        """Load the current token count from persistent storage"""
+        try:
+            with open('memory/metrics/token_count.txt', 'r') as f:
+                return int(f.read().strip())
+        except FileNotFoundError:
+            return 0
+
     def save_context(self, context_id: str, data: Dict):
         """Save context data to persistent storage"""
         file_path = f'memory/context/{context_id}.json'
@@ -104,59 +265,3 @@ class EnhancedAutonomousAgent(AutonomousAgent):
             with open(file_path, 'r') as f:
                 return json.load(f)
         return None
-
-    def load_token_count(self) -> int:
-        """Load the current token count from persistent storage"""
-        try:
-            with open('memory/metrics/token_count.txt', 'r') as f:
-                return int(f.read().strip())
-        except FileNotFoundError:
-            return 0
-
-    def save_token_count(self):
-        """Save the current token count to persistent storage"""
-        with open('memory/metrics/token_count.txt', 'w') as f:
-            f.write(str(self.token_count))
-
-    async def monitor_system_resources(self):
-        """Monitor system resource usage"""
-        cmd = "top -b -n 1 | head -n 20"
-        stdout, stderr, code = await self.execute(cmd)
-        self.logger.info(f"System resources:\n{stdout}")
-
-    def cleanup_old_conversations(self):
-        """Clean up old conversation files to manage storage"""
-        # Implementation to remove conversations older than X days
-        pass
-
-    async def execute_with_timeout(self, command: str, timeout: int = 60) -> Tuple[str, str, int]:
-        """Execute a command with timeout"""
-        try:
-            return await asyncio.wait_for(
-                self.execute(command),
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            return "", "Command timed out", 1
-
-    async def safe_think_and_act(self, prompt: str, system: str = "") -> str:
-        """Wrapper for think_and_act with additional safety checks"""
-        # Check API usage before proceeding
-        if self.cost_limit and self.token_count >= self.cost_limit:
-            return "API cost limit reached. Please check the configuration."
-            
-        response = await super().think_and_act(prompt, system)
-        
-        # Update token count (approximate)
-        self.token_count += len(prompt + response) // 4
-        self.save_token_count()
-        
-        return response
-
-    def load_system_prompt(self) -> str:
-        """Load the system prompt from configuration"""
-        try:
-            with open('memory/config/system_prompt.txt', 'r') as f:
-                return f.read()
-        except FileNotFoundError:
-            return ""  # Return empty string if no custom prompt is configured

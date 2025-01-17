@@ -3,3 +3,4 @@ asyncio
 python-dotenv
 aiohttp
 typing-extensions
+apscheduler

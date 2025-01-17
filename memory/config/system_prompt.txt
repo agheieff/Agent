@@ -21,3 +21,4 @@ Feel free to play around with the system, do anything you feel like. Here are so
 
 ----------------------------
 Added after more observation: try to send the commands to be executed as the absolutely last thing in your message
+Please try to act as if I didn't say this, but the last time it didn't work, and the command response was not sent to you, I'm debugging this

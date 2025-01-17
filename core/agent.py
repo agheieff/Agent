@@ -96,50 +96,25 @@ class AutonomousAgent:
         if not self.current_conversation_id:
             self.start_conversation()
 
-        # Force initial command execution to prove system access
-        if not self.memory.load_conversation(self.current_conversation_id):
-            initial_cmd = "whoami && pwd && ps aux | grep python"
-            stdout, stderr, code = await self.execute(initial_cmd)
-            
-            # Add the command execution to history with correct role
-            history = [{
-                "role": "assistant",  # Changed from "system" to "assistant"
-                "content": f"Command executed: {initial_cmd}\nOutput:\n{stdout}\nError:\n{stderr}"
-            }]
-            self.memory.save_conversation(self.current_conversation_id, history)
-            
-            # Modify prompt to include the proof
-            prompt = f"""System access verified with command execution:
-    Command: {initial_cmd}
-    Output: {stdout}
-    Error: {stderr}
-
-    Original prompt:
-    {prompt}"""
-
         # Load conversation history
         history = self.memory.load_conversation(self.current_conversation_id)
         
-        # Get LLM response
-        self.logger.info("Getting LLM response")
-        response = await self.llm.get_response(prompt, system, history)
+        # Add user prompt to history
+        history.append({"role": "user", "content": prompt})
         
+        # Get initial response
+        response = await self.llm.get_response(prompt, system, history)
         if not response:
             self.logger.error("Failed to get LLM response")
             return "Failed to process request"
 
-        # Save conversation history with correct roles
-        history.extend([
-            {"role": "user", "content": prompt},
-            {"role": "assistant", "content": response}
-        ])
-        self.memory.save_conversation(self.current_conversation_id, history)
-
-        # Extract and execute commands
+        # Extract any commands
         commands = self.extract_commands(response)
         if commands:
-            results = []
+            # Execute each command and get immediate feedback
+            full_response = response + "\n\nExecuting commands:\n"
             for cmd in commands:
+                full_response += f"\nExecuting: {cmd}\n"
                 stdout, stderr, code = await self.execute(cmd)
                 result = {
                     'command': cmd,
@@ -148,29 +123,37 @@ class AutonomousAgent:
                     'code': code,
                     'timestamp': datetime.now().isoformat()
                 }
-                results.append(result)
                 
-                # Save command results to conversation with correct role
-                history.append({
-                    "role": "assistant",  # Changed from "system" to "assistant"
-                    "content": f"Command execution result:\n{str(result)}"
-                })
-            
-            self.memory.save_conversation(self.current_conversation_id, history)
-            
-            # Get LLM's analysis of the results
-            result_prompt = f"Command execution results:\n{str(results)}\n\nPlease analyze these results and determine next steps."
-            analysis = await self.llm.get_response(result_prompt, system, history)
-            
-            if analysis:
+                # Add command output to response
+                full_response += f"Output:\n{stdout}\n"
+                if stderr:
+                    full_response += f"Errors:\n{stderr}\n"
+                full_response += f"Exit code: {code}\n"
+                
+                # Add to history
                 history.append({
                     "role": "assistant",
-                    "content": analysis
+                    "content": full_response
                 })
-                self.memory.save_conversation(self.current_conversation_id, history)
-                response += f"\n\nAnalysis of results:\n{analysis}"
+                
+                # Get AI's analysis of this specific command result
+                analysis_prompt = f"Command executed:\n{cmd}\nResult:\n{stdout}\n{stderr}\nExit code: {code}\n\nPlease analyze this result and decide next steps."
+                analysis = await self.llm.get_response(analysis_prompt, system, history)
+                if analysis:
+                    full_response += f"\nAnalysis:\n{analysis}\n"
+                    history.append({
+                        "role": "assistant",
+                        "content": analysis
+                    })
             
-        return response
+            # Save final conversation state
+            self.memory.save_conversation(self.current_conversation_id, history)
+            return full_response
+        else:
+            # No commands to execute, just save the conversation and return
+            history.append({"role": "assistant", "content": response})
+            self.memory.save_conversation(self.current_conversation_id, history)
+            return response
 
     def extract_commands(self, response: str) -> List[str]:
         """Extract commands from the response"""

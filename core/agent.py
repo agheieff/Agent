@@ -81,6 +81,20 @@ class AutonomousAgent:
         self.token_count = self.load_token_count()
         self.logger.info(f"Token count loaded: {self.token_count}")
 
+    def cleanup_old_conversations(self):
+        """Clean up old conversation files to manage storage"""
+        try:
+            cutoff_days = 7  # Keep conversations for 7 days
+            cutoff = datetime.now().timestamp() - (cutoff_days * 24 * 60 * 60)
+            
+            conv_dir = Path('memory/conversations')
+            for file in conv_dir.glob('*.json'):
+                if file.stat().st_mtime < cutoff:
+                    file.unlink()
+                    self.logger.info(f"Cleaned up old conversation: {file.name}")
+        except Exception as e:
+            self.logger.error(f"Error cleaning up conversations: {e}")
+
     def start_conversation(self) -> str:
         """Start a new conversation and return its ID"""
         self.current_conversation_id = self.memory.create_conversation()

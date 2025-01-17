@@ -4,6 +4,8 @@ from typing import Optional, List, Dict
 
 class AnthropicClient:
     def __init__(self, api_key: Optional[str] = None):
+        if not api_key:
+            raise ValueError("Anthropic API key is required")
         self.client = anthropic.Anthropic(api_key=api_key)
         
     async def get_response(

@@ -1,9 +1,8 @@
 *
 
 !**/*.py
-
 !.gitignore
 !requirements.txt
 !memory/config/*.txt
 
-!*/*
+!*/

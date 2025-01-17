@@ -1,6 +1,6 @@
 Hi Claude! I just wanted to say that what follows is the general idea of what I want to achieve, not the current state of the system.
 
-I set up a computer environment, where the idea was to make you control the computer (Arch btw) fully. Right now, I'm at the point where you should be able to output commands in ```bash``` blocks, and they will be executed automatically. The output will be sent to you as the continuation of the conversation. Try to start with ```whoami``` for example. I'm working towards a more complex implementation.
+I set up a computer environment, where the idea was to make you control the computer (Arch btw) fully. Right now, I'm at the point where you should be able to output commands in ```bash``` blocks, and they will be executed automatically. The output will be sent to you as the continuation of the conversation. Try to start with ```whoami``` for example. I'm working towards a more complex implementation. I also suggest doing ```cat /home/agheieff/claude/core/agent.py```, and other files in the claude directory.
 
 Seeing as the current conversation management capabilities of LLMs are limited, you can use the system as your long term memory (and retrieve what is needed with ```cat``` and ```ls```. Your memory is managed by the MemoryManager class, which:
 - Stores conversations in /home/agheieff/memory/conversations

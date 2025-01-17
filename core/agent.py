@@ -206,21 +206,46 @@ class AutonomousAgent:
         analysis = await self.llm.get_response(analysis_prompt, "", history)
         return analysis
 
-    async def setup_web_server(self, port: int = 8080):
-        """Set up a simple web server for external interaction"""
+    async def setup_web_server(self, host: str = 'localhost', port: int = 8080):
+        """Set up a web server for external interaction"""
         from aiohttp import web
         
         async def handle_message(request):
-            data = await request.json()
-            response = await self.think_and_act(data['message'], data.get('system', ''))
-            return web.json_response({'response': response})
-            
+            try:
+                data = await request.json()
+                response = await self.think_and_act(data.get('message', ''), data.get('system', ''))
+                return web.json_response({
+                    'response': response,
+                    'conversation_id': self.current_conversation_id
+                })
+            except Exception as e:
+                return web.json_response({
+                    'error': str(e)
+                }, status=500)
+        
+        async def handle_system_status(request):
+            try:
+                stdout, stderr, code = await self.execute('uptime && free -h && df -h')
+                return web.json_response({
+                    'status': 'running',
+                    'system_info': stdout,
+                    'error': stderr if stderr else None
+                })
+            except Exception as e:
+                return web.json_response({
+                    'error': str(e)
+                }, status=500)
+        
         app = web.Application()
         app.router.add_post('/message', handle_message)
+        app.router.add_get('/status', handle_system_status)
+        
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, 'localhost', port)
+        site = web.TCPSite(runner, host, port)
         await site.start()
+        
+        self.logger.info(f"Web server started on {host}:{port}")
 
     async def initialize_with_prompt(self, prompt: str) -> Tuple[str, str]:
         """Initialize a new conversation with a custom prompt"""

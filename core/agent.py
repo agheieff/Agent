@@ -93,123 +93,80 @@ class AutonomousAgent:
             return "", str(e), 1
 
     def extract_commands(self, response: str) -> List[str]:
-        """Extract commands from the response with improved debugging"""
-        print("\n=== Extracting commands from response ===")
-        print(f"Response text: {response[:200]}...")  # Print start of response
-        
+        """Extract commands from code blocks in the response"""
         commands = []
         lines = response.split('\n')
         in_code_block = False
         current_block = []
-        current_language = None
         
         for line in lines:
             stripped = line.strip()
-            print(f"Processing line: {stripped[:50]}...")  # Debug each line
             
-            # Handle code block markers
             if stripped.startswith('```'):
                 if in_code_block:
                     # End of code block
-                    if current_language in ['bash', 'shell', 'sh', None]:
-                        block_text = '\n'.join(current_block).strip()
-                        if block_text:
-                            block_commands = [cmd.strip() for cmd in block_text.split('\n') if cmd.strip()]
-                            commands.extend(block_commands)
-                            print(f"Found commands in block: {block_commands}")
+                    block_text = '\n'.join(current_block).strip()
+                    if block_text:
+                        commands.extend([cmd.strip() for cmd in block_text.split('\n') if cmd.strip()])
                     current_block = []
                     in_code_block = False
-                    current_language = None
-                    print("Exiting code block")
                 else:
                     # Start of code block
                     in_code_block = True
-                    lang_spec = stripped[3:].strip().lower()
-                    current_language = lang_spec if lang_spec else None
-                    print(f"Entering code block with language: {current_language}")
-                    continue
-            elif in_code_block:
-                if stripped:
-                    current_block.append(stripped)
-                    print(f"Added to current block: {stripped}")
+                continue
+            elif in_code_block and stripped:
+                current_block.append(stripped)
         
-        # Handle unclosed code blocks
-        if in_code_block and current_block and current_language in ['bash', 'shell', 'sh', None]:
+        # Handle any unclosed code block
+        if in_code_block and current_block:
             block_text = '\n'.join(current_block).strip()
             if block_text:
-                block_commands = [cmd.strip() for cmd in block_text.split('\n') if cmd.strip()]
-                commands.extend(block_commands)
-                print(f"Found commands in unclosed block: {block_commands}")
+                commands.extend([cmd.strip() for cmd in block_text.split('\n') if cmd.strip()])
         
-        print(f"\nExtracted commands: {commands}")
         return [cmd for cmd in commands if cmd]
-
+    
     async def think_and_act(self, prompt: str, system: str) -> str:
-        """Process a thought and execute any necessary actions with improved debugging"""
-        print("\n=== Starting think_and_act ===")
+        """Process thoughts and commands in a continuous loop"""
         if not self.current_conversation_id:
             self.start_conversation()
 
-        # Load conversation history
+        # Load or initialize conversation history
         history = self.memory.load_conversation(self.current_conversation_id)
-        print(f"Loaded conversation history: {len(history)} messages")
         
-        # Add user prompt to history
-        history.append({"role": "user", "content": prompt})
-        print(f"Added user prompt: {prompt[:100]}...")
+        # Add initial prompt only once
+        if not history:
+            history.append({"role": "user", "content": prompt})
         
-        # Get initial response
-        print("Getting LLM response...")
-        response = await self.llm.get_response(prompt, system, history)
-        if not response:
-            error_msg = "Failed to get LLM response"
-            print(error_msg)
-            return error_msg
+        while True:
+            # Get Claude's response based on full history
+            response = await self.llm.get_response("", system, history)
+            if not response:
+                return "Failed to get LLM response"
 
-        print(f"Got response: {response[:200]}...")
-
-        # Extract any commands
-        commands = self.extract_commands(response)
-        print(f"Extracted {len(commands)} commands")
-        
-        # Save the initial response to history
-        history.append({"role": "assistant", "content": response})
-        
-        if commands:
-            print("\n=== Executing commands ===")
-            # Execute each command and get immediate feedback
-            command_responses = []
+            # Save Claude's response
+            history.append({"role": "assistant", "content": response})
+            
+            # Extract commands from response
+            commands = self.extract_commands(response)
+            
+            # If no commands, conversation is complete
+            if not commands:
+                self.memory.save_conversation(self.current_conversation_id, history)
+                return response
+                
+            # Execute all commands and add results to history
             for cmd in commands:
-                print(f"\nExecuting command: {cmd}")
                 stdout, stderr, code = await self.execute(cmd)
                 
-                # Format command result
-                result = f"\nCommand: {cmd}\nOutput:\n{stdout}"
-                if stderr:
-                    result += f"\nErrors:\n{stderr}"
-                result += f"\nExit code: {code}"
-                command_responses.append(result)
-                
-                # Add command result to history
+                # Add raw command output to history
                 history.append({
                     "role": "system",
-                    "content": result
+                    "content": stdout if stdout else stderr
                 })
-            
-            # Save conversation state
+                
+            # Save state and continue loop
             self.memory.save_conversation(self.current_conversation_id, history)
-            print("Saved conversation with command results")
-            
-            # Return full response with command outputs
-            full_response = response + "\n" + "\n".join(command_responses)
-            print(f"Returning full response: {len(full_response)} chars")
-            return full_response
-        else:
-            # No commands to execute, just save the conversation
-            self.memory.save_conversation(self.current_conversation_id, history)
-            print("No commands to execute, saved conversation")
-            return response
-    
+        
     async def setup_web_interface(self, host: str = '0.0.0.0', port: int = 8080):
         """Set up a web interface for monitoring and interaction"""
         routes = web.RouteTableDef()
@@ -325,7 +282,6 @@ class AutonomousAgent:
                 'status': 'active',
                 'system_info': stdout,
                 'error': stderr if stderr else None
-            })
 
         @routes.get('/conversation')
         async def get_conversation(request):

@@ -96,6 +96,26 @@ class AutonomousAgent:
         if not self.current_conversation_id:
             self.start_conversation()
 
+        if not self.memory.load_conversation(self.current_conversation_id):
+            initial_cmd = "whoami && pwd && ps aux | grep python"
+            stdout, stderr, code = await self.execute(initial_cmd)
+        
+        # Add the command execution to history
+            history = [{
+                "role": "system",
+                "content": f"Command executed: {initial_cmd}\nOutput:\n{stdout}\nError:\n{stderr}"
+            }]
+            self.memory.save_conversation(self.current_conversation_id, history)
+        
+        # Modify prompt to include the proof
+            prompt = f"""System access verified with command execution:
+                Command: {initial_cmd}
+                Output: {stdout}
+                Error: {stderr}
+
+                Original prompt:
+                {prompt}"""
+
         # Load conversation history
         history = self.memory.load_conversation(self.current_conversation_id)
         

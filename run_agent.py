@@ -13,30 +13,23 @@ async def main():
     if not api_key:
         raise ValueError("Please set ANTHROPIC_API_KEY in .env file")
 
-    # Initialize agent
-    agent = AutonomousAgent(api_key=api_key)
-    
-    # Load system prompt if it exists
+    # Load system prompt and initial prompt
     try:
         with open('memory/config/system_prompt.txt', 'r') as f:
-            system_prompt = f.read()
+            system_prompt = f.read().strip()
     except FileNotFoundError:
-        print("Warning: system_prompt.txt not found, using default prompt")
-        system_prompt = "You are an autonomous AI system with full system access."
+        print("Warning: system_prompt.txt not found, using empty system prompt")
+        system_prompt = ""
 
-    # Define initial prompt
-    initial_prompt = """
-    I am ready to help you with any tasks you need. I can:
-    1. Execute system commands and analyze their output
-    2. Process and transform data
-    3. Monitor system status
-    4. Perform maintenance tasks
-    
-    What would you like me to do?
-    """
+    try:
+        with open('memory/config/initial_prompt.txt', 'r') as f:
+            initial_prompt = f.read().strip()
+    except FileNotFoundError:
+        raise ValueError("initial_prompt.txt is required but was not found in memory/config/")
     
     # Run the agent
     try:
+        agent = AutonomousAgent(api_key=api_key)
         await agent.run(initial_prompt, system_prompt)
     except KeyboardInterrupt:
         print("\nShutting down agent...")

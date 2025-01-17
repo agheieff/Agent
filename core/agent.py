@@ -31,15 +31,15 @@ class AutonomousAgent:
         self.system = SystemControl(user=system_user)
         self.current_conversation_id = None
         self.logger = logger
-        self.scheduler = AsyncIOScheduler()
         self.initialize_agent()
 
     def initialize_agent(self):
-        self.scheduler.start()
+        """Initialize agent with basic setup."""
         self.setup_persistent_storage()
         self.logger.info("Agent initialized successfully.")
 
     def setup_persistent_storage(self):
+        """Set up persistent storage directories."""
         storage_paths = [
             'memory/logs',
             'memory/conversations',
@@ -59,7 +59,6 @@ class AutonomousAgent:
         for line in lines:
             stripped = line.strip()
 
-            # Check for code block start
             if stripped.startswith('```'):
                 if not in_code_block:
                     in_code_block = True
@@ -103,55 +102,46 @@ class AutonomousAgent:
             return "", str(e), 1
 
     async def think_and_act(self, initial_prompt: str, system_prompt: str) -> None:
-        """Main autonomous loop with correct Messages API format."""
+        """Main autonomous loop with correct conversation flow."""
         # Start new conversation
         self.current_conversation_id = self.memory.create_conversation()
         
-        # Initialize conversation with only the initial prompt
+        # Start with just the initial prompt
         messages = [{"role": "user", "content": initial_prompt}]
         self.memory.save_conversation(self.current_conversation_id, messages)
         self.logger.info(f"Starting conversation {self.current_conversation_id}")
 
         try:
             while True:
-                # Get Claude's response
+                # Get Claude's response based on current conversation
                 self.logger.info("Requesting response from LLM...")
-                response = await self.llm.get_response(
-                    prompt="",  # Empty because we're using conversation history
-                    system=system_prompt,
-                    conversation_history=messages
-                )
+                response = await self.llm.get_response("", system_prompt, messages)
                 
                 if not response:
                     self.logger.error("Failed to get LLM response")
                     break
 
-                # Log full response for debugging
-                self.logger.debug(f"Full LLM response: {response}")
-
                 # Add Claude's response to conversation
                 messages.append({"role": "assistant", "content": response})
                 self.memory.save_conversation(self.current_conversation_id, messages)
+                self.logger.debug(f"Assistant response: {response}")
 
-                # Extract commands
+                # Extract any commands
                 commands = self.extract_commands(response)
                 self.logger.info(f"Extracted {len(commands)} commands: {commands}")
 
                 if commands:
-                    # Execute each command and add its output as a user message
+                    # Execute each command
                     for cmd in commands:
                         stdout, stderr, code = await self.execute(cmd)
                         output = stdout if stdout else stderr
                         if output:
-                            # Add command output as a user message
-                            messages.append({
-                                "role": "user",
-                                "content": f"Command output:\n{output}"
-                            })
+                            # Add command output as user message
+                            messages.append({"role": "user", "content": output})
+                            self.logger.debug(f"Added command output: {output}")
                             self.memory.save_conversation(self.current_conversation_id, messages)
                 else:
                     self.logger.info("No commands found in response")
-                    # Check for conversation end signals
                     if any(phrase in response.lower() for phrase in [
                         "task complete",
                         "finished",
@@ -166,8 +156,6 @@ class AutonomousAgent:
         except Exception as e:
             self.logger.error(f"Error in think_and_act loop: {e}")
             raise
-        finally:
-            self.scheduler.shutdown()
 
     async def run(self, initial_prompt: str, system_prompt: str = "") -> None:
         """Run the agent with the given prompts."""

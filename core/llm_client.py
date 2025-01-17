@@ -15,17 +15,17 @@ class AnthropicClient:
         conversation_history: List[Dict] = None
     ) -> str:
         """Send a prompt to Claude with conversation history."""
-        messages = []
-        
-        if conversation_history:
-            messages.extend(conversation_history)
-            
-        messages.append({
-            "role": "user",
-            "content": prompt
-        })
-        
         try:
+            # For Messages API, we use the conversation history directly
+            messages = conversation_history if conversation_history else []
+            
+            # Only append the prompt if it's not empty (which it should be in our case)
+            if prompt:
+                messages.append({
+                    "role": "user",
+                    "content": prompt
+                })
+            
             message = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=4096,
@@ -33,8 +33,13 @@ class AnthropicClient:
                 system=system,
                 messages=messages
             )
-            # Convert the response content to string
-            return str(message.content)
+            
+            # The Messages API returns content as a list of content blocks
+            # For our use case, we know it's text, so we extract it
+            if isinstance(message.content, list) and len(message.content) > 0:
+                return message.content[0].text
+            return ""
+            
         except Exception as e:
             print(f"API call failed: {e}")
             return None

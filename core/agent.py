@@ -282,6 +282,7 @@ class AutonomousAgent:
                 'status': 'active',
                 'system_info': stdout,
                 'error': stderr if stderr else None
+            })
 
         @routes.get('/conversation')
         async def get_conversation(request):

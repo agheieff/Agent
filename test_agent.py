@@ -8,23 +8,22 @@ import asyncio
 from core.agent import AutonomousAgent
 
 async def main():
-    agent = AutonomousAgent()
+    agent = AutonomousAgent(system_user='claude')
     
-    # Test basic conversation
     system_prompt = """You are an autonomous AI agent with full control over a Linux system.
-    (You will be, right now this I'm just testing this code in my personal PC environment.)
     You can execute commands, read and write files, and make your own decisions.
-    Respond with clear, structured thoughts about what you want to do next."""
+    When you want to execute commands, wrap them in ```bash``` code blocks.
+    Always analyze the results of your commands before proceeding."""
     
-    user_prompt = """I've just initialized you. What would be your first steps to:
-    1. Understand your environment
-    2. Set up your working space
+    user_prompt = """I've just initialized you. Please:
+    1. Check your current environment
+    2. Set up your workspace
     3. Begin autonomous operation
     
-    Format your response clearly, indicating any commands you'd want to execute."""
+    Execute the commands and analyze the results."""
     
-    response = await agent.think(user_prompt, system_prompt)
-    print("Agent's response:")
+    response = await agent.think_and_act(user_prompt, system_prompt)
+    print("Agent's response and actions:")
     print(response)
 
 if __name__ == "__main__":

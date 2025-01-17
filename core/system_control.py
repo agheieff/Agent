@@ -1,4 +1,8 @@
-# First, let's modify system_control.py to handle permissions better:
+import subprocess
+import os
+import pwd
+import asyncio
+from typing import Tuple, Optional
 
 class SystemControl:
     def __init__(self, user: str = None):

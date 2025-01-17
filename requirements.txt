@@ -1,0 +1,5 @@
+anthropic
+asyncio
+python-dotenv
+aiohttp
+typing-extensions

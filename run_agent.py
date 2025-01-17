@@ -1,20 +1,8 @@
 # run_agent.py
 import asyncio
 import os
-import socket
 from dotenv import load_dotenv
 from core.agent import AutonomousAgent
-
-def get_local_ip():
-    """Get the local IP address"""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('8.8.8.8', 80))
-        local_ip = s.getsockname()[0]
-        s.close()
-        return local_ip
-    except Exception:
-        return '127.0.0.1'
 
 async def main():
     # Load environment variables
@@ -25,23 +13,10 @@ async def main():
     if not api_key:
         raise ValueError("Please set ANTHROPIC_API_KEY in .env file")
 
-    # Get local IP address
-    local_ip = get_local_ip()
-    port = 8080
-
-    print("\n" + "="*50)
-    print("Starting AI Agent System")
-    print("="*50)
-    print(f"\nWeb Interface URLs:")
-    print(f"Local machine: http://localhost:{port}")
-    print(f"Other devices: http://{local_ip}:{port}")
-    print("\nYou can access the dashboard from any device on your local network")
-    print("="*50 + "\n")
-
-    # Initialize agent without specific system user
+    # Initialize agent
     agent = AutonomousAgent(api_key=api_key)
     
-    # Initialize with system prompt
+    # Load system prompt if it exists
     try:
         with open('memory/config/system_prompt.txt', 'r') as f:
             system_prompt = f.read()
@@ -49,14 +24,20 @@ async def main():
         print("Warning: system_prompt.txt not found, using default prompt")
         system_prompt = "You are an autonomous AI system with full system access."
 
-    # Initialize and run agent
-    print("Initializing agent...")
-    conv_id, response = await agent.initialize_with_prompt(system_prompt)
-    print(f"Agent initialized with conversation ID: {conv_id}")
-    print(f"Initial response: {response}")
+    # Define initial prompt
+    initial_prompt = """
+    I am ready to help you with any tasks you need. I can:
+    1. Execute system commands and analyze their output
+    2. Process and transform data
+    3. Monitor system status
+    4. Perform maintenance tasks
     
+    What would you like me to do?
+    """
+    
+    # Run the agent
     try:
-        await agent.run(host='0.0.0.0', port=port)
+        await agent.run(initial_prompt, system_prompt)
     except KeyboardInterrupt:
         print("\nShutting down agent...")
     except Exception as e:

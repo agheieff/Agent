@@ -10,9 +10,8 @@ from core.llm_client import AnthropicClient
 from core.memory_manager import MemoryManager
 from core.system_control import SystemControl
 
-# Set up logging with more verbose output
 logging.basicConfig(
-    level=logging.DEBUG,  # Changed to DEBUG for more detailed logging
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('agent.log'),
@@ -38,7 +37,6 @@ class AutonomousAgent:
     def initialize_agent(self):
         self.scheduler.start()
         self.setup_persistent_storage()
-        self.setup_task_scheduling()
         self.logger.info("Agent initialized successfully.")
 
     def setup_persistent_storage(self):
@@ -50,40 +48,8 @@ class AutonomousAgent:
             os.makedirs(path, exist_ok=True)
         self.logger.info("Persistent storage directories created.")
 
-    def setup_task_scheduling(self):
-        self.scheduler.add_job(
-            self.cleanup_old_conversations,
-            'interval',
-            hours=24
-        )
-
-    def cleanup_old_conversations(self):
-        try:
-            cutoff_days = 7
-            cutoff = datetime.now().timestamp() - (cutoff_days * 24 * 60 * 60)
-            
-            conv_dir = Path('memory/conversations')
-            for file in conv_dir.glob('*.json'):
-                if file.stat().st_mtime < cutoff:
-                    file.unlink()
-                    self.logger.info(f"Cleaned up old conversation: {file.name}")
-        except Exception as e:
-            self.logger.error(f"Error cleaning up conversations: {e}")
-
-    async def execute(self, command: str) -> Tuple[str, str, int]:
-        self.logger.info(f"Executing command: {command}")
-        try:
-            result = await self.system.execute_command(command)
-            self.logger.info(f"Command executed successfully. Exit code: {result[2]}")
-            self.logger.debug(f"Command stdout: {result[0]}")
-            self.logger.debug(f"Command stderr: {result[1]}")
-            return result
-        except Exception as e:
-            self.logger.error(f"Command execution failed: {e}")
-            return "", str(e), 1
-
     def extract_commands(self, response: str) -> List[str]:
-        """Extract commands from code blocks in the response with improved parsing."""
+        """Extract commands from code blocks in the response."""
         commands = []
         lines = response.split('\n')
         in_code_block = False
@@ -93,21 +59,19 @@ class AutonomousAgent:
         for line in lines:
             stripped = line.strip()
 
-            # Check for code block start with optional language
+            # Check for code block start
             if stripped.startswith('```'):
                 if not in_code_block:
                     in_code_block = True
-                    # Check if language is specified
+                    # Get language if specified
                     lang_spec = stripped[3:].strip().lower()
                     current_language = lang_spec if lang_spec else None
                     continue
                 else:
                     # End of code block
                     block_text = '\n'.join(current_block).strip()
-                    if block_text:
-                        # Only add commands from shell/bash blocks or unspecified blocks
-                        if not current_language or current_language in ['sh', 'shell', 'bash']:
-                            commands.extend([cmd.strip() for cmd in block_text.split('\n') if cmd.strip()])
+                    if block_text and (not current_language or current_language in ['sh', 'shell', 'bash']):
+                        commands.extend([cmd.strip() for cmd in block_text.split('\n') if cmd.strip()])
                     current_block = []
                     current_language = None
                     in_code_block = False
@@ -122,24 +86,31 @@ class AutonomousAgent:
             if block_text and (not current_language or current_language in ['sh', 'shell', 'bash']):
                 commands.extend([cmd.strip() for cmd in block_text.split('\n') if cmd.strip()])
 
-        # Log found commands for debugging
         self.logger.debug(f"Found commands: {commands}")
         return [cmd for cmd in commands if cmd and not cmd.startswith('```')]
 
+    async def execute(self, command: str) -> Tuple[str, str, int]:
+        """Execute a system command and return the results."""
+        self.logger.info(f"Executing command: {command}")
+        try:
+            result = await self.system.execute_command(command)
+            self.logger.info(f"Command executed successfully. Exit code: {result[2]}")
+            self.logger.debug(f"Command stdout: {result[0]}")
+            self.logger.debug(f"Command stderr: {result[1]}")
+            return result
+        except Exception as e:
+            self.logger.error(f"Command execution failed: {e}")
+            return "", str(e), 1
+
     async def think_and_act(self, initial_prompt: str, system_prompt: str) -> None:
-        """Main autonomous loop with improved conversation management."""
+        """Main autonomous loop with correct Messages API format."""
         # Start new conversation
         self.current_conversation_id = self.memory.create_conversation()
         
-        # Initialize conversation with both system prompt and initial prompt
-        history = []
-        
-        # Add initial prompt to history
-        history.append({"role": "user", "content": initial_prompt})
-        self.logger.info(f"Starting conversation {self.current_conversation_id} with initial prompt: {initial_prompt}")
-        
-        # Save initial state
-        self.memory.save_conversation(self.current_conversation_id, history)
+        # Initialize conversation with only the initial prompt
+        messages = [{"role": "user", "content": initial_prompt}]
+        self.memory.save_conversation(self.current_conversation_id, messages)
+        self.logger.info(f"Starting conversation {self.current_conversation_id}")
 
         try:
             while True:
@@ -148,7 +119,7 @@ class AutonomousAgent:
                 response = await self.llm.get_response(
                     prompt="",  # Empty because we're using conversation history
                     system=system_prompt,
-                    conversation_history=history
+                    conversation_history=messages
                 )
                 
                 if not response:
@@ -158,26 +129,26 @@ class AutonomousAgent:
                 # Log full response for debugging
                 self.logger.debug(f"Full LLM response: {response}")
 
-                # Save Claude's response
-                history.append({"role": "assistant", "content": response})
-                self.memory.save_conversation(self.current_conversation_id, history)
+                # Add Claude's response to conversation
+                messages.append({"role": "assistant", "content": response})
+                self.memory.save_conversation(self.current_conversation_id, messages)
 
-                # Extract and execute commands
+                # Extract commands
                 commands = self.extract_commands(response)
                 self.logger.info(f"Extracted {len(commands)} commands: {commands}")
 
                 if commands:
+                    # Execute each command and add its output as a user message
                     for cmd in commands:
                         stdout, stderr, code = await self.execute(cmd)
-                        
-                        # Add command output to history
                         output = stdout if stdout else stderr
                         if output:
-                            history.append({
-                                "role": "system",
+                            # Add command output as a user message
+                            messages.append({
+                                "role": "user",
                                 "content": f"Command output:\n{output}"
                             })
-                            self.memory.save_conversation(self.current_conversation_id, history)
+                            self.memory.save_conversation(self.current_conversation_id, messages)
                 else:
                     self.logger.info("No commands found in response")
                     # Check for conversation end signals
@@ -189,9 +160,6 @@ class AutonomousAgent:
                     ]):
                         self.logger.info("Task completion detected - ending conversation")
                         break
-
-                # Save after each iteration
-                self.memory.save_conversation(self.current_conversation_id, history)
 
         except KeyboardInterrupt:
             self.logger.info("Received keyboard interrupt - shutting down")

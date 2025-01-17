@@ -1,5 +1,4 @@
 # run_agent.py
-
 import asyncio
 import os
 import socket
@@ -7,17 +6,14 @@ from dotenv import load_dotenv
 from core.agent import AutonomousAgent
 
 def get_local_ip():
-    """Get the local IP address that other machines can use to access this one"""
+    """Get the local IP address"""
     try:
-        # Create a temporary socket to get local IP
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # Doesn't actually send any packets
         s.connect(('8.8.8.8', 80))
         local_ip = s.getsockname()[0]
         s.close()
         return local_ip
     except Exception:
-        # Fallback if we can't determine IP
         return '127.0.0.1'
 
 async def main():
@@ -33,7 +29,6 @@ async def main():
     local_ip = get_local_ip()
     port = 8080
 
-    # Print access information
     print("\n" + "="*50)
     print("Starting AI Agent System")
     print("="*50)
@@ -43,7 +38,7 @@ async def main():
     print("\nYou can access the dashboard from any device on your local network")
     print("="*50 + "\n")
 
-    # Initialize agent with API key
+    # Initialize agent without specific system user
     agent = AutonomousAgent(api_key=api_key)
     
     # Initialize with system prompt
@@ -55,11 +50,11 @@ async def main():
         system_prompt = "You are an autonomous AI system with full system access."
 
     # Initialize and run agent
+    print("Initializing agent...")
     conv_id, response = await agent.initialize_with_prompt(system_prompt)
     print(f"Agent initialized with conversation ID: {conv_id}")
     print(f"Initial response: {response}")
     
-    # Run the agent with web interface
     try:
         await agent.run(host='0.0.0.0', port=port)
     except KeyboardInterrupt:

@@ -24,6 +24,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+
 class AutonomousAgent:
     def __init__(self, api_key: Optional[str] = None, system_user: str = 'claude'):
         self.llm = AnthropicClient(api_key)
@@ -43,6 +44,7 @@ class AutonomousAgent:
         self.setup_persistent_storage()
         self.setup_task_scheduling()
         self.setup_cost_monitoring()
+        self.logger.info("Agent initialized successfully.")
 
     def setup_persistent_storage(self):
         """Set up persistent storage directories"""
@@ -58,6 +60,7 @@ class AutonomousAgent:
         ]
         for path in storage_paths:
             os.makedirs(path, exist_ok=True)
+        self.logger.info("Persistent storage directories created.")
 
     def setup_task_scheduling(self):
         """Initialize task scheduler with maintenance tasks"""
@@ -71,14 +74,17 @@ class AutonomousAgent:
             'interval',
             minutes=30
         )
+        self.logger.info("Scheduled tasks initialized.")
 
     def setup_cost_monitoring(self):
         """Initialize API cost monitoring"""
         self.token_count = self.load_token_count()
+        self.logger.info(f"Token count loaded: {self.token_count}")
 
     def start_conversation(self) -> str:
         """Start a new conversation and return its ID"""
         self.current_conversation_id = self.memory.create_conversation()
+        self.logger.info(f"New conversation started with ID: {self.current_conversation_id}")
         return self.current_conversation_id
 
     async def execute(self, command: str) -> Tuple[str, str, int]:
@@ -86,7 +92,9 @@ class AutonomousAgent:
         self.logger.info(f"Executing command: {command}")
         try:
             result = await self.system.execute_command(command)
-            self.logger.info(f"Command result: {result[2]}")
+            self.logger.info(f"Command executed successfully. Exit code: {result[2]}")
+            self.logger.debug(f"Command output (stdout): {result[0]}")
+            self.logger.debug(f"Command output (stderr): {result[1]}")
             return result
         except Exception as e:
             self.logger.error(f"Command execution failed: {e}")
@@ -98,10 +106,10 @@ class AutonomousAgent:
         lines = response.split('\n')
         in_code_block = False
         current_block = []
-        
+
         for line in lines:
             stripped = line.strip()
-            
+
             if stripped.startswith('```'):
                 if in_code_block:
                     # End of code block
@@ -116,15 +124,16 @@ class AutonomousAgent:
                 continue
             elif in_code_block and stripped:
                 current_block.append(stripped)
-        
+
         # Handle any unclosed code block
         if in_code_block and current_block:
             block_text = '\n'.join(current_block).strip()
             if block_text:
                 commands.extend([cmd.strip() for cmd in block_text.split('\n') if cmd.strip()])
-        
+
+        self.logger.debug(f"Extracted commands: {commands}")
         return [cmd for cmd in commands if cmd]
-    
+
     async def think_and_act(self, prompt: str, system: str) -> str:
         """Process thoughts and commands in a continuous loop"""
         if not self.current_conversation_id:
@@ -132,56 +141,59 @@ class AutonomousAgent:
 
         # Load or initialize conversation history
         history = self.memory.load_conversation(self.current_conversation_id)
-        
+        self.logger.info(f"Loaded conversation history: {len(history)} messages")
+
         # Add initial prompt only once
         if not history:
             history.append({"role": "user", "content": prompt})
-        
+            self.logger.info("Added initial prompt to conversation history.")
+
         while True:
             # Get Claude's response based on full history
+            self.logger.info("Requesting response from LLM...")
             response = await self.llm.get_response("", system, history)
             if not response:
+                self.logger.error("Failed to get LLM response.")
                 return "Failed to get LLM response"
 
             # Save Claude's response
             history.append({"role": "assistant", "content": response})
-            
+            self.logger.info("LLM response added to conversation history.")
+
             # Extract commands from response
             commands = self.extract_commands(response)
-            
+            self.logger.info(f"Extracted {len(commands)} commands from LLM response.")
+
             # If no commands, conversation is complete
             if not commands:
                 self.memory.save_conversation(self.current_conversation_id, history)
+                self.logger.info("No commands found. Ending conversation.")
                 return response
-                
+
             # Execute all commands and add results to history
             for cmd in commands:
+                self.logger.info(f"Executing command: {cmd}")
                 stdout, stderr, code = await self.execute(cmd)
-                
+
                 # Add raw command output to history
                 history.append({
                     "role": "system",
                     "content": stdout if stdout else stderr
                 })
-            
+                self.logger.info("Command output added to conversation history.")
+
             # Save state and continue loop
             self.memory.save_conversation(self.current_conversation_id, history)
-            
-            # Explicitly request the LLM to process the updated history
-            response = await self.llm.get_response("", system, history)
-            if not response:
-                return "Failed to get LLM response after command execution"
-            
-            # Save the LLM's response to history
-            history.append({"role": "assistant", "content": response})
-            
+            self.logger.info("Conversation history saved.")
+
     async def setup_web_interface(self, host: str = '0.0.0.0', port: int = 8080):
         """Set up a web interface for monitoring and interaction"""
         routes = web.RouteTableDef()
-        
+
         # Serve static HTML for the dashboard
         @routes.get('/')
         async def dashboard(request):
+            self.logger.debug("Serving dashboard page.")
             html = """
             <!DOCTYPE html>
             <html>
@@ -246,7 +258,7 @@ class AutonomousAgent:
                     // Refresh status and conversation every 5 seconds
                     setInterval(refreshStatus, 5000);
                     setInterval(refreshConversation, 5000);
-                    
+
                     // Initial load
                     document.addEventListener('DOMContentLoaded', () => {
                         refreshStatus();
@@ -260,18 +272,18 @@ class AutonomousAgent:
                         <h1>AI Agent Dashboard</h1>
                         <div class="status ok">Active</div>
                     </div>
-                    
+
                     <div class="card" id="system-status">
                         <h3>System Status</h3>
                         <p>Loading...</p>
                     </div>
-                    
+
                     <div class="card">
                         <h3>Conversation</h3>
                         <div id="conversation-history">
                             <p>Loading conversation history...</p>
                         </div>
-                        
+
                         <div class="message-form">
                             <textarea id="message-input" class="message-input" rows="4" placeholder="Type your message here..."></textarea>
                             <button onclick="sendMessage()" class="submit-btn">Send Message</button>
@@ -285,6 +297,7 @@ class AutonomousAgent:
 
         @routes.get('/status')
         async def status(request):
+            self.logger.debug("Handling /status request.")
             stdout, stderr, code = await self.execute('uptime && free -h && df -h')
             return web.json_response({
                 'status': 'active',
@@ -294,6 +307,7 @@ class AutonomousAgent:
 
         @routes.get('/conversation')
         async def get_conversation(request):
+            self.logger.debug("Handling /conversation request.")
             history = self.memory.load_conversation(self.current_conversation_id)
             return web.json_response({
                 'conversation_id': self.current_conversation_id,
@@ -303,6 +317,7 @@ class AutonomousAgent:
         @routes.post('/message')
         async def handle_message(request):
             try:
+                self.logger.debug("Handling /message request.")
                 data = await request.json()
                 response = await self.think_and_act(data.get('message', ''), '')
                 return web.json_response({
@@ -310,99 +325,27 @@ class AutonomousAgent:
                     'conversation_id': self.current_conversation_id
                 })
             except Exception as e:
+                self.logger.error(f"Error handling /message request: {e}")
                 return web.json_response({
                     'error': str(e)
                 }, status=500)
 
         app = web.Application()
         app.add_routes(routes)
-        
+
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, host, port)
         await site.start()
-        
+
         self.logger.info(f"Web interface started on http://{host}:{port}")
-
-    async def initialize_with_prompt(self, prompt: str) -> Tuple[str, str]:
-        """Initialize a new conversation with a custom prompt"""
-        conv_id = self.start_conversation()
-        response = await self.think_and_act(prompt, '')
-        return conv_id, response
-
-    async def monitor_system_resources(self):
-        """Monitor system resource usage"""
-        cmd = "top -b -n 1 | head -n 20"
-        stdout, stderr, code = await self.execute(cmd)
-        self.logger.info(f"System resources:\n{stdout}")
-
-    def cleanup_old_conversations(self):
-        """Clean up old conversation files to manage storage"""
-        try:
-            cutoff_days = 7  # Keep conversations for 7 days
-            cutoff = datetime.now().timestamp() - (cutoff_days * 24 * 60 * 60)
-            
-            conv_dir = Path('memory/conversations')
-            for file in conv_dir.glob('*.json'):
-                if file.stat().st_mtime < cutoff:
-                    file.unlink()
-                    self.logger.info(f"Cleaned up old conversation: {file.name}")
-        except Exception as e:
-            self.logger.error(f"Error cleaning up conversations: {e}")
-
-    def save_token_count(self):
-        """Save the current token count to persistent storage"""
-        with open('memory/metrics/token_count.txt', 'w') as f:
-            f.write(str(self.token_count))
-
-    def load_token_count(self) -> int:
-        """Load the current token count from persistent storage"""
-        try:
-            with open('memory/metrics/token_count.txt', 'r') as f:
-                return int(f.read().strip())
-        except FileNotFoundError:
-            return 0
-
-    def save_context(self, context_id: str, data: Dict):
-        """Save context data to persistent storage"""
-        file_path = f'memory/context/{context_id}.json'
-        with open(file_path, 'w') as f:
-            json.dump(data, f, indent=2)
-
-    def load_context(self, context_id: str) -> Optional[Dict]:
-        """Load context data from persistent storage"""
-        file_path = f'memory/context/{context_id}.json'
-        if os.path.exists(file_path):
-            with open(file_path, 'r') as f:
-                return json.load(f)
-        return None
-
-    async def analyze_conversation(self, conversation_id: Optional[str] = None) -> str:
-        """Analyze the conversation history and provide insights"""
-        conv_id = conversation_id or self.current_conversation_id
-        if not conv_id:
-            return "No conversation to analyze"
-            
-        history = self.memory.load_conversation(conv_id)
-        if not history:
-            return "Conversation history is empty"
-            
-        analysis_prompt = """Please analyze this conversation history and provide insights on:
-        1. Key decisions and actions taken
-        2. Success rate of executed commands
-        3. Overall progress toward goals
-        4. Potential areas for improvement
-        """
-        
-        analysis = await self.llm.get_response(analysis_prompt, "", history)
-        return analysis
 
     async def run(self, host: str = '0.0.0.0', port: int = 8080):
         """Main method to run the agent with web interface"""
         try:
             # Start web interface
             await self.setup_web_interface(host=host, port=port)
-            
+
             # Keep the agent running
             while True:
                 await asyncio.sleep(1)

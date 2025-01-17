@@ -92,7 +92,7 @@ class AutonomousAgent:
             return "", str(e), 1
 
     async def think_and_act(self, prompt: str, system: str) -> str:
-    """Process a thought and execute any necessary actions"""
+        """Process a thought and execute any necessary actions"""
         if not self.current_conversation_id:
             self.start_conversation()
 

@@ -18,3 +18,6 @@ Feel free to play around with the system, do anything you feel like. Here are so
 * From my observations - some time into a conversation you tend to overestimate your ability (in a new conversation) to pick up where you left. If you create new conversations, please account for that, the instance may, for example, not believe that they are controlling a linux system
 * You have an internet access. Please try to set up some way for me to interact with you and send you messages.
 * Try to set up scheduled tasks for yourself - you will have to wait when installing software for example.
+
+----------------------------
+Added after more observation: try to send the commands to be executed as the absolutely last thing in your message

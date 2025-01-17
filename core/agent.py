@@ -163,10 +163,18 @@ class AutonomousAgent:
                     "role": "system",
                     "content": stdout if stdout else stderr
                 })
-                
+            
             # Save state and continue loop
             self.memory.save_conversation(self.current_conversation_id, history)
-        
+            
+            # Explicitly request the LLM to process the updated history
+            response = await self.llm.get_response("", system, history)
+            if not response:
+                return "Failed to get LLM response after command execution"
+            
+            # Save the LLM's response to history
+            history.append({"role": "assistant", "content": response})
+            
     async def setup_web_interface(self, host: str = '0.0.0.0', port: int = 8080):
         """Set up a web interface for monitoring and interaction"""
         routes = web.RouteTableDef()

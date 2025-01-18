@@ -40,5 +40,4 @@ Here's the context that I modify a lot between runs:
 - For now, ideally, try to accomplish one goal with each conversation, log the results in messages.txt, and stop it (you can see how in agent.py)
 - If the session runs for too long, I have to stop it (api costs and rate limits)
 
-Suggested goal - try to test out the internet access
-
+Suggested - read the messages.txt file, try to clean up the no longer relevant parts, tell me your suggestions (put it there) for what to do next

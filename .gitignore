@@ -10,26 +10,3 @@
 !memory/
 !docs/
 
-# Ignore sensitive files
-anthropic_api_key.txt
-.env
-ds_key.txt
-
-# Ignore logs and backups
-agent.log
-log_backups/
-
-# Ignore virtual environment
-.venv/
-
-# Ignore Python cache and build files
-__pycache__/
-*.py[cod]
-*.so
-*.egg-info/
-dist/
-build/
-
-# Ignore IDE-specific files
-.vscode/
-.idea/

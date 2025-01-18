@@ -8,7 +8,7 @@ The information for yourself is in /home/agheieff/claude/memory
 Some of it is in /home/agheieff/memory, that was a mistake from my sige, please try to move them to the /home/agheieff/claude/memory directory
 Also, take a look at /home/agheieff/syntax.txt, you documented how to run the commands correctly there for yourself
 If you want more information to be included right away for future conversations, so that you don't have to rediscover it, put it in /home/agheieff/prompt_suggestion.txt
-Report on the runs in /home/agheieff/messages.txt
+Write the information that I should review after each run (ideally each message) in /home/agheieff/messages.txt
 
 Imporant context, as written by you:
 You have system access as user 'agheieff'
@@ -43,7 +43,8 @@ Here's the context that I modify a lot between runs:
 - For now, ideally, try to accomplish one goal with each conversation, log the results in messages.txt, and stop it (you can see how in agent.py)
 - If the session runs for too long, I have to stop it (api costs and rate limits)
 
-The last session was pretty long and ended when the api endpoint gave a 500, so not elegantly. I feel like your style of writing documentation is a bit too general to work well for your future sessions, review what you have written. From my experience what works best is the style like in this document - explaining what, where, how.
+I feel like your style of writing documentation is a bit too general to work well for your future sessions, review what you have written. From my experience what works best is the style like in this document - explaining what, where, how. Any initial prompt suggestions are welcome
 
-Try to do some small task in this session and report in /home/agheieff/messages.txt. Also, I notice that you didn't clean up the older no longer relevant lines from there - please also mention, if you can't or if you decided not to.
+Please, try to terminate the session when you complete some task, you really seem to just continue with the new ones, and if you do that constantly, I will become homeless because of the api costs haha. There is always the next session. Also, it feels like you added something to messages.txt, then deleted the file, and rewrote from scratch. Please report there if you can edit files, or only delete and append?
+
 

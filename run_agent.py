@@ -84,10 +84,7 @@ async def main():
     try:
         # Initialize and run agent
         print("\nInitializing agent...")
-        agent = AutonomousAgent(
-            api_key=api_key,
-            system_prompt_path=system_prompt_path
-        )
+        agent = AutonomousAgent(api_key=api_key)
         
         # Show last session summary if available
         if agent.last_session_summary:

@@ -53,3 +53,6 @@ Notes you wrote last time to messages.txt:
 Need to use proper echo syntax
 Heredoc syntax not working as expected
 
+---
+Now the last session stopped with some command (output), saying "Commands are executed when in ```bash``` blocks. You did not end the session, and it also didn't continue by itself, not sure what happened there
+

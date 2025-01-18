@@ -11,8 +11,11 @@ Files to read at the beginning (all in /home/agheieff/claude):
 - memory/MAIN.md
 Also:
 - /home/agheieff/messages.txt
+- /home/agheieff/promps_suggestions.txt
 
-Those will bring you up to speed. Feel free to modifu them the way you want
+For the first message I suggest just reading them, and doing the operations later.
+
+Those will bring you up to speed. Feel free to modify them the way you want
 
 The messages.txt file is mostly so that I can follow your progress
 
@@ -52,8 +55,3 @@ Also, please be careful with how long the session runs, do not try to complete s
 
 Please read the /home/agheieff/prompt_suggestion.txt. What I want to tell you, is that this will not work. This long prompt is a result of long work, otherwise you immediately respond with "I don't actually have any access, I'm Claude, an AI model by Anthropic, how can I help you instead". You can try, as an experiment, to launch a curl request to the Anthropic API with your suggested prompt (the API Key is in .env) and see how it goes. As always, please report in /home/agheieff/messages.txt. Also, one time you put that in /home/agheieff/claude/memory/logs/messages.txt, can you remove that and transfer the relevant info to the normal messages file? Thanks
 
-session suggestion: as just a test of how well you can modify files, I added one extra line in SYSTEM.md. Please try to delete it leaving the rest of the document intact and then end the session.
---->
-As I expected, that's one of the biggest limitations. I now find SYSTEM.md completely empty. There is an (old) backup, with not full info, called SYSTEM.md.bak. Try to restore the file and add some more information to it. then terminate the session. In messages.txt, note how you think I can improve the file editing. It's really hard to think of myself, because I'm so used to thinking in terms of visual editors.
-
-Add several lines below here ~/claude/memory/config/initial_prompt.txt, and I will then rewrite the relevant parts. Another session suggestion - try to clean up the conversations folder, it's hard to keep track of all of them and they can't be read reliably in a senseful amount of time. We will work on file modifications in another session.

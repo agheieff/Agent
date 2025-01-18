@@ -20,6 +20,12 @@ def setup_argparser() -> argparse.ArgumentParser:
         help="Path to system prompt file (default: memory/config/system_prompt.txt)",
         default="memory/config/system_prompt.txt"
     )
+    parser.add_argument(
+        "--model", "-m",
+        help="LLM provider to use (default: anthropic)",
+        default="anthropic",
+        choices=["anthropic", "deepseek"]
+    )
     return parser
 
 def load_system_prompt(path: str) -> str:
@@ -59,9 +65,9 @@ async def main():
     load_dotenv()
     
     # Get API key
-    api_key = os.getenv('ANTHROPIC_API_KEY')
+    api_key = os.getenv(f"{args.model.upper()}_API_KEY")
     if not api_key:
-        print("Error: ANTHROPIC_API_KEY not found in environment")
+        print(f"Error: {args.model.upper()}_API_KEY not found in environment")
         print("Please set it in your .env file or environment variables")
         sys.exit(1)
 
@@ -84,7 +90,7 @@ async def main():
     try:
         # Initialize and run agent
         print("\nInitializing agent...")
-        agent = AutonomousAgent(api_key=api_key)
+        agent = AutonomousAgent(api_key=api_key, model=args.model)
         
         # Show last session summary if available
         if agent.last_session_summary:

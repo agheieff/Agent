@@ -39,11 +39,11 @@ class CommandResult:
 
 class AutonomousAgent:
     """Autonomous agent with improved session handling and command execution"""
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = "anthropic"):
         if not api_key:
             raise ValueError("API key required")
             
-        self.llm = AnthropicClient(api_key)
+        self.llm = get_llm_client(model, api_key)
         self.memory_path = Path("memory")
         self.current_conversation_id = None
         self.last_session_summary = self._load_last_session()

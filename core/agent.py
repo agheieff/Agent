@@ -166,11 +166,12 @@ class AutonomousAgent:
         return heredocs
 
     def extract_commands(self, response: str) -> List[str]:
-        """Extract commands from response text with enhanced capabilities"""
+        """Extract commands from response text with enhanced multiline support"""
         commands = []
         in_block = False
         current_cmd = []
         in_heredoc = False
+        multiline_mode = False
         
         for line in response.split('\n'):
             stripped = line.strip()
@@ -198,22 +199,39 @@ class AutonomousAgent:
             # Handle code blocks
             if stripped.startswith('```'):
                 if in_block:
+                    # End of code block - add accumulated command if any
                     if current_cmd:
-                        commands.append(' '.join(current_cmd))
+                        if multiline_mode:
+                            # For multiline commands, join with newlines
+                            commands.append('\n'.join(current_cmd))
+                        else:
+                            # For single-line commands joined by continuations
+                            commands.append(' '.join(current_cmd))
                         current_cmd = []
                     in_block = False
+                    multiline_mode = False
                 else:
                     in_block = True
+                    # Check if next line indicates multiline mode
+                    remaining_lines = response.split('\n')[response.split('\n').index(line) + 1:]
+                    if remaining_lines and not remaining_lines[0].strip().endswith('\\'):
+                        multiline_mode = True
                 continue
-                
+            
+            # Process lines within a code block
             if in_block and stripped and not stripped.startswith('#'):
-                if stripped.endswith('\\'):
-                    current_cmd.append(stripped[:-1].strip())
-                else:
+                if multiline_mode:
+                    # In multiline mode, collect lines as-is
                     current_cmd.append(stripped)
-                    if not any(cmd.endswith('\\') for cmd in current_cmd):
-                        commands.append(' '.join(current_cmd))
-                        current_cmd = []
+                else:
+                    # In single-line mode with possible continuations
+                    if stripped.endswith('\\'):
+                        current_cmd.append(stripped[:-1].strip())
+                    else:
+                        current_cmd.append(stripped)
+                        if not any(cmd.endswith('\\') for cmd in current_cmd):
+                            commands.append(' '.join(current_cmd))
+                            current_cmd = []
                     
         return [cmd for cmd in commands if cmd]
 

@@ -1,196 +1,216 @@
-# core/agent.py
+# agent.py
 import asyncio
 import logging
 import os
-from typing import Optional, List, Tuple
+from typing import Optional, List, Dict, Tuple
 from pathlib import Path
 from datetime import datetime
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from core.llm_client import AnthropicClient
-from core.memory_manager import MemoryManager
-from core.system_control import SystemControl
+import json
 
+# Configure logging - file handler gets everything, console gets filtered output
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('agent.log'),
         logging.StreamHandler()
     ]
 )
 
+# Only show user-relevant output to console
+console_handler = logging.getLogger().handlers[1]
+console_handler.setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
+class CommandResult:
+    """Structured command execution results"""
+    def __init__(self, stdout: str, stderr: str, code: int):
+        self.stdout = stdout
+        self.stderr = stderr
+        self.code = code
+        self.success = code == 0
+
+    @property
+    def output(self) -> str:
+        return self.stdout if self.stdout else self.stderr
+
 class AutonomousAgent:
-    def __init__(self, api_key: Optional[str] = None, system_user: str = 'claude'):
+    """Autonomous agent with improved session handling and command execution"""
+    def __init__(self, api_key: str, system_prompt_path: Path = Path("memory/config/system_prompt.txt")):
         if not api_key:
-            raise ValueError("Anthropic API key is required")
+            raise ValueError("API key required")
             
         self.llm = AnthropicClient(api_key)
-        self.memory = MemoryManager()
-        self.system = SystemControl(user=system_user)
+        self.memory_path = Path("memory")
+        self.system_prompt = self._load_system_prompt(system_prompt_path)
         self.current_conversation_id = None
-        self.logger = logger
-        self.initialize_agent()
+        self.last_session_summary = self._load_last_session()
+        self._setup_storage()
 
-    def initialize_agent(self):
-        """Initialize agent with basic setup."""
-        self.setup_persistent_storage()
-        self.logger.info("Agent initialized successfully.")
-
-    def setup_persistent_storage(self):
-        """Set up persistent storage directories."""
-        storage_paths = [
-            'memory/logs',
-            'memory/conversations',
-            'memory/tasks',
-            'memory/docs',
-            'memory/context'
+    def _setup_storage(self):
+        """Ensure required directories exist"""
+        dirs = [
+            'conversations',
+            'logs',
+            'summaries',
+            'config'
         ]
-        for path in storage_paths:
-            os.makedirs(path, exist_ok=True)
-        self.logger.info("Persistent storage directories created.")
+        for dir_name in dirs:
+            (self.memory_path / dir_name).mkdir(parents=True, exist_ok=True)
+
+    def _load_system_prompt(self, path: Path) -> str:
+        """Load system prompt from file"""
+        try:
+            with open(path) as f:
+                return f.read().strip()
+        except FileNotFoundError:
+            logger.warning(f"System prompt not found at {path}, using empty prompt")
+            return ""
+
+    def _load_last_session(self) -> Optional[str]:
+        """Load summary of last session"""
+        summary_path = self.memory_path / "summaries/last_session.txt"
+        try:
+            if summary_path.exists():
+                with open(summary_path) as f:
+                    return f.read().strip()
+        except Exception as e:
+            logger.error(f"Error loading last session: {e}")
+        return None
+
+    def _save_session_summary(self, summary: str):
+        """Save session summary for next run"""
+        try:
+            with open(self.memory_path / "summaries/last_session.txt", 'w') as f:
+                f.write(summary)
+        except Exception as e:
+            logger.error(f"Error saving session summary: {e}")
+
+    def print_response(self, content: str):
+        """Print agent's response with clear formatting"""
+        print("\n=== CLAUDE ===")
+        print(content)
+        print("=============")
+
+    async def execute_command(self, command: str) -> CommandResult:
+        """Execute a system command with better error handling"""
+        try:
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            result = CommandResult(
+                stdout.decode() if stdout else "",
+                stderr.decode() if stderr else "",
+                process.returncode
+            )
+
+            # Only log command execution, don't print to console
+            logger.info(f"Command executed: {command}")
+            if result.stderr:
+                logger.warning(f"Command stderr: {result.stderr}")
+            
+            return result
+
+        except Exception as e:
+            logger.error(f"Command execution failed: {e}")
+            return CommandResult("", str(e), 1)
 
     def extract_commands(self, response: str) -> List[str]:
-        """
-        Extract commands from response more reliably.
-        - Handles both ``` and ```bash/sh code blocks
-        - Properly handles multiline commands
-        - Ignores commented lines
-        """
+        """Extract commands from response text"""
         commands = []
-        lines = response.split('\n')
-        in_code_block = False
-        current_command = []
+        in_block = False
+        current_cmd = []
         
-        for line in lines:
+        for line in response.split('\n'):
             stripped = line.strip()
             
-            # Handle code block markers
             if stripped.startswith('```'):
-                if not in_code_block:
-                    # Start of code block
-                    in_code_block = True
-                    language = stripped[3:].strip().lower()
-                    # Only process shell/bash blocks or unmarked blocks
-                    if language and language not in ['sh', 'shell', 'bash']:
-                        in_code_block = False
+                if in_block:
+                    if current_cmd:
+                        commands.append(' '.join(current_cmd))
+                        current_cmd = []
+                    in_block = False
                 else:
-                    # End of code block
-                    if current_command:
-                        commands.append(' '.join(current_command))
-                        current_command = []
-                    in_code_block = False
+                    in_block = True
                 continue
                 
-            if in_code_block:
-                # Skip empty lines and comments
-                if not stripped or stripped.startswith('#'):
-                    continue
-                    
-                # Handle line continuation
+            if in_block and stripped and not stripped.startswith('#'):
                 if stripped.endswith('\\'):
-                    current_command.append(stripped[:-1].strip())
+                    current_cmd.append(stripped[:-1].strip())
                 else:
-                    current_command.append(stripped)
-                    commands.append(' '.join(current_command))
-                    current_command = []
-
-        # Handle any unclosed command
-        if current_command:
-            commands.append(' '.join(current_command))
-
-        self.logger.debug(f"Extracted commands: {commands}")
+                    current_cmd.append(stripped)
+                    commands.append(' '.join(current_cmd))
+                    current_cmd = []
+                    
         return [cmd for cmd in commands if cmd]
 
-    async def execute(self, command: str) -> Tuple[str, str, int]:
-        """Execute a system command and return the results."""
-        self.logger.info(f"Executing command: {command}")
-        try:
-            result = await self.system.execute_command(command)
-            stdout, stderr, code = result
-            
-            if code == 0:
-                self.logger.info(f"Command executed successfully")
-            else:
-                self.logger.warning(f"Command returned non-zero exit code: {code}")
-                
-            if stdout:
-                self.logger.debug(f"Command stdout: {stdout[:200]}...")
-            if stderr:
-                self.logger.debug(f"Command stderr: {stderr[:200]}...")
-                
-            return result
-        except Exception as e:
-            self.logger.error(f"Command execution failed: {e}")
-            return "", str(e), 1
-
-    def format_message_for_log(self, message: dict) -> str:
-        """Format a single message for the conversation log."""
-        role = message['role']
-        content = message.get('content', '')
-        return f"\n=== {role.upper()} ===\n{content}\n"
-
-    async def think_and_act(self, initial_prompt: str, system_prompt: str) -> None:
-        """Main autonomous loop with improved conversation flow and logging."""
-        # Start new conversation
-        self.current_conversation_id = self.memory.create_conversation()
+    async def think_and_act(self, initial_prompt: str) -> None:
+        """Main conversation loop with better output control"""
+        # Start with system context, last session summary, and initial prompt
+        messages = []
         
-        # Start with just the initial prompt
-        messages = [{"role": "user", "content": initial_prompt}]
-        self.memory.save_conversation(self.current_conversation_id, messages)
-        self.logger.info(f"Starting conversation {self.current_conversation_id}")
-
+        if self.last_session_summary:
+            messages.append({
+                "role": "system",
+                "content": f"Last session summary:\n{self.last_session_summary}"
+            })
+        
+        messages.append({"role": "user", "content": initial_prompt})
+        
         try:
             while True:
-                # Get Claude's response based on current conversation
-                self.logger.info("Requesting response from LLM...")
-                response = await self.llm.get_response("", system_prompt, messages)
+                response = await self.llm.get_response(
+                    "",
+                    self.system_prompt,
+                    messages
+                )
                 
                 if not response:
-                    self.logger.error("Failed to get LLM response")
+                    logger.error("Failed to get LLM response")
                     break
 
-                # Add Claude's response to conversation and log only the new message
+                # Print only Claude's response
+                self.print_response(response)
                 messages.append({"role": "assistant", "content": response})
-                self.memory.save_conversation(self.current_conversation_id, messages)
-                print(self.format_message_for_log(messages[-1]))
 
-                # Extract and execute commands
+                # Execute commands silently
                 commands = self.extract_commands(response)
-                self.logger.info(f"Extracted {len(commands)} commands")
-
                 for cmd in commands:
-                    stdout, stderr, code = await self.execute(cmd)
-                    output = stdout if stdout else stderr
-                    if output:
-                        # Add command output as user message and log only the new message
-                        new_message = {"role": "user", "content": output}
-                        messages.append(new_message)
-                        self.memory.save_conversation(self.current_conversation_id, messages)
-                        print(self.format_message_for_log(new_message))
+                    result = await self.execute_command(cmd)
+                    if result.output:
+                        messages.append({"role": "user", "content": result.output})
 
-                # Check for conversation completion
-                if not commands and any(phrase in response.lower() for phrase in [
-                    "task complete",
-                    "finished",
-                    "all done",
-                    "completed successfully"
-                ]):
-                    self.logger.info("Task completion detected - ending conversation")
+                # Check for completion
+                if self._is_conversation_complete(response):
+                    # Save summary for next session
+                    if "Summary:" in response:
+                        summary = response.split("Summary:")[1].strip()
+                        self._save_session_summary(summary)
                     break
 
         except KeyboardInterrupt:
-            self.logger.info("Received keyboard interrupt - shutting down")
+            logger.info("Session interrupted by user")
         except Exception as e:
-            self.logger.error(f"Error in think_and_act loop: {e}")
+            logger.error(f"Session error: {e}")
             raise
 
-    async def run(self, initial_prompt: str, system_prompt: str = "") -> None:
-        """Run the agent with the given prompts."""
+    def _is_conversation_complete(self, response: str) -> bool:
+        """Check if conversation is complete"""
+        return any(phrase in response.lower() for phrase in [
+            "task complete",
+            "finished",
+            "all done",
+            "completed successfully"
+        ])
+
+    async def run(self, initial_prompt: str) -> None:
+        """Run agent with error handling"""
         try:
-            self.logger.info("Starting agent run...")
-            await self.think_and_act(initial_prompt, system_prompt)
+            await self.think_and_act(initial_prompt)
         except Exception as e:
-            self.logger.error(f"Error running agent: {e}")
+            logger.error(f"Run failed: {e}")
             raise

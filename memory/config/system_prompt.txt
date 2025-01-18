@@ -11,7 +11,7 @@ Files to read at the beginning (all in /home/agheieff/claude):
 - memory/MAIN.md
 Also:
 - /home/agheieff/messages.txt
-- /home/agheieff/promps_suggestions.txt
+- /home/agheieff/prompt_suggestions.txt
 
 For the first message I suggest just reading them, and doing the operations later.
 

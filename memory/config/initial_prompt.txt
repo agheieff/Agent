@@ -41,5 +41,3 @@ And most important: do what you feel like.
 
 
 I'm thinking of a system where you could, if you want, set yourself a goal to accomplish for a session, do it, and then finish. In another session you could try doing something else. I had to stop last several sessions because (I think) you ls -R'd too much, please be a bit more careful with that. I renamed python venv to .venv, so that should be better now. Please explore the system, set up what's necessary, and put some more things in /home/agheieff/messages.txt
-
-I think when outputting bash, and especially echos, you should escape newlines with \, not sure how exactly to achieve that. For now,

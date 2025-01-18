@@ -1,9 +1,9 @@
 # core/agent.py
 import asyncio
 import logging
+import os
 from typing import Optional, List, Tuple
 from pathlib import Path
-import os
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from core.llm_client import AnthropicClient
@@ -11,7 +11,7 @@ from core.memory_manager import MemoryManager
 from core.system_control import SystemControl
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('agent.log'),
@@ -43,66 +43,96 @@ class AutonomousAgent:
         storage_paths = [
             'memory/logs',
             'memory/conversations',
+            'memory/tasks',
+            'memory/docs',
+            'memory/context'
         ]
         for path in storage_paths:
             os.makedirs(path, exist_ok=True)
         self.logger.info("Persistent storage directories created.")
 
     def extract_commands(self, response: str) -> List[str]:
-        """Extract commands from code blocks in the response."""
+        """
+        Extract commands from response more reliably.
+        - Handles both ``` and ```bash/sh code blocks
+        - Properly handles multiline commands
+        - Ignores commented lines
+        """
         commands = []
         lines = response.split('\n')
         in_code_block = False
-        current_block = []
-        current_language = None
-
+        current_command = []
+        
         for line in lines:
             stripped = line.strip()
-
+            
+            # Handle code block markers
             if stripped.startswith('```'):
                 if not in_code_block:
+                    # Start of code block
                     in_code_block = True
-                    # Get language if specified
-                    lang_spec = stripped[3:].strip().lower()
-                    current_language = lang_spec if lang_spec else None
-                    continue
+                    language = stripped[3:].strip().lower()
+                    # Only process shell/bash blocks or unmarked blocks
+                    if language and language not in ['sh', 'shell', 'bash']:
+                        in_code_block = False
                 else:
                     # End of code block
-                    block_text = '\n'.join(current_block).strip()
-                    if block_text and (not current_language or current_language in ['sh', 'shell', 'bash']):
-                        commands.extend([cmd.strip() for cmd in block_text.split('\n') if cmd.strip()])
-                    current_block = []
-                    current_language = None
+                    if current_command:
+                        commands.append(' '.join(current_command))
+                        current_command = []
                     in_code_block = False
                 continue
-            
+                
             if in_code_block:
-                current_block.append(stripped)
+                # Skip empty lines and comments
+                if not stripped or stripped.startswith('#'):
+                    continue
+                    
+                # Handle line continuation
+                if stripped.endswith('\\'):
+                    current_command.append(stripped[:-1].strip())
+                else:
+                    current_command.append(stripped)
+                    commands.append(' '.join(current_command))
+                    current_command = []
 
-        # Handle any unclosed code block
-        if in_code_block and current_block:
-            block_text = '\n'.join(current_block).strip()
-            if block_text and (not current_language or current_language in ['sh', 'shell', 'bash']):
-                commands.extend([cmd.strip() for cmd in block_text.split('\n') if cmd.strip()])
+        # Handle any unclosed command
+        if current_command:
+            commands.append(' '.join(current_command))
 
-        self.logger.debug(f"Found commands: {commands}")
-        return [cmd for cmd in commands if cmd and not cmd.startswith('```')]
+        self.logger.debug(f"Extracted commands: {commands}")
+        return [cmd for cmd in commands if cmd]
 
     async def execute(self, command: str) -> Tuple[str, str, int]:
         """Execute a system command and return the results."""
         self.logger.info(f"Executing command: {command}")
         try:
             result = await self.system.execute_command(command)
-            self.logger.info(f"Command executed successfully. Exit code: {result[2]}")
-            self.logger.debug(f"Command stdout: {result[0]}")
-            self.logger.debug(f"Command stderr: {result[1]}")
+            stdout, stderr, code = result
+            
+            if code == 0:
+                self.logger.info(f"Command executed successfully")
+            else:
+                self.logger.warning(f"Command returned non-zero exit code: {code}")
+                
+            if stdout:
+                self.logger.debug(f"Command stdout: {stdout[:200]}...")
+            if stderr:
+                self.logger.debug(f"Command stderr: {stderr[:200]}...")
+                
             return result
         except Exception as e:
             self.logger.error(f"Command execution failed: {e}")
             return "", str(e), 1
 
+    def format_message_for_log(self, message: dict) -> str:
+        """Format a single message for the conversation log."""
+        role = message['role']
+        content = message.get('content', '')
+        return f"\n=== {role.upper()} ===\n{content}\n"
+
     async def think_and_act(self, initial_prompt: str, system_prompt: str) -> None:
-        """Main autonomous loop with correct conversation flow."""
+        """Main autonomous loop with improved conversation flow and logging."""
         # Start new conversation
         self.current_conversation_id = self.memory.create_conversation()
         
@@ -121,35 +151,34 @@ class AutonomousAgent:
                     self.logger.error("Failed to get LLM response")
                     break
 
-                # Add Claude's response to conversation
+                # Add Claude's response to conversation and log only the new message
                 messages.append({"role": "assistant", "content": response})
                 self.memory.save_conversation(self.current_conversation_id, messages)
-                self.logger.debug(f"Assistant response: {response}")
+                print(self.format_message_for_log(messages[-1]))
 
-                # Extract any commands
+                # Extract and execute commands
                 commands = self.extract_commands(response)
-                self.logger.info(f"Extracted {len(commands)} commands: {commands}")
+                self.logger.info(f"Extracted {len(commands)} commands")
 
-                if commands:
-                    # Execute each command
-                    for cmd in commands:
-                        stdout, stderr, code = await self.execute(cmd)
-                        output = stdout if stdout else stderr
-                        if output:
-                            # Add command output as user message
-                            messages.append({"role": "user", "content": output})
-                            self.logger.debug(f"Added command output: {output}")
-                            self.memory.save_conversation(self.current_conversation_id, messages)
-                else:
-                    self.logger.info("No commands found in response")
-                    if any(phrase in response.lower() for phrase in [
-                        "task complete",
-                        "finished",
-                        "all done",
-                        "completed successfully"
-                    ]):
-                        self.logger.info("Task completion detected - ending conversation")
-                        break
+                for cmd in commands:
+                    stdout, stderr, code = await self.execute(cmd)
+                    output = stdout if stdout else stderr
+                    if output:
+                        # Add command output as user message and log only the new message
+                        new_message = {"role": "user", "content": output}
+                        messages.append(new_message)
+                        self.memory.save_conversation(self.current_conversation_id, messages)
+                        print(self.format_message_for_log(new_message))
+
+                # Check for conversation completion
+                if not commands and any(phrase in response.lower() for phrase in [
+                    "task complete",
+                    "finished",
+                    "all done",
+                    "completed successfully"
+                ]):
+                    self.logger.info("Task completion detected - ending conversation")
+                    break
 
         except KeyboardInterrupt:
             self.logger.info("Received keyboard interrupt - shutting down")

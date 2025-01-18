@@ -1,6 +1,8 @@
-# core/llm_client.py
 import anthropic
-from typing import Optional, List, Dict
+import logging
+from typing import Optional, List, Dict, Union
+
+logger = logging.getLogger(__name__)
 
 class AnthropicClient:
     def __init__(self, api_key: Optional[str] = None):
@@ -12,34 +14,33 @@ class AnthropicClient:
         self, 
         prompt: str, 
         system: str,
-        conversation_history: List[Dict] = None
-    ) -> str:
-        """Send a prompt to Claude with conversation history."""
+        conversation_history: List[Dict] = None,
+        temperature: float = 0.5,
+        max_tokens: int = 4096
+    ) -> Optional[str]:
+        """
+        Send a prompt to Claude with conversation history.
+        Returns None if the API call fails.
+        """
         try:
-            # For Messages API, we use the conversation history directly
             messages = conversation_history if conversation_history else []
-            
-            # Only append the prompt if it's not empty (which it should be in our case)
             if prompt:
-                messages.append({
-                    "role": "user",
-                    "content": prompt
-                })
+                messages.append({"role": "user", "content": prompt})
             
+            logger.debug(f"Sending request to Claude with {len(messages)} messages")
             message = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
-                max_tokens=4096,
-                temperature=0.5,
+                max_tokens=max_tokens,
+                temperature=temperature,
                 system=system,
                 messages=messages
             )
             
-            # The Messages API returns content as a list of content blocks
-            # For our use case, we know it's text, so we extract it
             if isinstance(message.content, list) and len(message.content) > 0:
                 return message.content[0].text
-            return ""
+            logger.warning("Received empty response from Claude")
+            return None
             
         except Exception as e:
-            print(f"API call failed: {e}")
+            logger.error(f"API call failed: {str(e)}", exc_info=True)
             return None

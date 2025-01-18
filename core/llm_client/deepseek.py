@@ -1,6 +1,7 @@
-import aiohttp
+# core/llm_client/deepseek.py
 import logging
 from typing import Optional, List, Dict
+from openai import OpenAI
 from .base import BaseLLMClient
 
 logger = logging.getLogger(__name__)
@@ -9,8 +10,10 @@ class DeepSeekClient(BaseLLMClient):
     def __init__(self, api_key: str):
         if not api_key:
             raise ValueError("DeepSeek API key is required")
-        self.api_key = api_key
-        self.api_url = "https://api.deepseek.com/chat/completions"
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.deepseek.com"
+        )
         
     async def get_response(
         self,
@@ -27,27 +30,20 @@ class DeepSeekClient(BaseLLMClient):
             if prompt:
                 messages.append({"role": "user", "content": prompt})
 
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            logger.debug(f"Sending request to DeepSeek with {len(messages)} messages")
+            response = self.client.chat.completions.create(
+                model="deepseek-chat",
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
             
-            data = {
-                "model": "deepseek-chat",
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.api_url, headers=headers, json=data) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        if result.get("choices") and len(result["choices"]) > 0:
-                            return result["choices"][0].get("message", {}).get("content")
-                    logger.error(f"DeepSeek API error: {response.status}")
-                    return None
+            if response.choices and len(response.choices) > 0:
+                return response.choices[0].message.content
+                
+            logger.warning("Received empty response from DeepSeek")
+            return None
                     
         except Exception as e:
-            logger.error(f"DeepSeek API call failed: {str(e)}")
+            logger.error(f"DeepSeek API call failed: {str(e)}", exc_info=True)
             return None

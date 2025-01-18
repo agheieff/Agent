@@ -1,5 +1,5 @@
 # agent.py
-from core.llm_client import AnthropicClient
+from core.llm_client import get_llm_client
 from core.memory_manager import MemoryManager
 from core.system_control import SystemControl
 import asyncio

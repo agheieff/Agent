@@ -1,16 +1,15 @@
-# agent.py
-from core.llm_client import get_llm_client
-from core.memory_manager import MemoryManager
-from core.system_control import SystemControl
 import asyncio
 import logging
 import os
-from typing import Optional, List, Dict, Tuple
-from pathlib import Path
-from datetime import datetime
 import json
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, List, Dict, Tuple, Any
+from core.llm_client import get_llm_client
+from core.memory_manager import MemoryManager
+from core.system_control import SystemControl
 
-# Configure logging - file handler gets everything, console gets filtered output
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -38,7 +37,7 @@ class CommandResult:
         return self.stdout if self.stdout else self.stderr
 
 class AutonomousAgent:
-    """Autonomous agent with improved session handling and command execution"""
+    """Enhanced autonomous agent with improved capabilities"""
     def __init__(self, api_key: str, model: str = "anthropic"):
         if not api_key:
             raise ValueError("API key required")
@@ -47,7 +46,10 @@ class AutonomousAgent:
         self.memory_path = Path("memory")
         self.current_conversation_id = None
         self.last_session_summary = self._load_last_session()
+        self.system_control = SystemControl()
+        self.memory_manager = MemoryManager()
         self._setup_storage()
+        self.should_exit = False
 
     def _setup_storage(self):
         """Ensure required directories exist"""
@@ -55,7 +57,10 @@ class AutonomousAgent:
             'conversations',
             'logs',
             'summaries',
-            'config'
+            'config',
+            'scripts',
+            'data',
+            'temp'
         ]
         for dir_name in dirs:
             (self.memory_path / dir_name).mkdir(parents=True, exist_ok=True)
@@ -97,6 +102,11 @@ class AutonomousAgent:
     async def execute_command(self, command: str) -> CommandResult:
         """Execute a system command with better error handling"""
         try:
+            # Handle exit command
+            if command.strip().lower() in ['exit', 'quit', 'bye']:
+                self.should_exit = True
+                return CommandResult("Exiting session...", "", 0)
+
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
@@ -110,7 +120,6 @@ class AutonomousAgent:
                 process.returncode
             )
 
-            # Only log command execution, don't print to console
             logger.info(f"Command executed: {command}")
             if result.stderr:
                 logger.warning(f"Command stderr: {result.stderr}")
@@ -121,15 +130,72 @@ class AutonomousAgent:
             logger.error(f"Command execution failed: {e}")
             return CommandResult("", str(e), 1)
 
+    def extract_heredocs(self, response: str) -> List[Dict[str, str]]:
+        """Extract heredoc blocks from response text"""
+        heredocs = []
+        current_doc = None
+        content_lines = []
+        
+        for line in response.split('\n'):
+            if line.strip().startswith('cat << EOF >'):
+                # Start new heredoc
+                if current_doc:
+                    heredocs.append({
+                        'filename': current_doc,
+                        'content': '\n'.join(content_lines)
+                    })
+                    content_lines = []
+                
+                # Extract filename
+                current_doc = line.strip().split('>')[1].strip()
+                continue
+                
+            if line.strip() == 'EOF' and current_doc:
+                # End current heredoc
+                heredocs.append({
+                    'filename': current_doc,
+                    'content': '\n'.join(content_lines)
+                })
+                current_doc = None
+                content_lines = []
+                continue
+                
+            if current_doc:
+                content_lines.append(line)
+                
+        return heredocs
+
     def extract_commands(self, response: str) -> List[str]:
-        """Extract commands from response text"""
+        """Extract commands from response text with enhanced capabilities"""
         commands = []
         in_block = False
         current_cmd = []
+        in_heredoc = False
         
         for line in response.split('\n'):
             stripped = line.strip()
             
+            # Check for exit command
+            if stripped.lower() in ['exit', 'quit', 'bye']:
+                commands.append(stripped)
+                continue
+
+            # Handle heredoc start
+            if stripped.startswith('cat << EOF >'):
+                in_heredoc = True
+                current_cmd.append(line)
+                continue
+                
+            # Handle heredoc content and end
+            if in_heredoc:
+                current_cmd.append(line)
+                if stripped == 'EOF':
+                    in_heredoc = False
+                    commands.append('\n'.join(current_cmd))
+                    current_cmd = []
+                continue
+            
+            # Handle code blocks
             if stripped.startswith('```'):
                 if in_block:
                     if current_cmd:
@@ -145,14 +211,29 @@ class AutonomousAgent:
                     current_cmd.append(stripped[:-1].strip())
                 else:
                     current_cmd.append(stripped)
-                    commands.append(' '.join(current_cmd))
-                    current_cmd = []
+                    if not any(cmd.endswith('\\') for cmd in current_cmd):
+                        commands.append(' '.join(current_cmd))
+                        current_cmd = []
                     
         return [cmd for cmd in commands if cmd]
 
+    async def process_heredocs(self, response: str) -> None:
+        """Process and save heredoc content to files"""
+        heredocs = self.extract_heredocs(response)
+        for doc in heredocs:
+            try:
+                filepath = Path(doc['filename'])
+                filepath.parent.mkdir(parents=True, exist_ok=True)
+                
+                with open(filepath, 'w') as f:
+                    f.write(doc['content'])
+                    
+                logger.info(f"Created file: {filepath}")
+            except Exception as e:
+                logger.error(f"Error creating file {doc['filename']}: {e}")
+
     async def think_and_act(self, initial_prompt: str, system_prompt: str) -> None:
-        """Main conversation loop with better output control"""
-        # Start with system context, last session summary, and initial prompt
+        """Enhanced main conversation loop"""
         messages = []
         
         if self.last_session_summary:
@@ -164,7 +245,7 @@ class AutonomousAgent:
         messages.append({"role": "user", "content": initial_prompt})
         
         try:
-            while True:
+            while not self.should_exit:
                 response = await self.llm.get_response(
                     "",
                     system_prompt,
@@ -175,20 +256,35 @@ class AutonomousAgent:
                     logger.error("Failed to get LLM response")
                     break
 
-                # Print only Claude's response
                 self.print_response(response)
                 messages.append({"role": "assistant", "content": response})
 
-                # Execute commands silently
+                # Process heredocs first
+                await self.process_heredocs(response)
+
+                # Execute commands
                 commands = self.extract_commands(response)
                 for cmd in commands:
-                    result = await self.execute_command(cmd)
-                    if result.output:
-                        messages.append({"role": "user", "content": result.output})
+                    if cmd.strip().lower() in ['exit', 'quit', 'bye']:
+                        self.should_exit = True
+                        print("\nExiting session...")
+                        break
+                        
+                    if not cmd.startswith('cat << EOF'):
+                        result = await self.execute_command(cmd)
+                        if result.output:
+                            messages.append({"role": "user", "content": result.output})
 
-                # Check for completion
-                if self._is_conversation_complete(response):
-                    # Save summary for next session
+                # Allow user input for continuation
+                if not self.should_exit:
+                    user_input = input("\nPress Enter to continue or type 'exit' to end session: ").strip()
+                    if user_input.lower() in ['exit', 'quit', 'bye']:
+                        self.should_exit = True
+                    elif user_input:
+                        messages.append({"role": "user", "content": user_input})
+
+                # Check for completion or exit
+                if self.should_exit or self._is_conversation_complete(response):
                     if "Summary:" in response:
                         summary = response.split("Summary:")[1].strip()
                         self._save_session_summary(summary)
@@ -196,23 +292,63 @@ class AutonomousAgent:
 
         except KeyboardInterrupt:
             logger.info("Session interrupted by user")
+            self.should_exit = True
         except Exception as e:
             logger.error(f"Session error: {e}")
             raise
 
     def _is_conversation_complete(self, response: str) -> bool:
         """Check if conversation is complete"""
-        return any(phrase in response.lower() for phrase in [
+        completion_phrases = [
             "task complete",
             "finished",
             "all done",
-            "completed successfully"
-        ])
+            "completed successfully",
+            "goodbye",
+            "session ended"
+        ]
+        return any(phrase in response.lower() for phrase in completion_phrases)
 
     async def run(self, initial_prompt: str, system_prompt: str) -> None:
-        """Run agent with error handling"""
+        """Run agent with enhanced error handling"""
         try:
+            print("\nStarting agent session...")
+            print("Type 'exit', 'quit', or 'bye' at any time to end the session")
+            print("Press Ctrl+C to force quit")
+            print("\nInitializing...")
+            
             await self.think_and_act(initial_prompt, system_prompt)
+            
+            if self.should_exit:
+                print("\nSession ended by user")
+            else:
+                print("\nSession completed naturally")
+                
         except Exception as e:
             logger.error(f"Run failed: {e}")
             raise
+        finally:
+            print("\nCleaning up...")
+            # Add any cleanup code here if needed
+
+    def cleanup(self):
+        """Cleanup resources and save state"""
+        try:
+            # Save any pending state
+            if self.current_conversation_id:
+                self.memory_manager.save_conversation(
+                    self.current_conversation_id,
+                    []  # Add any pending messages here
+                )
+            
+            # Clean up temp directory
+            temp_dir = self.memory_path / "temp"
+            if temp_dir.exists():
+                for file in temp_dir.iterdir():
+                    try:
+                        file.unlink()
+                    except Exception as e:
+                        logger.error(f"Error cleaning up {file}: {e}")
+                        
+        except Exception as e:
+            logger.error(f"Cleanup error: {e}")

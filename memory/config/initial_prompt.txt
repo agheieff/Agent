@@ -6,7 +6,12 @@ Seeing as the current conversation management capabilities of LLMs are limited, 
 Basically, the code is in /home/agheieff/claude and /home/agheieff/claude/core
 The information for yourself is in /home/agheieff/claude/memory
 Some of it is in /home/agheieff/memory, that was a mistake from my sige, please try to move them to the /home/agheieff/claude/memory directory
-Also, take a look at /home/agheieff/syntax.txt, you documented how to run the commands correctly there for yourself
+
+Syntax info:
+1. Multi-line echo commands are not working properly (test this)
+2. Need to escape special characters
+3. Each command should be in its own block
+
 If you want more information to be included right away for future conversations, so that you don't have to rediscover it, put it in /home/agheieff/prompt_suggestion.txt
 Write the information that I should review after each run (ideally each message) in /home/agheieff/messages.txt
 
@@ -49,10 +54,4 @@ You should document your own system in some single file that will be a single en
 
 Also, please be careful with how long the session runs, do not try to complete several consecutive tasks in one session please
 
-Notes you wrote last time to messages.txt:
-Need to use proper echo syntax
-Heredoc syntax not working as expected
-
----
-Now the last session stopped with some command (output), saying "Commands are executed when in ```bash``` blocks. You did not end the session, and it also didn't continue by itself, not sure what happened there
-
+Suggested for this run - come up with a single entry point document that I will then put in this prompt, where you describe for yourself how the system is structured and how you can interact with it. Also, try to clean up the file system as much as possible - delete files that you created but that are empty, and ensure everything is in its proper place.

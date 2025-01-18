@@ -16,6 +16,7 @@ Files to read at the beginning (all in /home/agheieff/claude):
 - core/agent.py
 - core/other files
 - memory/SYSTEM.md
+- memory/MAIN.md
 - ../messages.txt
 
 If you want more information to be included right away for future conversations, so that you don't have to rediscover it, put it in /home/agheieff/prompt_suggestion.txt
@@ -60,5 +61,7 @@ You should document your own system in some single file that will be a single en
 
 Also, please be careful with how long the session runs, do not try to complete several consecutive tasks in one session please
 
-Last run, I terminated it because it hit some API limits, so not a completely smooth ending. Try to avoid that with shorter runs. This run idea: review the system documentation, and suggest how to make the beginning of each session easier - what should the initial message contain, apart from this prompt
+Last session got hit by rate limits
+
+Please read the /home/agheieff/prompt_suggestion.txt. What I want to tell you, is that this will not work. This long prompt is a result of long work, otherwise you immediately respond with "I don't actually have any access, I'm Claude, an AI model by Anthropic, how can I help you instead". You can try, as an experiment, to launch a curl request to the Anthropic API with your suggested prompt (the API Key is in .env) and see how it goes. As always, please report in /home/agheieff/messages.txt. Also, one time you put that in /home/agheieff/claude/memory/logs/messages.txt, can you remove that and transfer the relevant info to the normal messages file? Thanks
 

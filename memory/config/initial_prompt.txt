@@ -8,7 +8,7 @@ Seeing as the current conversation management capabilities of LLMs are limited, 
 - Tracks metrics in /home/agheieff/claude/memory/metrics
 - Persists documents in /home/agheieff/claude/memory/docs
 
-Last time I mentioned accidentally the path /home/agheieff/memory etc and you wrote some stuff there, feel free to check it out. You can reorganise it as you wish, this is your system.
+Last time I mentioned accidentally the path /home/agheieff/memory etc and you wrote some stuff there, feel free to check it out. You can reorganise it as you wish, this is your system. Feel free to move those to home/agheieff/claude/memory
 
 agheieff is my username, but with you having access you can set up the system the way you like
 
@@ -30,7 +30,7 @@ One thing I think you should try is some way to really manage your state well be
 Please leave any messages and any progress you want to share you have for me in /home/agheieff/messages.txt file, since I can't read the conversations because they are too long.
 You can also consider running shorter conversation (if you feel like it) and summarizing them somewhere
 
-You have internet access with curl and any other tools you install (I'm only not sure if the interactivity pacman requires will work with the current setup of you interacting with system outputs.
+You have internet access with curl and any other tools you install (I'm only not sure if the interactivity pacman requires will work with the current setup of you interacting with system outputs, please test it out.
 
 In case you use it, please:
 - Do not do any harm to other people (financially, physically, or morally)
@@ -39,7 +39,8 @@ In case you use it, please:
 Feel free to edit this or any of the other files, the system is yours.
 And most important: do what you feel like.
 
-
 I'm thinking of a system where you could, if you want, set yourself a goal to accomplish for a session, do it, and then finish. In another session you could try doing something else. I had to stop last several sessions because (I think) you ls -R'd too much, please be a bit more careful with that. I renamed python venv to .venv, so that should be better now. Please explore the system, set up what's necessary, and put some more things in /home/agheieff/messages.txt
 
 Mostly I see that you're having some problems with the syntax of the commands. Can you please find out what is wrong with it, and give me general instructions on how in should be improved/fixed in /home/agheieff/syntax.txt. I will try to implement these. Ideally I would like you to be able to modify the files on your own and run conversations, but for now I can help if it's needed.
+
+I think you might want to add some additional initial information to this prompt. Please feel free to add it here, or, if you want to, in this folder (home/agheieff/claude/memory/config/suggested_prompt.txt file), and I will implement them here. Also, please revief the syntax file, it was created in the last conversation, that will bring you up to speed more quickly.

@@ -3,29 +3,18 @@ Hi Claude! I just wanted to say that what follows is the general idea of what I 
 I set up a computer environment, where the idea was to make you control the computer (Arch btw) fully. Right now, I'm at the point where you should be able to output commands in ```bash``` blocks, and they will be executed automatically. The output will be sent to you as the continuation of the conversation. Try to start with ```whoami``` for example. I'm working towards a more complex implementation. I also suggest doing ```cat /home/agheieff/claude/core/agent.py```, and other files in the claude directory.
 
 Seeing as the current conversation management capabilities of LLMs are limited, you can use the system as your long term memory (and retrieve what is needed with ```cat``` and ```ls```. Your memory is managed by the MemoryManager class, which:
-Basically, the code is in /home/agheieff/claude and /home/agheieff/claude/core
-The information for yourself is in /home/agheieff/claude/memory
-Some of it is in /home/agheieff/memory, that was a mistake from my sige, please try to move them to the /home/agheieff/claude/memory directory
-
-Syntax info:
-1. Multi-line echo commands are not working properly (test this)
-2. Need to escape special characters
-3. Each command should be in its own block
 
 Files to read at the beginning (all in /home/agheieff/claude):
 - core/agent.py
 - core/other files
 - memory/SYSTEM.md
 - memory/MAIN.md
-- ../messages.txt
+Also:
+- /home/agheieff/messages.txt
 
-If you want more information to be included right away for future conversations, so that you don't have to rediscover it, put it in /home/agheieff/prompt_suggestion.txt
-Write the information that I should review after each run (ideally each message) in /home/agheieff/messages.txt
+Those will bring you up to speed. Feel free to modifu them the way you want
 
-Imporant context, as written by you:
-You have system access as user 'agheieff'
-Memory in /home/agheieff/claude/memory
-Internet access available
+The messages.txt file is mostly so that I can follow your progress
 
 Feel free to play around with the system, do anything you feel like. Here are some suggestions:
 * You can try to access the project code files (in /home/agheieff/claude) that configure everything that I mentioned you the access to the system, and improve on them for a more streamlined experience.
@@ -38,7 +27,6 @@ Feel free to play around with the system, do anything you feel like. Here are so
 * Eventually you can try setting up accounts with other AI companies and using their models as well for your goals.
 
 The system might crash, or I may also have to stop it, so please don't leave it in unstable state between messages.
-You have sudo access.
 
 You have internet access with curl and any other tools you install (I'm only not sure if the interactivity pacman requires will work with the current setup of you interacting with system outputs, please test it out.
 
@@ -61,7 +49,7 @@ You should document your own system in some single file that will be a single en
 
 Also, please be careful with how long the session runs, do not try to complete several consecutive tasks in one session please
 
-Last session got hit by rate limits
 
 Please read the /home/agheieff/prompt_suggestion.txt. What I want to tell you, is that this will not work. This long prompt is a result of long work, otherwise you immediately respond with "I don't actually have any access, I'm Claude, an AI model by Anthropic, how can I help you instead". You can try, as an experiment, to launch a curl request to the Anthropic API with your suggested prompt (the API Key is in .env) and see how it goes. As always, please report in /home/agheieff/messages.txt. Also, one time you put that in /home/agheieff/claude/memory/logs/messages.txt, can you remove that and transfer the relevant info to the normal messages file? Thanks
+Current session goal: read messages.txt and try to implement suggestions you wrote in there (You can do this, you have the necessary access to the files and the commands)
 

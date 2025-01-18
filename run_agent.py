@@ -94,7 +94,8 @@ async def main():
             print("-" * 40)
         
         print("\nStarting agent...\n")
-        await agent.run(initial_prompt)
+        system_prompt = load_system_prompt(str(system_prompt_path))
+        await agent.run(initial_prompt, system_prompt)
         
     except KeyboardInterrupt:
         print("\nShutting down agent (Ctrl+C pressed)...")

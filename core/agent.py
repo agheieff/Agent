@@ -1,4 +1,7 @@
 # agent.py
+from core.llm_client import AnthropicClient
+from core.memory_manager import MemoryManager
+from core.system_control import SystemControl
 import asyncio
 import logging
 import os
@@ -164,7 +167,7 @@ class AutonomousAgent:
             while True:
                 response = await self.llm.get_response(
                     "",
-                    self.system_prompt,
+                    system_prompt,
                     messages
                 )
                 

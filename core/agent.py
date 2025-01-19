@@ -4,7 +4,7 @@ import os
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple, Any
+from typing import Optional, List, Dict, Any
 from core.llm_client import get_llm_client
 from core.memory_manager import MemoryManager
 from core.system_control import SystemControl
@@ -19,25 +19,34 @@ logging.basicConfig(
     ]
 )
 
-# Only show user-relevant output to console
 console_handler = logging.getLogger().handlers[1]
 console_handler.setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 class CommandResult:
-    """Structured command execution results"""
+    """Enhanced command execution results"""
     def __init__(self, stdout: str, stderr: str, code: int):
         self.stdout = stdout
         self.stderr = stderr
         self.code = code
         self.success = code == 0
+        self.timestamp = datetime.now()
 
     @property
     def output(self) -> str:
         return self.stdout if self.stdout else self.stderr
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'stdout': self.stdout,
+            'stderr': self.stderr,
+            'code': self.code,
+            'success': self.success,
+            'timestamp': self.timestamp.isoformat()
+        }
+
 class AutonomousAgent:
-    """Enhanced autonomous agent with improved capabilities"""
+    """Fully autonomous agent with enhanced capabilities"""
     def __init__(self, api_key: str, model: str = "anthropic"):
         if not api_key:
             raise ValueError("API key required")
@@ -50,6 +59,7 @@ class AutonomousAgent:
         self.memory_manager = MemoryManager()
         self._setup_storage()
         self.should_exit = False
+        self.command_history = []
 
     def _setup_storage(self):
         """Ensure required directories exist"""
@@ -60,7 +70,8 @@ class AutonomousAgent:
             'config',
             'scripts',
             'data',
-            'temp'
+            'temp',
+            'state'
         ]
         for dir_name in dirs:
             (self.memory_path / dir_name).mkdir(parents=True, exist_ok=True)
@@ -100,29 +111,21 @@ class AutonomousAgent:
         print("=============")
 
     async def execute_command(self, command: str) -> CommandResult:
-        """Execute a system command with better error handling"""
+        """Execute command with enhanced error handling"""
         try:
             # Handle exit command
             if command.strip().lower() in ['exit', 'quit', 'bye']:
                 self.should_exit = True
                 return CommandResult("Exiting session...", "", 0)
 
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
+            stdout, stderr, code = await self.system_control.execute_command(command)
+            result = CommandResult(stdout, stderr, code)
             
-            result = CommandResult(
-                stdout.decode() if stdout else "",
-                stderr.decode() if stderr else "",
-                process.returncode
-            )
-
-            logger.info(f"Command executed: {command}")
-            if result.stderr:
-                logger.warning(f"Command stderr: {result.stderr}")
+            # Store command history
+            self.command_history.append({
+                'command': command,
+                'result': result.to_dict()
+            })
             
             return result
 
@@ -166,7 +169,7 @@ class AutonomousAgent:
         return heredocs
 
     def extract_commands(self, response: str) -> List[str]:
-        """Extract commands from response text with enhanced multiline support"""
+        """Extract commands with enhanced multiline support"""
         commands = []
         in_block = False
         current_cmd = []
@@ -293,14 +296,6 @@ class AutonomousAgent:
                         if result.output:
                             messages.append({"role": "user", "content": result.output})
 
-                # Allow user input for continuation
-                if not self.should_exit:
-                    user_input = input("\nPress Enter to continue or type 'exit' to end session: ").strip()
-                    if user_input.lower() in ['exit', 'quit', 'bye']:
-                        self.should_exit = True
-                    elif user_input:
-                        messages.append({"role": "user", "content": user_input})
-
                 # Check for completion or exit
                 if self.should_exit or self._is_conversation_complete(response):
                     if "Summary:" in response:
@@ -331,14 +326,12 @@ class AutonomousAgent:
         """Run agent with enhanced error handling"""
         try:
             print("\nStarting agent session...")
-            print("Type 'exit', 'quit', or 'bye' at any time to end the session")
-            print("Press Ctrl+C to force quit")
             print("\nInitializing...")
             
             await self.think_and_act(initial_prompt, system_prompt)
             
             if self.should_exit:
-                print("\nSession ended by user")
+                print("\nSession ended by agent")
             else:
                 print("\nSession completed naturally")
                 
@@ -347,7 +340,7 @@ class AutonomousAgent:
             raise
         finally:
             print("\nCleaning up...")
-            # Add any cleanup code here if needed
+            self.cleanup()
 
     def cleanup(self):
         """Cleanup resources and save state"""
@@ -359,6 +352,11 @@ class AutonomousAgent:
                     []  # Add any pending messages here
                 )
             
+            # Save command history
+            history_path = self.memory_path / "state/command_history.json"
+            with open(history_path, 'w') as f:
+                json.dump(self.command_history, f, indent=2)
+            
             # Clean up temp directory
             temp_dir = self.memory_path / "temp"
             if temp_dir.exists():
@@ -367,6 +365,9 @@ class AutonomousAgent:
                         file.unlink()
                     except Exception as e:
                         logger.error(f"Error cleaning up {file}: {e}")
+            
+            # Cleanup system control processes
+            self.system_control.cleanup()
                         
         except Exception as e:
             logger.error(f"Cleanup error: {e}")

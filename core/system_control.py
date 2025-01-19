@@ -1,31 +1,133 @@
 import asyncio
 import logging
 import shlex
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict, List
 from pathlib import Path
+from datetime import datetime
+from .interactive_handler import InteractiveCommandHandler, InteractionPattern
 
 logger = logging.getLogger(__name__)
 
 class SystemControl:
+    """Enhanced system control with interactive command support"""
+    
+    # Commands that typically require interaction
+    INTERACTIVE_COMMANDS = {
+        'pacman': ['-S', '-Syu'],
+        'apt': ['install', 'upgrade'],
+        'apt-get': ['install', 'upgrade'],
+        'pip': ['install'],
+        'npm': ['install'],
+        'docker': ['run', 'exec'],
+        'ssh': [],  # Empty list means the command itself is interactive
+        'mysql': [],
+        'psql': [],
+        'nano': [],
+        'vim': [],
+        'top': [],
+        'htop': [],
+        'less': [],
+        'more': []
+    }
+
     def __init__(self, user: str = None, working_dir: Optional[Path] = None):
         self.user = user
         self.working_dir = working_dir or Path.cwd()
         self.process_map = {}  # Track long-running processes
+        self.interactive_handler = InteractiveCommandHandler()
         
     def _sanitize_command(self, command: str) -> str:
         """Basic command sanitization"""
-        # Remove any null bytes or other dangerous characters
         return command.replace('\0', '')
 
+    def _is_interactive_command(self, command: str) -> bool:
+        """Determine if a command typically requires interaction"""
+        try:
+            args = shlex.split(command)
+            if not args:
+                return False
+                
+            base_cmd = args[0].split('/')[-1]  # Handle path-based commands
+            
+            if base_cmd in self.INTERACTIVE_COMMANDS:
+                if not self.INTERACTIVE_COMMANDS[base_cmd]:  # Empty list means always interactive
+                    return True
+                    
+                # Check if any of the command's arguments match the interactive flags
+                return any(flag in args[1:] for flag in self.INTERACTIVE_COMMANDS[base_cmd])
+                
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking interactive command: {e}")
+            return False
+
+    def _get_custom_patterns(self, command: str) -> Dict[str, InteractionPattern]:
+        """Get custom interaction patterns for specific commands"""
+        args = shlex.split(command)
+        base_cmd = args[0].split('/')[-1]
+        
+        patterns = {}
+        
+        if base_cmd == 'pacman':
+            patterns.update({
+                'proceed': InteractionPattern(
+                    pattern=r'Proceed with installation\?',
+                    response='y\n'
+                ),
+                'trust': InteractionPattern(
+                    pattern=r'Trust this package\?',
+                    response='y\n'
+                )
+            })
+        elif base_cmd in ['apt', 'apt-get']:
+            patterns.update({
+                'continue': InteractionPattern(
+                    pattern=r'Do you want to continue\?',
+                    response='y\n'
+                ),
+                'restart': InteractionPattern(
+                    pattern=r'Restart services during package upgrades',
+                    response='y\n'
+                )
+            })
+        elif base_cmd == 'pip':
+            patterns['proceed'] = InteractionPattern(
+                pattern=r'Proceed \([y/N]\)',
+                response='y\n'
+            )
+        elif base_cmd == 'npm':
+            patterns['proceed'] = InteractionPattern(
+                pattern=r'Ok to proceed\? \(y\)',
+                response='y\n'
+            )
+        
+        return patterns
+
     async def execute_command(self, command: str) -> Tuple[str, str, int]:
-        """Execute a shell command with proper sanitization and logging"""
+        """Execute a command with automatic interactive support"""
         command = self._sanitize_command(command)
         logger.info(f"Executing command: {command}")
         
         try:
-            # Use shlex to properly handle command arguments
-            args = shlex.split(command)
+            # Check if command needs interactive handling
+            if self._is_interactive_command(command):
+                logger.info(f"Using interactive handler for command: {command}")
+                custom_patterns = self._get_custom_patterns(command)
+                
+                stdout, stderr, code = await self.interactive_handler.run_interactive_command(
+                    command,
+                    custom_patterns=custom_patterns
+                )
+                
+                if code == 0:
+                    logger.info("Interactive command completed successfully")
+                else:
+                    logger.warning(f"Interactive command failed with exit code: {code}")
+                
+                return stdout, stderr, code
             
+            # Non-interactive command execution
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
@@ -33,7 +135,6 @@ class SystemControl:
                 cwd=str(self.working_dir)
             )
             
-            logger.debug("Process created, awaiting completion...")
             stdout, stderr = await process.communicate()
             
             stdout_str = stdout.decode() if stdout else ""
@@ -53,30 +154,61 @@ class SystemControl:
             logger.error(error_msg, exc_info=True)
             return "", error_msg, 1
 
-    async def execute_interactive(self, command: str) -> Optional[asyncio.subprocess.Process]:
-        """Start an interactive process with better error handling"""
-        command = self._sanitize_command(command)
-        logger.info(f"Starting interactive process: {command}")
-        
+    async def start_process(self, command: str) -> Optional[Dict]:
+        """Start a long-running process"""
         try:
             process = await asyncio.create_subprocess_shell(
                 command,
-                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.working_dir)
             )
             
-            # Store process reference
-            process_id = id(process)
-            self.process_map[process_id] = {
+            process_info = {
                 'process': process,
                 'command': command,
-                'start_time': datetime.now()
+                'start_time': datetime.now(),
+                'stdout': [],
+                'stderr': []
             }
             
-            return process
+            self.process_map[id(process)] = process_info
+            return process_info
             
         except Exception as e:
-            logger.error(f"Error starting interactive process: {str(e)}", exc_info=True)
+            logger.error(f"Error starting process: {str(e)}")
             return None
+
+    async def check_process(self, process_id: int) -> Optional[Dict]:
+        """Check status of a running process"""
+        process_info = self.process_map.get(process_id)
+        if not process_info:
+            return None
+            
+        process = process_info['process']
+        
+        if process.returncode is not None:
+            # Process has finished
+            stdout, stderr = await process.communicate()
+            return {
+                'command': process_info['command'],
+                'returncode': process.returncode,
+                'stdout': stdout.decode() if stdout else "",
+                'stderr': stderr.decode() if stderr else "",
+                'runtime': datetime.now() - process_info['start_time']
+            }
+            
+        return {
+            'command': process_info['command'],
+            'running': True,
+            'runtime': datetime.now() - process_info['start_time']
+        }
+
+    def cleanup(self):
+        """Cleanup any running processes"""
+        for process_info in self.process_map.values():
+            try:
+                process_info['process'].terminate()
+            except:
+                pass
+        self.process_map.clear()

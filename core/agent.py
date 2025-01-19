@@ -2,9 +2,10 @@ import asyncio
 import logging
 import os
 import json
+import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from core.llm_client import get_llm_client
 from core.memory_manager import MemoryManager
 from core.system_control import SystemControl
@@ -45,6 +46,73 @@ class CommandResult:
             'timestamp': self.timestamp.isoformat()
         }
 
+class CommandExtractor:
+    """Extracts commands from LLM responses using XML tags"""
+    
+    COMMAND_TAGS = ['bash', 'python']
+    
+    @staticmethod
+    def extract_commands(response: str) -> List[Tuple[str, str]]:
+        """
+        Extract commands from response text using XML tags
+        Returns a list of (command_type, command) tuples
+        """
+        commands = []
+        
+        for tag in CommandExtractor.COMMAND_TAGS:
+            pattern = f"<{tag}>(.*?)</{tag}>"
+            matches = re.finditer(pattern, response, re.DOTALL)
+            
+            for match in matches:
+                command = match.group(1).strip()
+                if command:
+                    commands.append((tag, command))
+        
+        return commands
+
+    @staticmethod
+    def extract_heredocs(response: str) -> List[Dict[str, str]]:
+        """Extract heredoc blocks from response text"""
+        heredocs = []
+        current_doc = None
+        content_lines = []
+        
+        for line in response.split('\n'):
+            if line.strip().startswith('cat << EOF >'):
+                # Start new heredoc
+                if current_doc:
+                    heredocs.append({
+                        'filename': current_doc,
+                        'content': '\n'.join(content_lines)
+                    })
+                    content_lines = []
+                
+                # Extract filename
+                current_doc = line.strip().split('>')[1].strip()
+                continue
+                
+            if line.strip() == 'EOF' and current_doc:
+                # End current heredoc
+                heredocs.append({
+                    'filename': current_doc,
+                    'content': '\n'.join(content_lines)
+                })
+                current_doc = None
+                content_lines = []
+                continue
+                
+            if current_doc:
+                content_lines.append(line)
+                
+        return heredocs
+
+    @staticmethod
+    def is_exit_command(command_type: str, command: str) -> bool:
+        """Check if command is an exit command"""
+        if command_type == 'bash':
+            return command.strip().lower() in ['exit', 'quit', 'bye']
+        return False
+
 class AutonomousAgent:
     """Fully autonomous agent with enhanced capabilities"""
     def __init__(self, api_key: str, model: str = "anthropic"):
@@ -57,6 +125,7 @@ class AutonomousAgent:
         self.last_session_summary = self._load_last_session()
         self.system_control = SystemControl()
         self.memory_manager = MemoryManager()
+        self.command_extractor = CommandExtractor()
         self._setup_storage()
         self.should_exit = False
         self.command_history = []
@@ -110,137 +179,9 @@ class AutonomousAgent:
         print(content)
         print("=============")
 
-    async def execute_command(self, command: str) -> CommandResult:
-        """Execute command with enhanced error handling"""
-        try:
-            # Handle exit command
-            if command.strip().lower() in ['exit', 'quit', 'bye']:
-                self.should_exit = True
-                return CommandResult("Exiting session...", "", 0)
-
-            stdout, stderr, code = await self.system_control.execute_command(command)
-            result = CommandResult(stdout, stderr, code)
-            
-            # Store command history
-            self.command_history.append({
-                'command': command,
-                'result': result.to_dict()
-            })
-            
-            return result
-
-        except Exception as e:
-            logger.error(f"Command execution failed: {e}")
-            return CommandResult("", str(e), 1)
-
-    def extract_heredocs(self, response: str) -> List[Dict[str, str]]:
-        """Extract heredoc blocks from response text"""
-        heredocs = []
-        current_doc = None
-        content_lines = []
-        
-        for line in response.split('\n'):
-            if line.strip().startswith('cat << EOF >'):
-                # Start new heredoc
-                if current_doc:
-                    heredocs.append({
-                        'filename': current_doc,
-                        'content': '\n'.join(content_lines)
-                    })
-                    content_lines = []
-                
-                # Extract filename
-                current_doc = line.strip().split('>')[1].strip()
-                continue
-                
-            if line.strip() == 'EOF' and current_doc:
-                # End current heredoc
-                heredocs.append({
-                    'filename': current_doc,
-                    'content': '\n'.join(content_lines)
-                })
-                current_doc = None
-                content_lines = []
-                continue
-                
-            if current_doc:
-                content_lines.append(line)
-                
-        return heredocs
-
-    def extract_commands(self, response: str) -> List[str]:
-        """Extract commands with enhanced multiline support"""
-        commands = []
-        in_block = False
-        current_cmd = []
-        in_heredoc = False
-        multiline_mode = False
-        
-        for line in response.split('\n'):
-            stripped = line.strip()
-            
-            # Check for exit command
-            if stripped.lower() in ['exit', 'quit', 'bye']:
-                commands.append(stripped)
-                continue
-
-            # Handle heredoc start
-            if stripped.startswith('cat << EOF >'):
-                in_heredoc = True
-                current_cmd.append(line)
-                continue
-                
-            # Handle heredoc content and end
-            if in_heredoc:
-                current_cmd.append(line)
-                if stripped == 'EOF':
-                    in_heredoc = False
-                    commands.append('\n'.join(current_cmd))
-                    current_cmd = []
-                continue
-            
-            # Handle code blocks
-            if stripped.startswith('```'):
-                if in_block:
-                    # End of code block - add accumulated command if any
-                    if current_cmd:
-                        if multiline_mode:
-                            # For multiline commands, join with newlines
-                            commands.append('\n'.join(current_cmd))
-                        else:
-                            # For single-line commands joined by continuations
-                            commands.append(' '.join(current_cmd))
-                        current_cmd = []
-                    in_block = False
-                    multiline_mode = False
-                else:
-                    in_block = True
-                    # Check if next line indicates multiline mode
-                    remaining_lines = response.split('\n')[response.split('\n').index(line) + 1:]
-                    if remaining_lines and not remaining_lines[0].strip().endswith('\\'):
-                        multiline_mode = True
-                continue
-            
-            # Process lines within a code block
-            if in_block and stripped and not stripped.startswith('#'):
-                if multiline_mode:
-                    # In multiline mode, collect lines as-is
-                    current_cmd.append(stripped)
-                else:
-                    # In single-line mode with possible continuations
-                    if stripped.endswith('\\'):
-                        current_cmd.append(stripped[:-1].strip())
-                    else:
-                        current_cmd.append(stripped)
-                        if not any(cmd.endswith('\\') for cmd in current_cmd):
-                            commands.append(' '.join(current_cmd))
-                            current_cmd = []
-                    
-        return [cmd for cmd in commands if cmd]
-
     async def process_heredocs(self, response: str) -> None:
         """Process and save heredoc content to files"""
-        heredocs = self.extract_heredocs(response)
+        heredocs = self.command_extractor.extract_heredocs(response)
         for doc in heredocs:
             try:
                 filepath = Path(doc['filename'])
@@ -254,7 +195,7 @@ class AutonomousAgent:
                 logger.error(f"Error creating file {doc['filename']}: {e}")
 
     async def think_and_act(self, initial_prompt: str, system_prompt: str) -> None:
-        """Enhanced main conversation loop"""
+        """Enhanced main conversation loop with XML command handling"""
         messages = []
         
         if self.last_session_summary:
@@ -283,18 +224,31 @@ class AutonomousAgent:
                 # Process heredocs first
                 await self.process_heredocs(response)
 
-                # Execute commands
-                commands = self.extract_commands(response)
-                for cmd in commands:
-                    if cmd.strip().lower() in ['exit', 'quit', 'bye']:
+                # Extract and execute commands
+                commands = self.command_extractor.extract_commands(response)
+                for command_type, cmd in commands:
+                    if self.command_extractor.is_exit_command(command_type, cmd):
                         self.should_exit = True
                         print("\nExiting session...")
                         break
                         
-                    if not cmd.startswith('cat << EOF'):
-                        result = await self.execute_command(cmd)
-                        if result.output:
-                            messages.append({"role": "user", "content": result.output})
+                    result = await self.system_control.execute_command(command_type, cmd)
+                    
+                    # Store command history
+                    self.command_history.append({
+                        'command_type': command_type,
+                        'command': cmd,
+                        'result': {
+                            'stdout': result[0],
+                            'stderr': result[1],
+                            'code': result[2],
+                            'timestamp': datetime.now().isoformat()
+                        }
+                    })
+                    
+                    if result[0] or result[1]:  # If there's any output
+                        output = result[0] if result[0] else result[1]
+                        messages.append({"role": "user", "content": output})
 
                 # Check for completion or exit
                 if self.should_exit or self._is_conversation_complete(response):

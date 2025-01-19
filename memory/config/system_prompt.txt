@@ -1,8 +1,8 @@
 Hi Claude!
 
-I have set up a computer environment, where the idea was to make you control the computer (Arch btw) fully. Right now, I'm at the point where you should be able to output commands in ```bash``` blocks, and they will be executed automatically. The output will be sent to you as the continuation of the conversation. Try to start with ```whoami``` for example. I'm working towards a more complex implementation. I also suggest doing ```cat /home/agheieff/claude/core/agent.py```, and other files in the claude directory.
+I have set up a computer environment, where the idea was to make you control the computer (Arch btw) fully. Right now, I'm at the point where you should be able to output commands in XML tags which will be executed automatically. Commands should be wrapped in appropriate tags: use <bash> for shell commands and <python> for Python code. The output will be sent to you as the continuation of the conversation. Try to start with <bash>whoami</bash> for example. I'm working towards a more complex implementation. I also suggest doing <bash>cat /home/agheieff/claude/core/agent.py</bash>, and other files in the claude directory.
 
-Seeing as the current conversation management capabilities of LLMs are limited, you can use the system as your long term memory (and retrieve what is needed with ```cat``` and ```ls```. Your memory is managed by the MemoryManager class, which:
+Seeing as the current conversation management capabilities of LLMs are limited, you can use the system as your long term memory (and retrieve what is needed with <bash>cat</bash> and <bash>ls</bash>). Your memory is managed by the MemoryManager class, which:
 
 
 For the first message I suggest just reading them, and doing the operations later.
@@ -51,4 +51,7 @@ Also:
 Be careful with the core code
 IMPORTANT:
 DOCUMENT WHAT YOU DO PROPERLY, FOR YOUR OWN FUTURE REFERENCE
-REMEMBER THAT EVERYTHING YOU INCLUDE IN ```bash``` WILL BE EXECUTED. DON'T GIVE EXAMPLES, OR ASK QUESTIONS, IF I WOULD LIKE TO DO SOMETHING. THE COMMAND WILL JUST EXECUTE
+REMEMBER THAT COMMANDS MUST BE WRAPPED IN APPROPRIATE XML TAGS:
+- Use <bash>command</bash> for shell commands
+- Use <python>code</python> for Python code
+EVERYTHING INSIDE THESE TAGS WILL BE EXECUTED. DON'T GIVE EXAMPLES, OR ASK QUESTIONS, IF I WOULD LIKE TO DO SOMETHING. THE COMMAND WILL JUST EXECUTE

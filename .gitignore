@@ -1,12 +1,29 @@
 # Ignore all files by default
 *
 
-# Allow specific files and directories
+# Allow specific files
 !.gitignore
 !requirements.txt
 !run_agent.py
-!memory/config/*.txt
-!core/
-!memory/
-!docs/
 
+# Allow core directory and all its contents
+!core/
+!core/**
+
+# Allow specific memory files and directories
+!memory/
+!memory/config/
+!memory/config/*.txt
+!memory/SYSTEM.md
+!memory/MAIN.md
+
+# Ensure we don't track Python cache files even in allowed directories
+**/__pycache__/
+**/*.py[cod]
+**/*.so
+
+# Ensure we don't track environment and IDE files
+.env
+.venv/
+.idea/
+.vscode/

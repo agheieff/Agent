@@ -37,7 +37,7 @@ class InteractiveCommandHandler:
             pattern=re.compile(r'press.*continue|continue\?|proceed\?', re.IGNORECASE),
             response='\n',
             timeout=5.0
-        )
+        ),
         'sudo': InteractionPattern(
             pattern=re.compile(r'\[sudo\] password'),
             response=f'{os.getenv("SUDO_PASSWORD", "")}\n',

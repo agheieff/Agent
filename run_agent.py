@@ -58,14 +58,20 @@ def load_system_prompt(path: str) -> str:
         return ""
 
 async def main():
-    system_prompt_path.parent.mkdir(parents=True, exist_ok=True)
-    if not system_prompt_path.exists():
-        system_prompt_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(system_prompt_path, 'w') as f:
-            f.write(Path("system_prompt.md").read_text())
-    # Load environment variables
     load_dotenv()
     
+    # Initialize system prompt path
+    system_prompt_path = Path("config/system_prompt.md")
+    if not system_prompt_path.is_absolute():
+        system_prompt_path = Path.cwd() / system_prompt_path
+    
+    # Create system prompt file if missing
+    system_prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    if not system_prompt_path.exists():
+        default_prompt = Path(__file__).parent / "system_prompt.md"
+        with open(system_prompt_path, 'w') as f:
+            f.write(default_prompt.read_text())
+
     # Get model choice interactively
     model = get_model_choice()
     
@@ -75,11 +81,6 @@ async def main():
         print(f"Error: {model.upper()}_API_KEY not found in environment")
         print("Please set it in your .env file or environment variables")
         sys.exit(1)
-
-    # Load system prompt
-    system_prompt_path = Path("config/system_prompt.md")
-    if not system_prompt_path.is_absolute():
-        system_prompt_path = Path.cwd() / system_prompt_path
     
     # Get initial prompt
     initial_prompt = get_initial_prompt()

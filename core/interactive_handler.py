@@ -38,6 +38,16 @@ class InteractiveCommandHandler:
             response='\n',
             timeout=5.0
         )
+        'sudo': InteractionPattern(
+            pattern=re.compile(r'\[sudo\] password'),
+            response=f'{os.getenv("SUDO_PASSWORD", "")}\n',
+            timeout=15.0
+        ),
+        'ssh_confirm': InteractionPattern(
+            pattern=re.compile(r'Are you sure you want to continue connecting'),
+            response='yes\n',
+            timeout=10.0
+        )
     }
 
     def __init__(self):

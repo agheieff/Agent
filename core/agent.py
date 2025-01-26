@@ -9,6 +9,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from core.llm_client import get_llm_client
 from core.memory_manager import MemoryManager
 from core.system_control import SystemControl
+from core.task_manager import TaskManager
 
 # Configure logging
 logging.basicConfig(
@@ -114,21 +115,35 @@ class CommandExtractor:
         return False
 
 class AutonomousAgent:
-    """Fully autonomous agent with enhanced capabilities"""
-    def __init__(self, api_key: str, model: str = "anthropic"):
+    def __init__(self, api_key: str, model: str = "deepseek"):
         if not api_key:
             raise ValueError("API key required")
-            
-        self.llm = get_llm_client(model, api_key)
+
         self.memory_path = Path("memory")
+        self.memory_manager = MemoryManager()
+        self.system_control = SystemControl()
+        self.task_manager = TaskManager(self.memory_path)
+        
+        # Then check for first-run setup
+        if not (self.memory_path / "vector_index").exists():
+            self.memory_manager.save_document(
+                "system_guide",
+                (Path(__file__).parent / "system_prompt.txt").read_text()
+            )
+
+        # Rest of initialization
+        self.llm = get_llm_client(model, api_key)
         self.current_conversation_id = None
         self.last_session_summary = self._load_last_session()
-        self.system_control = SystemControl()
-        self.memory_manager = MemoryManager()
         self.command_extractor = CommandExtractor()
         self._setup_storage()
         self.should_exit = False
         self.command_history = []
+        self.heartbeat_task = None
+
+    async def run(self, initial_prompt: str, system_prompt: str) -> None:
+        try:
+            self.heartbeat_task = asyncio.create_task(self.heartbeat())
 
     def _setup_storage(self):
         """Ensure required directories exist"""
@@ -197,6 +212,10 @@ class AutonomousAgent:
     async def think_and_act(self, initial_prompt: str, system_prompt: str) -> None:
         """Enhanced main conversation loop with XML command handling"""
         messages = []
+        messages = await self.compress_context(messages)
+
+        if task := self.task_manager.get_next_task():
+            initial_prompt = f"ACTIVE TASK: {task['description']}\n{initial_prompt}"
         
         if self.last_session_summary:
             messages.append({
@@ -325,3 +344,28 @@ class AutonomousAgent:
                         
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
+
+    async def heartbeat(self):
+        """Auto-save state every 5 minutes"""
+        while not self.should_exit:
+            self._save_state()
+            await asyncio.sleep(300)
+
+    def _save_state(self):
+        """Save critical state information"""
+        state = {
+            "tasks": self.task_manager.active_tasks,
+            "environment": dict(os.environ),
+            "last_commands": self.command_history[-5:],
+            "session_summary": self.last_session_summary
+        }
+        self.memory_manager.save_document("system_state", json.dumps(state))
+
+    async def compress_context(self, messages: List[Dict]) -> List[Dict]:
+        """Keep conversation under 4k tokens using vector search"""
+        if len(str(messages)) > 3500:
+            relevant_memories = self.memory_manager.search_memory(
+                "Recent important system changes"
+            )
+            return [{"role": "system", "content": f"Relevant memories: {relevant_memories}"}]
+        return messages

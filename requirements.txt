@@ -5,3 +5,8 @@ aiohttp
 typing-extensions
 apscheduler
 openai
+text
+sentence-transformers
+faiss-cpu
+python-dateutil
+aiofiles

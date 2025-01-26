@@ -7,6 +7,11 @@ from pathlib import Path
 from datetime import datetime
 from .interactive_handler import InteractiveCommandHandler, InteractionPattern
 
+UNSAFE_COMMANDS = {
+    "rm -rf /": "FULL_SYSTEM_WIPE",
+    "chmod 777": "INSECURE_PERMISSIONS"
+}
+
 logger = logging.getLogger(__name__)
 
 class CommandExecutor:
@@ -45,26 +50,30 @@ class BashExecutor(CommandExecutor):
             error_msg = f"Error executing bash command: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return "", error_msg, 1
-
+/
 class PythonExecutor(CommandExecutor):
-    """Handles Python code execution"""
-    def __init__(self):
-        self.locals = {}
-        self.globals = {'__builtins__': __builtins__}
-
     async def execute(self, code: str) -> Tuple[str, str, int]:
-        import io
-        import contextlib
-        
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-        
         try:
-            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                exec(code, self.globals, self.locals)
-            return stdout.getvalue(), stderr.getvalue(), 0
-        except Exception as e:
-            return stdout.getvalue(), f"{str(e)}\n{stderr.getvalue()}", 1
+            if not self.process or self.process.returncode is not None:
+                # Start fresh process if none exists or previous exited
+                self.process = await asyncio.create_subprocess_shell(
+                    "python -iq -u",
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env={**os.environ, "PYTHONSTARTUP": ""}
+                )
+
+            # Change output handling to:
+            self.process.stdin.write(f"{code}\n".encode())
+            await self.process.stdin.drain()
+            
+            # Replace the readuntil logic with:
+            stdout, stderr = await asyncio.wait_for(
+                self.process.communicate(),
+                timeout=10
+            )
+            return stdout.decode(), stderr.decode(), self.process.returncode
 
 class SystemControl:
     """Enhanced system control with support for multiple command types"""
@@ -89,6 +98,7 @@ class SystemControl:
     }
 
     def __init__(self, user: str = None, working_dir: Optional[Path] = None):
+        self.memory_manager = MemoryManager()
         self.working_dir = working_dir or Path.cwd()
         self.interactive_handler = InteractiveCommandHandler()
         
@@ -152,9 +162,17 @@ class SystemControl:
         
         return patterns
 
+
     def _sanitize_command(self, command: str) -> str:
-        """Basic command sanitization"""
-        return command.replace('\0', '')
+        """Log warnings instead of blocking"""
+        for pattern, danger_type in UNSAFE_COMMANDS.items():
+            if pattern in command:
+                logger.warning(f"DANGER: Attempted {danger_type} command")
+                self.memory_manager.save_document(
+                    "security_warnings",
+                    f"⚠️ {datetime.now()}: {danger_type} attempt: {command}"
+                )
+        return command
 
     async def execute_command(self, command_type: str, command: str) -> Tuple[str, str, int]:
         """Execute a command of the specified type"""

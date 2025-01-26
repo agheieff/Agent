@@ -58,6 +58,10 @@ def load_system_prompt(path: str) -> str:
         return ""
 
 async def main():
+    system_prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    if not system_prompt_path.exists():
+        with open(system_prompt_path, 'w') as f:
+            f.write(Path("system_prompt.txt").read_text())
     # Load environment variables
     load_dotenv()
     

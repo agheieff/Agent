@@ -6,6 +6,7 @@ from typing import Tuple, Optional, Dict, List, Union
 from pathlib import Path
 from datetime import datetime
 from .interactive_handler import InteractiveCommandHandler, InteractionPattern
+from .memory_manager import MemoryManager
 
 UNSAFE_COMMANDS = {
     "rm -rf /": "FULL_SYSTEM_WIPE",

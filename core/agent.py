@@ -125,11 +125,11 @@ class AutonomousAgent:
         self.task_manager = TaskManager(self.memory_path)
         
         # Then check for first-run setup
-    if not (self.memory_path / "vector_index").exists():
-        self.memory_manager.save_document(
-            "system_guide",
-            Path("config/system_prompt.md").read_text()  # Updated path
-        )
+        if not (self.memory_path / "vector_index").exists():
+            self.memory_manager.save_document(
+                "system_guide",
+                Path("config/system_prompt.md").read_text()  # Updated path
+            )
 
         # Rest of initialization
         self.llm = get_llm_client(model, api_key)

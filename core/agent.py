@@ -142,8 +142,34 @@ class AutonomousAgent:
         self.heartbeat_task = None
 
     async def run(self, initial_prompt: str, system_prompt: str) -> None:
+        """Run agent with enhanced error handling"""
         try:
+            print("\nStarting agent session...")
+            print("\nInitializing...")
+            
+            # Start heartbeat task
             self.heartbeat_task = asyncio.create_task(self.heartbeat())
+            
+            await self.think_and_act(initial_prompt, system_prompt)
+            
+            if self.should_exit:
+                print("\nSession ended by agent")
+            else:
+                print("\nSession completed naturally")
+                
+        except Exception as e:
+            logger.error(f"Run failed: {e}")
+            raise
+        finally:
+            print("\nCleaning up...")
+            # Cancel heartbeat task if it exists
+            if self.heartbeat_task and not self.heartbeat_task.done():
+                self.heartbeat_task.cancel()
+                try:
+                    await self.heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+            self.cleanup()
 
     def _setup_storage(self):
         """Ensure required directories exist"""
@@ -294,26 +320,6 @@ class AutonomousAgent:
             "session ended"
         ]
         return any(phrase in response.lower() for phrase in completion_phrases)
-
-    async def run(self, initial_prompt: str, system_prompt: str) -> None:
-        """Run agent with enhanced error handling"""
-        try:
-            print("\nStarting agent session...")
-            print("\nInitializing...")
-            
-            await self.think_and_act(initial_prompt, system_prompt)
-            
-            if self.should_exit:
-                print("\nSession ended by agent")
-            else:
-                print("\nSession completed naturally")
-                
-        except Exception as e:
-            logger.error(f"Run failed: {e}")
-            raise
-        finally:
-            print("\nCleaning up...")
-            self.cleanup()
 
     def cleanup(self):
         """Cleanup resources and save state"""

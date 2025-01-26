@@ -1,4 +1,3 @@
-# core/llm_client/deepseek.py
 import logging
 from typing import Optional, List, Dict
 from openai import OpenAI
@@ -20,7 +19,7 @@ class DeepSeekClient(BaseLLMClient):
         prompt: str,
         system: str,
         conversation_history: List[Dict] = None,
-        temperature: float = 0.5,
+        temperature: float = 0.5,  # Parameter kept for interface compatibility
         max_tokens: int = 4096
     ) -> Optional[str]:
         try:
@@ -30,20 +29,26 @@ class DeepSeekClient(BaseLLMClient):
             if prompt:
                 messages.append({"role": "user", "content": prompt})
 
-            logger.debug(f"Sending request to DeepSeek with {len(messages)} messages")
+            logger.debug(f"Sending request to DeepSeek-Reasoner with {len(messages)} messages")
             response = self.client.chat.completions.create(
-                model="deepseek-chat",
+                model="deepseek-reasoner",
                 messages=messages,
-                temperature=temperature,
                 max_tokens=max_tokens
             )
             
             if response.choices and len(response.choices) > 0:
-                return response.choices[0].message.content
+                message = response.choices[0].message
+                reasoning_content = message.reasoning_content
+                content = message.content
                 
-            logger.warning("Received empty response from DeepSeek")
+                # Log reasoning chain for debugging
+                logger.debug(f"Reasoning Chain:\n{reasoning_content}")
+                
+                return content
+                
+            logger.warning("Received empty response from DeepSeek-Reasoner")
             return None
                     
         except Exception as e:
-            logger.error(f"DeepSeek API call failed: {str(e)}", exc_info=True)
+            logger.error(f"DeepSeek-Reasoner API call failed: {str(e)}", exc_info=True)
             return None

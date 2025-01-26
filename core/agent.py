@@ -125,11 +125,11 @@ class AutonomousAgent:
         self.task_manager = TaskManager(self.memory_path)
         
         # Then check for first-run setup
-        if not (self.memory_path / "vector_index").exists():
-            self.memory_manager.save_document(
-                "system_guide",
-                (Path(__file__).parent / "system_prompt.txt").read_text()
-            )
+    if not (self.memory_path / "vector_index").exists():
+        self.memory_manager.save_document(
+            "system_guide",
+            Path("config/system_prompt.md").read_text()  # Updated path
+        )
 
         # Rest of initialization
         self.llm = get_llm_client(model, api_key)
@@ -163,7 +163,7 @@ class AutonomousAgent:
     def _load_system_prompt(self, path: Path) -> str:
         """Load system prompt from file"""
         try:
-            with open(path) as f:
+            with open(Path("config/system_prompt.md")) as f:  # Updated path
                 return f.read().strip()
         except FileNotFoundError:
             logger.warning(f"System prompt not found at {path}, using empty prompt")

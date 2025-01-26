@@ -4,7 +4,7 @@ python-dotenv
 aiohttp
 typing-extensions
 apscheduler
-openai
+openai>=1.12.0
 text
 sentence-transformers
 faiss-cpu

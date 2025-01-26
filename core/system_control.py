@@ -50,12 +50,14 @@ class BashExecutor(CommandExecutor):
             error_msg = f"Error executing bash command: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return "", error_msg, 1
-/
+
 class PythonExecutor(CommandExecutor):
+    def __init__(self):
+        self.process = None
+        
     async def execute(self, code: str) -> Tuple[str, str, int]:
         try:
             if not self.process or self.process.returncode is not None:
-                # Start fresh process if none exists or previous exited
                 self.process = await asyncio.create_subprocess_shell(
                     "python -iq -u",
                     stdin=asyncio.subprocess.PIPE,
@@ -64,16 +66,17 @@ class PythonExecutor(CommandExecutor):
                     env={**os.environ, "PYTHONSTARTUP": ""}
                 )
 
-            # Change output handling to:
             self.process.stdin.write(f"{code}\n".encode())
             await self.process.stdin.drain()
             
-            # Replace the readuntil logic with:
+            # Get output with timeout
             stdout, stderr = await asyncio.wait_for(
                 self.process.communicate(),
-                timeout=10
+                timeout=15
             )
             return stdout.decode(), stderr.decode(), self.process.returncode
+        except Exception as e:
+            return "", str(e), 1
 
 class SystemControl:
     """Enhanced system control with support for multiple command types"""

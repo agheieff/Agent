@@ -12,7 +12,7 @@ def get_model_choice() -> str:
     while True:
         print("\nAvailable models:")
         print("1. Anthropic Claude")
-        print("2. DeepSeek")
+        print("2. DeepSeek-Reasoner")
         try:
             choice = input("\nChoose a model (1-2): ").strip()
             if choice == "1":
@@ -60,8 +60,9 @@ def load_system_prompt(path: str) -> str:
 async def main():
     system_prompt_path.parent.mkdir(parents=True, exist_ok=True)
     if not system_prompt_path.exists():
+        system_prompt_path.parent.mkdir(parents=True, exist_ok=True)
         with open(system_prompt_path, 'w') as f:
-            f.write(Path("system_prompt.txt").read_text())
+            f.write(Path("system_prompt.md").read_text())
     # Load environment variables
     load_dotenv()
     
@@ -76,7 +77,7 @@ async def main():
         sys.exit(1)
 
     # Load system prompt
-    system_prompt_path = Path("memory/config/system_prompt.txt")
+    system_prompt_path = Path("config/system_prompt.md")
     if not system_prompt_path.is_absolute():
         system_prompt_path = Path.cwd() / system_prompt_path
     

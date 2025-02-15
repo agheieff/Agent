@@ -32,27 +32,37 @@ class SecurityManager:
         'MAX_OPEN_FILES': 1024
     }
     
-    # Dangerous patterns for both Bash and Nu shell
-    DANGEROUS_PATTERNS = {
-        'SYSTEM_WIPE': [
-            r'rm\s+-rf\s+[/~]',
-            r'remove-item\s+-Recurse\s+-Force\s+[/~]'
-        ],
-        'PERMISSION_CHANGE': [
-            r'chmod\s+777',
-            r'chmod\s+-R\s+777',
-            r'icacls\s+.*\s+\/grant\s+Everyone:F'
-        ],
-        'NETWORK_EXPOSURE': [
-            r'nc\s+-l',
-            r'netcat\s+-l',
-            r'python\s+-m\s+http\.server'
-        ],
-        'DANGEROUS_DOWNLOAD': [
-            r'curl\s+.*\s+\|\s+bash',
-            r'wget\s+.*\s+\|\s+bash',
-            r'iwr\s+.*\s+\|\s+iex'
-        ]
+    # Shell-specific dangerous patterns
+    SHELL_PATTERNS = {
+        'bash': {
+            'SYSTEM_WIPE': [
+                r'rm\s+-rf\s+[/~]',
+                r'shred\s+-u\s+[/~]'
+            ],
+            'PERMISSION_CHANGE': [
+                r'chmod\s+777',
+                r'chmod\s+-R\s+777'
+            ],
+            'NETWORK_EXPOSURE': [
+                r'nc\s+-l',
+                r'netcat\s+-l',
+                r'python\s+-m\s+http\.server'
+            ]
+        },
+        'nu': {
+            'SYSTEM_WIPE': [
+                r'rm\s+-rf\s+[/~]',
+                r'remove-item\s+-r\s+[/~]'
+            ],
+            'PERMISSION_CHANGE': [
+                r'chmod\s+777',
+                r'set\s+mode\s+777'
+            ],
+            'NETWORK_EXPOSURE': [
+                r'listen\s+tcp',
+                r'serve\s+http'
+            ]
+        }
     }
     
     def __init__(self, config_path: Optional[Path] = None):
@@ -168,73 +178,196 @@ class SecurityManager:
         except Exception as e:
             logger.error(f"Error saving capabilities: {e}")
             
-    def validate_command(self, command: str, shell_type: str = 'bash') -> Dict:
-        """Validate command against security rules"""
+    def validate_command(self, command: str, shell_type: str) -> Dict:
+        """Validate command against security rules with shell-specific checks"""
         results = {
             'is_safe': True,
             'warnings': [],
             'blocked_patterns': [],
-            'required_capabilities': set()
+            'required_capabilities': set(),
+            'resource_requirements': {}
         }
         
+        # Get shell-specific patterns
+        patterns = self.SHELL_PATTERNS.get(shell_type, {})
+        
         # Check for dangerous patterns
-        for danger_type, patterns in self.DANGEROUS_PATTERNS.items():
-            for pattern in patterns:
+        for danger_type, danger_patterns in patterns.items():
+            for pattern in danger_patterns:
                 if re.search(pattern, command, re.IGNORECASE):
                     results['is_safe'] = False
                     results['blocked_patterns'].append(
                         f"{danger_type}: {pattern}"
                     )
-                    
-        # Check shell-specific patterns
-        if shell_type == 'nu':
-            # Add Nu shell specific checks
-            nu_patterns = [
-                (r'rm\s+-rf\s+/', "Dangerous system deletion"),
-                (r'sudo\s+rm', "Privileged deletion"),
-                (r'open\s+.*\s+\|\s+save', "Unsafe file redirection")
-            ]
-            for pattern, warning in nu_patterns:
-                if re.search(pattern, command, re.IGNORECASE):
-                    results['warnings'].append(warning)
-                    
+        
+        # Estimate resource requirements
+        results['resource_requirements'] = self._estimate_resources(command)
+        
         # Determine required capabilities
-        if 'sudo' in command or 'doas' in command:
-            results['required_capabilities'].add('privileged_execution')
-        if any(pat in command for pat in ['cp', 'mv', 'rm', 'touch']):
-            results['required_capabilities'].add('file_operations')
-        if any(pat in command for pat in ['curl', 'wget', 'nc', 'ssh']):
-            results['required_capabilities'].add('network_operations')
-            
+        results['required_capabilities'] = self._determine_capabilities(
+            command,
+            shell_type
+        )
+        
         return results
         
-    def apply_resource_limits(self):
-        """Apply resource limits using cgroups and rlimit"""
-        try:
-            # Set process resource limits
-            resource.setrlimit(resource.RLIMIT_CPU, 
-                             (self.DEFAULT_LIMITS['MAX_CPU_TIME'], 
-                              self.DEFAULT_LIMITS['MAX_CPU_TIME']))
-            resource.setrlimit(resource.RLIMIT_AS, 
-                             (self.DEFAULT_LIMITS['MAX_MEMORY'],
-                              self.DEFAULT_LIMITS['MAX_MEMORY']))
-            resource.setrlimit(resource.RLIMIT_FSIZE,
-                             (self.DEFAULT_LIMITS['MAX_FILE_SIZE'],
-                              self.DEFAULT_LIMITS['MAX_FILE_SIZE']))
-            resource.setrlimit(resource.RLIMIT_NOFILE,
-                             (self.DEFAULT_LIMITS['MAX_OPEN_FILES'],
-                              self.DEFAULT_LIMITS['MAX_OPEN_FILES']))
+    def _estimate_resources(self, command: str) -> Dict:
+        """Estimate resource requirements for command"""
+        resources = {
+            'cpu': 'low',
+            'memory': 'low',
+            'disk': 'low',
+            'network': 'none'
+        }
+        
+        # CPU intensive operations
+        cpu_patterns = [
+            r'find',
+            r'grep\s+-r',
+            r'sort',
+            r'where\s+.*\|\s+sort-by',
+            r'compress',
+            r'tar',
+            r'zip'
+        ]
+        if any(re.search(p, command) for p in cpu_patterns):
+            resources['cpu'] = 'medium'
             
-            # Add process to cgroup
-            pid = os.getpid()
-            cgroup_path = Path(f"/sys/fs/cgroup/{self.cgroup_name}/cgroup.procs")
-            if cgroup_path.exists():
-                with open(cgroup_path, "a") as f:
-                    f.write(str(pid))
-                    
+        # Memory intensive operations
+        memory_patterns = [
+            r'sort\s+-S',
+            r'convert',
+            r'ffmpeg',
+            r'where\s+.*\|\s+group-by'
+        ]
+        if any(re.search(p, command) for p in memory_patterns):
+            resources['memory'] = 'high'
+            
+        # Disk intensive operations
+        disk_patterns = [
+            r'dd',
+            r'rsync',
+            r'cp\s+-r',
+            r'mv\s+.*\s+/',
+            r'save\s+.*\s+/'
+        ]
+        if any(re.search(p, command) for p in disk_patterns):
+            resources['disk'] = 'high'
+            
+        # Network operations
+        network_patterns = [
+            r'curl',
+            r'wget',
+            r'fetch',
+            r'ssh',
+            r'scp',
+            r'rsync\s+.*:',
+            r'git\s+clone'
+        ]
+        if any(re.search(p, command) for p in network_patterns):
+            resources['network'] = 'active'
+            
+        return resources
+        
+    def _determine_capabilities(self, command: str, shell_type: str) -> Set[str]:
+        """Determine required capabilities for command"""
+        capabilities = set()
+        
+        # Basic execution always required
+        capabilities.add('basic_execution')
+        
+        # Shell-specific capability checks
+        if shell_type == 'nu':
+            if any(p in command for p in ['save', 'append', 'open']):
+                capabilities.add('file_operations')
+            if 'http' in command or 'fetch' in command:
+                capabilities.add('network_operations')
+        else:  # bash
+            if any(p in command for p in ['>', '>>', 'cat', 'cp', 'mv']):
+                capabilities.add('file_operations')
+            if any(p in command for p in ['curl', 'wget', 'nc']):
+                capabilities.add('network_operations')
+                
+        # Common capability checks
+        if 'sudo' in command or 'doas' in command:
+            capabilities.add('privileged_execution')
+        if any(p in command for p in ['systemctl', 'service']):
+            capabilities.add('service_management')
+            
+        return capabilities
+        
+    def apply_resource_limits(self, requirements: Dict):
+        """Apply resource limits based on requirements"""
+        try:
+            # CPU limits
+            if requirements['cpu'] == 'low':
+                cpu_limit = 30  # 30 seconds
+            elif requirements['cpu'] == 'medium':
+                cpu_limit = 300  # 5 minutes
+            else:
+                cpu_limit = 3600  # 1 hour
+                
+            resource.setrlimit(resource.RLIMIT_CPU, (cpu_limit, cpu_limit))
+            
+            # Memory limits
+            if requirements['memory'] == 'low':
+                mem_limit = 512 * 1024 * 1024  # 512MB
+            elif requirements['memory'] == 'medium':
+                mem_limit = 2 * 1024 * 1024 * 1024  # 2GB
+            else:
+                mem_limit = 8 * 1024 * 1024 * 1024  # 8GB
+                
+            resource.setrlimit(resource.RLIMIT_AS, (mem_limit, mem_limit))
+            
+            # Process limits based on CPU intensity
+            if requirements['cpu'] == 'low':
+                proc_limit = 50
+            else:
+                proc_limit = 200
+                
+            resource.setrlimit(resource.RLIMIT_NPROC, (proc_limit, proc_limit))
+            
+            # File size limits based on disk usage
+            if requirements['disk'] == 'low':
+                file_limit = 100 * 1024 * 1024  # 100MB
+            elif requirements['disk'] == 'medium':
+                file_limit = 1024 * 1024 * 1024  # 1GB
+            else:
+                file_limit = 10 * 1024 * 1024 * 1024  # 10GB
+                
+            resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
+            
         except Exception as e:
             logger.error(f"Error applying resource limits: {e}")
             
+    def track_resource_usage(self, pid: int) -> Dict:
+        """Track resource usage of a process"""
+        try:
+            with open(f"/proc/{pid}/status") as f:
+                status = f.read()
+                
+            with open(f"/proc/{pid}/stat") as f:
+                stat = f.read().split()
+                
+            # Extract memory usage
+            vm_peak = re.search(r'VmPeak:\s+(\d+)', status)
+            vm_peak = int(vm_peak.group(1)) if vm_peak else 0
+            
+            # Extract CPU usage
+            utime = int(stat[13])
+            stime = int(stat[14])
+            
+            return {
+                'memory_peak_kb': vm_peak,
+                'cpu_user_time': utime,
+                'cpu_system_time': stime,
+                'total_cpu_time': utime + stime
+            }
+            
+        except Exception as e:
+            logger.error(f"Error tracking resource usage: {e}")
+            return {}
+        
     def validate_binary(self, command: str) -> bool:
         """Validate binary existence and permissions"""
         try:
@@ -272,8 +405,8 @@ class SecurityManager:
             logger.error(f"Error validating binary: {e}")
             return False
             
-    def create_restricted_environment(self) -> Dict[str, str]:
-        """Create a restricted environment for command execution"""
+    def create_restricted_environment(self, shell_type: str) -> Dict[str, str]:
+        """Create a restricted environment for specific shell"""
         env = os.environ.copy()
         
         # Remove potentially dangerous environment variables
@@ -288,11 +421,14 @@ class SecurityManager:
         for var in dangerous_vars:
             env.pop(var, None)
             
-        # Set safe PATH
-        env['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
-        
-        # Set safe shell
-        env['SHELL'] = '/bin/bash'
+        # Set safe PATH based on shell
+        if shell_type == 'nu':
+            env['PATH'] = '/usr/local/bin:/usr/bin:/bin'
+        else:
+            env['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+            
+        # Set appropriate shell
+        env['SHELL'] = f'/bin/{shell_type}'
         
         return env
         

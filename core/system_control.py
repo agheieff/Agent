@@ -5,7 +5,6 @@ import sys
 from typing import Tuple, Optional, Dict, List, Union
 from pathlib import Path
 from datetime import datetime
-from .interactive_handler import InteractiveCommandHandler, InteractionPattern
 from .memory_manager import MemoryManager
 from .shell_adapter import ShellAdapter
 
@@ -23,76 +22,27 @@ class CommandExecutor:
 
 class BashExecutor(CommandExecutor):
     """Handles bash command execution"""
-    def __init__(self, interactive_handler: InteractiveCommandHandler, working_dir: Optional[Path] = None):
-        self.interactive_handler = interactive_handler
+    def __init__(self, working_dir: Optional[Path] = None):
         self.working_dir = working_dir or Path.cwd()
         self.shell_adapter = ShellAdapter(preferred_shell='bash')
 
     async def execute(self, command: str) -> Tuple[str, str, int]:
         try:
-            # Use interactive handler for interactive commands
-            if SystemControl._is_interactive_command(command):
-                custom_patterns = SystemControl._get_custom_patterns(command)
-                return await self.interactive_handler.run_interactive_command(
-                    command,
-                    custom_patterns=custom_patterns
-                )
-
-            # Use shell adapter for command execution
             return await self.shell_adapter.execute(command)
-
         except Exception as e:
             error_msg = f"Error executing bash command: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return "", error_msg, 1
 
-class PythonExecutor(CommandExecutor):
-    def __init__(self):
-        self.process = None
-        
-    async def execute(self, code: str) -> Tuple[str, str, int]:
-        try:
-            if not self.process or self.process.returncode is not None:
-                self.process = await asyncio.create_subprocess_shell(
-                    "python -iq -u",
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    env={**os.environ, "PYTHONSTARTUP": ""}
-                )
-
-            self.process.stdin.write(f"{code}\n".encode())
-            await self.process.stdin.drain()
-            
-            # Get output with timeout
-            stdout, stderr = await asyncio.wait_for(
-                self.process.communicate(),
-                timeout=15
-            )
-            return stdout.decode(), stderr.decode(), self.process.returncode
-        except Exception as e:
-            return "", str(e), 1
-
 class NuShellExecutor(CommandExecutor):
     """Handles Nu shell command execution"""
-    def __init__(self, interactive_handler: InteractiveCommandHandler, working_dir: Optional[Path] = None):
-        self.interactive_handler = interactive_handler
+    def __init__(self, working_dir: Optional[Path] = None):
         self.working_dir = working_dir or Path.cwd()
         self.shell_adapter = ShellAdapter(preferred_shell='nu')
 
     async def execute(self, command: str) -> Tuple[str, str, int]:
         try:
-            # Use interactive handler for interactive commands
-            if SystemControl._is_interactive_command(command):
-                custom_patterns = SystemControl._get_custom_patterns(command)
-                return await self.interactive_handler.run_interactive_command(
-                    command,
-                    custom_patterns=custom_patterns
-                )
-
-            # Use shell adapter for command execution
             return await self.shell_adapter.execute(command)
-
         except Exception as e:
             error_msg = f"Error executing nu shell command: {str(e)}"
             logger.error(error_msg, exc_info=True)
@@ -101,91 +51,16 @@ class NuShellExecutor(CommandExecutor):
 class SystemControl:
     """Enhanced system control with support for multiple command types"""
     
-    # Interactive command patterns
-    INTERACTIVE_COMMANDS = {
-        'pacman': ['-S', '-Syu'],
-        'apt': ['install', 'upgrade'],
-        'apt-get': ['install', 'upgrade'],
-        'pip': ['install'],
-        'npm': ['install'],
-        'docker': ['run', 'exec'],
-        'ssh': [],
-        'mysql': [],
-        'psql': [],
-        'nano': [],
-        'vim': [],
-        'top': [],
-        'htop': [],
-        'less': [],
-        'more': []
-    }
-
-    def __init__(self, user: str = None, working_dir: Optional[Path] = None, preferred_shell: str = 'nu'):
+    def __init__(self, preferred_shell: str = 'nu'):
         self.memory_manager = MemoryManager()
-        self.working_dir = working_dir or Path.cwd()
-        self.interactive_handler = InteractiveCommandHandler()
+        self.working_dir = Path.cwd()
         self.preferred_shell = preferred_shell
         
         # Initialize executors
         self.executors = {
-            'bash': BashExecutor(self.interactive_handler, self.working_dir),
-            'python': PythonExecutor(),
-            'nu': NuShellExecutor(self.interactive_handler, self.working_dir)
+            'bash': BashExecutor(self.working_dir),
+            'nu': NuShellExecutor(self.working_dir)
         }
-
-    @staticmethod
-    def _is_interactive_command(command: str) -> bool:
-        """Determine if a command typically requires interaction"""
-        try:
-            args = shlex.split(command)
-            if not args:
-                return False
-                
-            base_cmd = args[0].split('/')[-1]
-            
-            if base_cmd in SystemControl.INTERACTIVE_COMMANDS:
-                if not SystemControl.INTERACTIVE_COMMANDS[base_cmd]:
-                    return True
-                return any(flag in args[1:] for flag in SystemControl.INTERACTIVE_COMMANDS[base_cmd])
-                
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error checking interactive command: {e}")
-            return False
-
-    @staticmethod
-    def _get_custom_patterns(command: str) -> Dict[str, InteractionPattern]:
-        """Get custom interaction patterns for specific commands"""
-        args = shlex.split(command)
-        base_cmd = args[0].split('/')[-1]
-        
-        patterns = {}
-        
-        if base_cmd == 'pacman':
-            patterns.update({
-                'proceed': InteractionPattern(
-                    pattern=r'Proceed with installation\?',
-                    response='y\n'
-                ),
-                'trust': InteractionPattern(
-                    pattern=r'Trust this package\?',
-                    response='y\n'
-                )
-            })
-        elif base_cmd in ['apt', 'apt-get']:
-            patterns.update({
-                'continue': InteractionPattern(
-                    pattern=r'Do you want to continue\?',
-                    response='y\n'
-                ),
-                'restart': InteractionPattern(
-                    pattern=r'Restart services during package upgrades',
-                    response='y\n'
-                )
-            })
-        
-        return patterns
 
     def _sanitize_command(self, command: str) -> str:
         """Log warnings instead of blocking"""

@@ -49,15 +49,27 @@ class CommandVisitor(CommandParser.CommandVisitorImpl):
             self.current_depth += 1
             
             if ctx.bash_block():
-                node = self.visitBash_block(ctx.bash_block())
+                node = CommandNode(
+                    type='bash',
+                    content=self._unescape_content(ctx.bash_block().command_content().getText())
+                )
             elif ctx.python_block():
-                node = self.visitPython_block(ctx.python_block())
+                node = CommandNode(
+                    type='python',
+                    content=self._unescape_content(ctx.python_block().command_content().getText())
+                )
             elif ctx.task_block():
                 node = self.visitTask_block(ctx.task_block())
             elif ctx.service_block():
-                node = self.visitService_block(ctx.service_block())
+                node = CommandNode(
+                    type='service',
+                    content=self._unescape_content(ctx.service_block().command_content().getText())
+                )
             elif ctx.package_block():
-                node = self.visitPackage_block(ctx.package_block())
+                node = CommandNode(
+                    type='package',
+                    content=self._unescape_content(ctx.package_block().command_content().getText())
+                )
             else:
                 node = None
                 
@@ -190,44 +202,14 @@ class CommandVisitor(CommandParser.CommandVisitorImpl):
         """Unescape brackets in command content"""
         return content.replace('\\<', '<').replace('\\>', '>')
 
-    def visitBash_block(self, ctx: CommandParser.Bash_blockContext) -> Dict:
-        """Visit a bash block and return its content"""
-        return {
-            'type': 'bash',
-            'content': ctx.CONTENT().getText().strip()
-        }
-
-    def visitPython_block(self, ctx: CommandParser.Python_blockContext) -> Dict:
-        """Visit a python block and return its content"""
-        return {
-            'type': 'python',
-            'content': ctx.CONTENT().getText().strip()
-        }
-
-    def visitDescription_block(self, ctx: CommandParser.Description_blockContext) -> str:
-        """Visit a description block and return its content"""
-        return ctx.CONTENT().getText().strip()
-
-    def visitService_block(self, ctx: CommandParser.Service_blockContext) -> Dict:
-        """Visit a service block and return its content"""
-        return {
-            'type': 'service',
-            'content': ctx.CONTENT().getText().strip()
-        }
-
-    def visitPackage_block(self, ctx: CommandParser.Package_blockContext) -> Dict:
-        """Visit a package block and return its content"""
-        return {
-            'type': 'package',
-            'content': ctx.CONTENT().getText().strip()
-        }
-
     def visitDependency_list(self, ctx: CommandParser.Dependency_listContext) -> List[str]:
-        """Visit a parse tree produced by CommandParser.dependency_list."""
+        """Visit dependency list and return as list of strings"""
         return [dep.getText() for dep in ctx.dependency()]
 
     def visitDependency(self, ctx: CommandParser.DependencyContext) -> str:
-        """Visit a parse tree produced by CommandParser.dependency."""
-        if ctx.ID_REF():
-            return ctx.ID_REF().getText()
-        return ctx.TASK_REF().getText() 
+        """Visit dependency and return as string"""
+        return ctx.getText()
+
+    def visitDescription_block(self, ctx: CommandParser.Description_blockContext) -> str:
+        """Visit a description block and return its content"""
+        return ctx.CONTENT().getText().strip() 

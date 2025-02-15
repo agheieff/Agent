@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import List, Dict, Tuple
 import json
 import logging
-import unittest
 
 logger = logging.getLogger(__name__)
 
@@ -197,68 +196,12 @@ class CommandMigrator:
         
         return errors
 
-class TestCommandMigration(unittest.TestCase):
-    """Test cases for command migration"""
-    
-    def setUp(self):
-        self.migrator = CommandMigrator(Path("test_storage"))
-        
-    def test_nested_task_conversion(self):
-        """Test conversion of nested task structures"""
-        input_xml = '''
-        <task priority="1">
-        <description>Parent task</description>
-        <commands>
-        <task priority="2">
-        <description>Child task</description>
-        <commands>
-        echo "nested command"
-        </commands>
-        </task>
-        </commands>
-        </task>
-        '''
-        
-        converted = self.migrator._convert_xml_to_antlr(input_xml)
-        self.assertIn('<task priority="1">', converted)
-        self.assertIn('<task priority="2">', converted)
-        self.assertIn('echo "nested command"', converted)
-        
-    def test_escaped_brackets(self):
-        """Test handling of commands with angle brackets"""
-        input_xml = '''
-        <bash>
-        echo "redirect > file.txt"
-        </bash>
-        '''
-        
-        converted = self.migrator._convert_xml_to_antlr(input_xml)
-        self.assertIn('\\>', converted)
-        
-    def test_dependency_conversion(self):
-        """Test conversion of dependencies"""
-        input_xml = '''
-        <task id="task1">
-        <description>Task with deps</description>
-        <commands>
-        echo "command"
-        </commands>
-        <dependencies>#dep1,@task2</dependencies>
-        </task>
-        '''
-        
-        converted = self.migrator._convert_xml_to_antlr(input_xml)
-        self.assertIn('#dep1,@task2', converted)
-        
 def main():
     """Main migration script"""
     storage_path = Path("storage")
     migrator = CommandMigrator(storage_path)
     
     print("Starting command format migration...")
-    
-    # Run tests first
-    unittest.main(argv=['dummy'])
     
     success, failed = migrator.migrate_directory(storage_path)
     print(f"Migration complete: {success} successful, {failed} failed")

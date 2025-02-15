@@ -229,6 +229,28 @@ class TemporalContext:
             key=lambda x: x.get('last_accessed', 0)
         )
 
+class MemoryPreloader:
+    """Handles preloading of relevant memory context"""
+    
+    def __init__(self, memory_manager: 'MemoryManager'):
+        self.memory_manager = memory_manager
+        self.context_keys = [
+            "system_config", 
+            "tool_usage",
+            "error_history",
+            "active_projects"
+        ]
+        
+    def get_session_context(self) -> str:
+        """Compile relevant context from memory"""
+        context = []
+        for key in self.context_keys:
+            results = self.memory_manager.search_memory(key, limit=3)
+            if results:
+                context.append(f"## {key.replace('_', ' ').title()}")
+                context.extend([n['content'] for n in results[:3]])
+        return "\n".join(context)
+
 class MemoryManager:
     """Enhanced memory manager with graph-based storage and hierarchical organization"""
     
@@ -243,6 +265,7 @@ class MemoryManager:
         self.graph = MemoryGraph(self.base_path)
         self.hierarchy = MemoryHierarchy(self.base_path)
         self.temporal = TemporalContext(self.graph)
+        self.command_history: List[Dict] = []
         
     def save_document(self, title: str, content: str, tags: List[str] = None,
                      metadata: Dict = None, category_id: Optional[str] = None) -> str:
@@ -440,3 +463,55 @@ class MemoryManager:
     def get_activity_sequence(self, start_time: float, end_time: float) -> List[Dict]:
         """Get sequence of memory activity between timestamps"""
         return self.temporal.get_temporal_sequence(start_time, end_time)
+
+    def get_execution_context(self) -> str:
+        """Get temporal context for LLM"""
+        try:
+            # Get last 5 commands
+            recent_commands = self.command_history[-5:] if self.command_history else []
+            command_str = "\n".join([
+                f"- {cmd.get('command', 'Unknown')} ({cmd.get('shell', 'unknown')})"
+                for cmd in recent_commands
+            ])
+            
+            # Get active projects
+            active_projects = self.get_category_contents('active_projects')[:3]
+            projects_str = "\n".join([
+                f"- {p.title}: {p.content[:100]}..."
+                for p in active_projects
+            ])
+            
+            # Get recent errors
+            errors = self.search_memory('error', limit=3)
+            errors_str = "\n".join([
+                f"- {e['title']}: {e['content'][:100]}..."
+                for e in errors
+            ])
+            
+            return f"""EXECUTION CONTEXT:
+            
+Recent Commands:
+{command_str}
+
+Active Projects:
+{projects_str}
+
+Recent Errors:
+{errors_str}
+"""
+        except Exception as e:
+            logger.error(f"Error getting execution context: {e}")
+            return ""
+            
+    def add_command_to_history(self, command: str, shell: str, success: bool = True):
+        """Add command to history"""
+        self.command_history.append({
+            'command': command,
+            'shell': shell,
+            'success': success,
+            'timestamp': time.time()
+        })
+        
+        # Trim history if too long
+        if len(self.command_history) > 1000:
+            self.command_history = self.command_history[-1000:]

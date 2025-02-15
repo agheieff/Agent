@@ -59,16 +59,34 @@ class CommandMigrator:
                 flags=re.DOTALL
             )
             
-            # Convert task commands with attributes
+            # Convert task commands with attributes and description
             def convert_task(match):
                 try:
                     xml = ET.fromstring(match.group(0))
+                    # Get attributes
                     attrs = []
                     for key, value in xml.attrib.items():
                         if key != 'type':
                             attrs.append(f'{key}="{value}"')
                     attrs_str = ' '.join(attrs)
-                    return f'<task {attrs_str}>{xml.text}</task>'
+                    
+                    # Split content into description and commands
+                    content = xml.text.strip()
+                    desc_match = re.match(r'Description:\s*(.*?)\s*Commands:\s*(.*)', content, re.DOTALL)
+                    if desc_match:
+                        description = desc_match.group(1).strip()
+                        commands = desc_match.group(2).strip()
+                        return f'''<task {attrs_str}>
+<description>{description}</description>
+<commands>{commands}</commands>
+</task>'''
+                    else:
+                        # If no clear split, treat all as commands
+                        return f'''<task {attrs_str}>
+<description>No description provided</description>
+<commands>{content}</commands>
+</task>'''
+                        
                 except Exception as e:
                     logger.error(f"Error converting task: {e}")
                     return match.group(0)
@@ -106,7 +124,7 @@ class CommandMigrator:
         content = file_path.read_text()
         
         # Check for unclosed tags
-        tags = ['bash', 'python', 'task']
+        tags = ['bash', 'python', 'task', 'description', 'commands']
         for tag in tags:
             opens = len(re.findall(f'<{tag}', content))
             closes = len(re.findall(f'</{tag}>', content))
@@ -126,6 +144,15 @@ class CommandMigrator:
                 except Exception as e:
                     errors.append(f"Error parsing attributes: {str(e)}")
                     
+        # Check for description and command blocks in tasks
+        task_contents = re.finditer(r'<task.*?>(.*?)</task>', content, re.DOTALL)
+        for task in task_contents:
+            task_content = task.group(1)
+            if '<description>' not in task_content:
+                errors.append("Task missing description block")
+            if '<commands>' not in task_content:
+                errors.append("Task missing commands block")
+                
         return errors
         
 def main():

@@ -53,4 +53,147 @@ command2
 3. Document session in /memory/sessions/
 4. Prepare next task context
 
+## Session Management and Branching
+
+## Overview
+The system supports advanced session management with branching capabilities, allowing for parallel exploration of different command sequences while maintaining context and history.
+
+## Session Branches
+
+### Creating Branches
+- Create new branches from any point in the session tree
+- Inherit context and command history from parent branch
+- Maintain separate command sequences in each branch
+
+Example:
+```
+<task name="create_branch" inherit_context="true">
+<description>Create a new branch for testing alternative approach</description>
+<commands>
+branch create "test-approach" "Testing alternative implementation"
+</commands>
+</task>
+```
+
+### Branch Context
+- Each branch maintains its own:
+  - Command history
+  - Context inheritance
+  - Temporal relationships
+  - Memory references
+
+### Branch Operations
+1. Switching Branches
+   ```
+   <task name="switch_branch">
+   <description>Switch to a different branch</description>
+   <commands>
+   branch switch "test-approach"
+   </commands>
+   </task>
+   ```
+
+2. Merging Branches
+   ```
+   <task name="merge_branches">
+   <description>Merge test branch back to main</description>
+   <commands>
+   branch merge "test-approach" "main"
+   </commands>
+   </task>
+   ```
+
+## Context Inheritance
+
+### Temporal Context
+- Recent commands from parent branch
+- Active project context
+- Error history
+- Tool usage patterns
+
+### Memory Integration
+- Inherited memory references
+- Branch-specific memory nodes
+- Context-aware search results
+
+## Best Practices
+
+1. Branch Creation
+   - Create branches for:
+     - Alternative approaches
+     - Experimental features
+     - Debugging sessions
+     - Parallel tasks
+
+2. Context Management
+   - Inherit context when relevant
+   - Isolate experimental changes
+   - Maintain clear branch descriptions
+
+3. Branch Lifecycle
+   - Create with clear purpose
+   - Document changes and outcomes
+   - Merge or archive when complete
+   - Clean up unused branches
+
+## Example Workflows
+
+1. Feature Development
+   ```
+   # Create feature branch
+   branch create "feature-x" "Implementing feature X"
+   
+   # Make changes in isolation
+   # Test and validate
+   
+   # Merge back to main
+   branch merge "feature-x" "main"
+   ```
+
+2. Debugging
+   ```
+   # Create debug branch
+   branch create "debug-issue-123" "Debugging performance issue"
+   
+   # Add debugging context
+   branch add-context "debug-issue-123" "performance_logs"
+   
+   # Investigate and fix
+   # Verify solution
+   
+   # Merge if successful
+   branch merge "debug-issue-123" "main"
+   ```
+
+3. Parallel Tasks
+   ```
+   # Create parallel branches
+   branch create "task-a" "Working on Task A"
+   branch create "task-b" "Working on Task B"
+   
+   # Switch between tasks
+   branch switch "task-a"
+   # Work on task A
+   
+   branch switch "task-b"
+   # Work on task B
+   ```
+
+## Error Handling
+
+1. Branch Conflicts
+   - Detect conflicting changes
+   - Provide merge suggestions
+   - Maintain audit trail
+
+2. Context Conflicts
+   - Resolve inheritance conflicts
+   - Preserve branch-specific context
+   - Handle missing references
+
+3. Recovery
+   - Auto-save branch state
+   - Restore from checkpoints
+   - Revert failed merges
+
 Good luck!

@@ -1,12 +1,13 @@
 import logging
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
 from pathlib import Path
 import time
-import numpy as np
+import networkx as nx
 from collections import Counter
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,34 @@ class CommandSkill:
         )
 
 @dataclass
+class SessionBranch:
+    """Represents a branch in the session tree"""
+    id: str
+    parent_id: Optional[str]
+    name: str
+    description: str
+    created_at: float
+    command_history: List[Dict] = field(default_factory=list)
+    context_inheritance: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict:
+        return {
+            'id': self.id,
+            'parent_id': self.parent_id,
+            'name': self.name,
+            'description': self.description,
+            'created_at': self.created_at,
+            'command_history': self.command_history,
+            'context_inheritance': self.context_inheritance,
+            'metadata': self.metadata
+        }
+    
+    @staticmethod
+    def from_dict(data: Dict) -> 'SessionBranch':
+        return SessionBranch(**data)
+
+@dataclass
 class SessionState:
     """Represents the state of a session"""
     id: str
@@ -55,6 +84,7 @@ class SessionState:
     command_history: List[Dict]
     active_contexts: Set[str] = field(default_factory=set)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    active_branch_id: Optional[str] = None
     
     def to_dict(self) -> Dict:
         return {
@@ -65,24 +95,17 @@ class SessionState:
             'environment': self.environment,
             'command_history': self.command_history,
             'active_contexts': list(self.active_contexts),
-            'metadata': self.metadata
+            'metadata': self.metadata,
+            'active_branch_id': self.active_branch_id
         }
     
     @staticmethod
     def from_dict(data: Dict) -> 'SessionState':
-        return SessionState(
-            id=data['id'],
-            start_time=data['start_time'],
-            shell_preference=data['shell_preference'],
-            working_directory=data['working_directory'],
-            environment=data['environment'],
-            command_history=data['command_history'],
-            active_contexts=set(data['active_contexts']),
-            metadata=data['metadata']
-        )
+        data['active_contexts'] = set(data['active_contexts'])
+        return SessionState(**data)
 
 class SessionManager:
-    """Manages session continuity and command learning"""
+    """Manages session continuity, branching, and command learning"""
     
     def __init__(self, storage_path: Path, memory_manager=None):
         self.storage_path = storage_path
@@ -92,17 +115,29 @@ class SessionManager:
         self.current_session: Optional[SessionState] = None
         self.command_skills: Dict[str, CommandSkill] = {}
         self.context_transitions: Dict[str, Counter] = {}
+        self.session_tree = nx.DiGraph()
         
         self._load_state()
         
     def _load_state(self):
-        """Load session state and learned skills"""
+        """Load session state, branches, and learned skills"""
         try:
             # Load last session
             session_file = self.storage_path / "last_session.json"
             if session_file.exists():
                 with open(session_file, 'r') as f:
                     self.current_session = SessionState.from_dict(json.load(f))
+                    
+            # Load session tree
+            tree_file = self.storage_path / "session_tree.json"
+            if tree_file.exists():
+                with open(tree_file, 'r') as f:
+                    data = json.load(f)
+                    for branch_data in data['branches']:
+                        branch = SessionBranch.from_dict(branch_data)
+                        self.session_tree.add_node(branch.id, branch=branch)
+                        if branch.parent_id:
+                            self.session_tree.add_edge(branch.parent_id, branch.id)
                     
             # Load command skills
             skills_file = self.storage_path / "command_skills.json"
@@ -128,13 +163,22 @@ class SessionManager:
             logger.error(f"Error loading session state: {e}")
             
     def _save_state(self):
-        """Save session state and learned skills"""
+        """Save session state, branches, and learned skills"""
         try:
             # Save current session
             if self.current_session:
                 with open(self.storage_path / "last_session.json", 'w') as f:
                     json.dump(self.current_session.to_dict(), f, indent=2)
                     
+            # Save session tree
+            with open(self.storage_path / "session_tree.json", 'w') as f:
+                json.dump({
+                    'branches': [
+                        self.session_tree.nodes[node]['branch'].to_dict()
+                        for node in self.session_tree.nodes
+                    ]
+                }, f, indent=2)
+                
             # Save command skills
             with open(self.storage_path / "command_skills.json", 'w') as f:
                 json.dump(
@@ -368,4 +412,179 @@ class SessionManager:
                 cmd['command'].split()[0]
                 for cmd in self.current_session.command_history
             ).most_common(5)
-        } 
+        }
+        
+    def create_branch(self, name: str, description: str,
+                     parent_id: Optional[str] = None,
+                     inherit_context: bool = True) -> Optional[str]:
+        """Create a new session branch"""
+        try:
+            branch_id = f"branch_{int(time.time())}"
+            
+            # Determine parent branch
+            if not parent_id and self.current_session:
+                parent_id = self.current_session.active_branch_id
+                
+            # Create branch
+            branch = SessionBranch(
+                id=branch_id,
+                parent_id=parent_id,
+                name=name,
+                description=description,
+                created_at=time.time()
+            )
+            
+            # Inherit context if requested
+            if inherit_context and parent_id:
+                parent = self.get_branch(parent_id)
+                if parent:
+                    branch.context_inheritance = parent.context_inheritance.copy()
+                    branch.command_history = parent.command_history[-5:]  # Last 5 commands
+                    
+            # Add to tree
+            self.session_tree.add_node(branch_id, branch=branch)
+            if parent_id:
+                self.session_tree.add_edge(parent_id, branch_id)
+                
+            # Update current session
+            if self.current_session:
+                self.current_session.active_branch_id = branch_id
+                
+            self._save_state()
+            return branch_id
+            
+        except Exception as e:
+            logger.error(f"Error creating branch: {e}")
+            return None
+            
+    def get_branch(self, branch_id: str) -> Optional[SessionBranch]:
+        """Get a session branch by ID"""
+        if branch_id in self.session_tree:
+            return self.session_tree.nodes[branch_id]['branch']
+        return None
+        
+    def get_branch_path(self, branch_id: str) -> List[SessionBranch]:
+        """Get path from root to branch"""
+        if branch_id not in self.session_tree:
+            return []
+            
+        path = []
+        current = branch_id
+        while current is not None:
+            branch = self.get_branch(current)
+            if not branch:
+                break
+            path.append(branch)
+            current = branch.parent_id
+            
+        return list(reversed(path))
+        
+    def switch_branch(self, branch_id: str) -> bool:
+        """Switch to a different session branch"""
+        if not self.current_session or branch_id not in self.session_tree:
+            return False
+            
+        try:
+            # Update current session
+            self.current_session.active_branch_id = branch_id
+            
+            # Get branch context
+            branch = self.get_branch(branch_id)
+            if branch:
+                self.current_session.active_contexts.update(branch.context_inheritance)
+                
+            self._save_state()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error switching branch: {e}")
+            return False
+            
+    def get_branch_context(self, branch_id: str) -> Dict[str, Any]:
+        """Get combined context for a branch"""
+        try:
+            context = {}
+            
+            # Get branch path
+            path = self.get_branch_path(branch_id)
+            
+            # Combine context from path
+            for branch in path:
+                # Add command history
+                if branch.command_history:
+                    if 'commands' not in context:
+                        context['commands'] = []
+                    context['commands'].extend(branch.command_history)
+                    
+                # Add inherited context
+                for ctx in branch.context_inheritance:
+                    if ctx not in context:
+                        context[ctx] = []
+                    if self.memory_manager:
+                        results = self.memory_manager.search_memory(ctx, limit=3)
+                        context[ctx].extend(results)
+                        
+            return context
+            
+        except Exception as e:
+            logger.error(f"Error getting branch context: {e}")
+            return {}
+            
+    def add_command_to_branch(self, branch_id: str, command: str,
+                           shell_type: str, success: bool = True):
+        """Add command to branch history"""
+        try:
+            branch = self.get_branch(branch_id)
+            if not branch:
+                return
+                
+            # Add to branch history
+            branch.command_history.append({
+                'command': command,
+                'shell_type': shell_type,
+                'success': success,
+                'timestamp': time.time()
+            })
+            
+            # Update command skills
+            self.add_command(command, shell_type, success)
+            
+            self._save_state()
+            
+        except Exception as e:
+            logger.error(f"Error adding command to branch: {e}")
+            
+    def merge_branches(self, source_id: str, target_id: str) -> bool:
+        """Merge source branch into target branch"""
+        try:
+            source = self.get_branch(source_id)
+            target = self.get_branch(target_id)
+            if not source or not target:
+                return False
+                
+            # Merge command history
+            target.command_history.extend(source.command_history)
+            
+            # Merge context inheritance
+            target.context_inheritance.extend(
+                ctx for ctx in source.context_inheritance
+                if ctx not in target.context_inheritance
+            )
+            
+            # Update children
+            for _, child in self.session_tree.out_edges(source_id):
+                self.session_tree.remove_edge(source_id, child)
+                self.session_tree.add_edge(target_id, child)
+                child_branch = self.get_branch(child)
+                if child_branch:
+                    child_branch.parent_id = target_id
+                    
+            # Remove source branch
+            self.session_tree.remove_node(source_id)
+            
+            self._save_state()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error merging branches: {e}")
+            return False 

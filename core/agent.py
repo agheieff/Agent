@@ -10,6 +10,8 @@ from core.llm_client import get_llm_client
 from core.memory_manager import MemoryManager
 from core.system_control import SystemControl
 from core.task_manager import TaskManager
+from core.memory_preloader import MemoryPreloader
+import networkx as nx
 
 # Configure logging
 logging.basicConfig(
@@ -115,14 +117,16 @@ class CommandExtractor:
         return False
 
 class AutonomousAgent:
-    def __init__(self, api_key: str, model: str = "deepseek"):
+    def __init__(self, memory_manager, session_manager, api_key: str, model: str = "deepseek"):
         if not api_key:
             raise ValueError("API key required")
 
         self.memory_path = Path("memory")
-        self.memory_manager = MemoryManager()
+        self.memory_manager = memory_manager
         self.system_control = SystemControl()
         self.task_manager = TaskManager(self.memory_path)
+        self.session_manager = session_manager
+        self.preloader = MemoryPreloader(memory_manager)
         
         # Then check for first-run setup
         if not (self.memory_path / "vector_index").exists():
@@ -236,78 +240,101 @@ class AutonomousAgent:
                 logger.error(f"Error creating file {doc['filename']}: {e}")
 
     async def think_and_act(self, initial_prompt: str, system_prompt: str) -> None:
-        """Enhanced main conversation loop with XML command handling"""
         messages = []
-        messages = await self.compress_context(messages)
-
-        if task := self.task_manager.get_next_task():
-            initial_prompt = f"ACTIVE TASK: {task['description']}\n{initial_prompt}"
         
-        if self.last_session_summary:
-            messages.append({
-                "role": "system",
-                "content": f"Last session summary:\n{self.last_session_summary}"
-            })
+        # Initialize session context
+        self.preloader.initialize_session()
         
-        messages.append({"role": "user", "content": initial_prompt})
+        # Add temporal context
+        temporal_context = self.memory_manager.get_execution_context()
+        messages.append({
+            "role": "system",
+            "content": f"TEMPORAL CONTEXT:\n{temporal_context}"
+        })
         
+        # Add system prompt
+        messages.append({
+            "role": "system",
+            "content": system_prompt
+        })
+        
+        # Add initial prompt
+        messages.append({
+            "role": "user",
+            "content": initial_prompt
+        })
+        
+        # Get active branch context if available
+        if self.session_manager.current_session and self.session_manager.current_session.active_branch_id:
+            branch_context = self.session_manager.get_branch_context(
+                self.session_manager.current_session.active_branch_id
+            )
+            if branch_context:
+                messages.append({
+                    "role": "system",
+                    "content": f"BRANCH CONTEXT:\n{json.dumps(branch_context, indent=2)}"
+                })
+        
+        # Process command sequence with dependencies
         try:
-            while not self.should_exit:
-                response = await self.llm.get_response(
-                    "",
-                    system_prompt,
-                    messages
-                )
-                
-                if not response:
-                    logger.error("Failed to get LLM response")
+            commands = self._parse_commands(initial_prompt)
+            ordered_commands = self._resolve_dependencies(commands)
+            
+            for command in ordered_commands:
+                result = await self._execute_command(command)
+                if not result.success:
+                    logger.error(f"Command execution failed: {result.error}")
                     break
-
-                self.print_response(response)
-                messages.append({"role": "assistant", "content": response})
-
-                # Process heredocs first
-                await self.process_heredocs(response)
-
-                # Extract and execute commands
-                commands = self.command_extractor.extract_commands(response)
-                for command_type, cmd in commands:
-                    if self.command_extractor.is_exit_command(command_type, cmd):
-                        self.should_exit = True
-                        print("\nExiting session...")
-                        break
-                        
-                    result = await self.system_control.execute_command(command_type, cmd)
                     
-                    # Store command history
-                    self.command_history.append({
-                        'command_type': command_type,
-                        'command': cmd,
-                        'result': {
-                            'stdout': result[0],
-                            'stderr': result[1],
-                            'code': result[2],
-                            'timestamp': datetime.now().isoformat()
-                        }
-                    })
-                    
-                    if result[0] or result[1]:  # If there's any output
-                        output = result[0] if result[0] else result[1]
-                        messages.append({"role": "user", "content": output})
-
-                # Check for completion or exit
-                if self.should_exit or self._is_conversation_complete(response):
-                    if "Summary:" in response:
-                        summary = response.split("Summary:")[1].strip()
-                        self._save_session_summary(summary)
-                    break
-
-        except KeyboardInterrupt:
-            logger.info("Session interrupted by user")
-            self.should_exit = True
+                # Update branch history if in a branch
+                if (self.session_manager.current_session and 
+                    self.session_manager.current_session.active_branch_id):
+                    self.session_manager.add_command_to_branch(
+                        self.session_manager.current_session.active_branch_id,
+                        command.raw_command,
+                        command.type,
+                        result.success
+                    )
+        
         except Exception as e:
-            logger.error(f"Session error: {e}")
-            raise
+            logger.error(f"Error in think_and_act: {e}")
+            
+    def _resolve_dependencies(self, commands: List[Dict]) -> List[Dict]:
+        """Resolve command dependencies using topological sort"""
+        # Build dependency graph
+        graph = nx.DiGraph()
+        command_map = {}
+        
+        for i, cmd in enumerate(commands):
+            cmd_id = f"cmd_{i}"
+            graph.add_node(cmd_id, command=cmd)
+            command_map[cmd_id] = cmd
+            
+            if cmd['type'] == 'task' and 'dependencies' in cmd:
+                for dep in cmd['dependencies']:
+                    if dep.startswith('#'):
+                        # ID reference
+                        dep_id = dep[1:]
+                        if dep_id in command_map:
+                            graph.add_edge(dep_id, cmd_id)
+                    elif dep.startswith('@'):
+                        # Task reference - find most recent matching task
+                        task_name = dep[1:]
+                        for j in range(i-1, -1, -1):
+                            prev_cmd = commands[j]
+                            if (prev_cmd['type'] == 'task' and 
+                                prev_cmd.get('attributes', {}).get('name') == task_name):
+                                prev_id = f"cmd_{j}"
+                                graph.add_edge(prev_id, cmd_id)
+                                break
+        
+        # Check for cycles
+        try:
+            ordered = list(nx.topological_sort(graph))
+            return [command_map[cmd_id] for cmd_id in ordered]
+        except nx.NetworkXUnfeasible:
+            logger.error("Circular dependency detected in commands")
+            return commands  # Return original order if cycle detected
 
     def _is_conversation_complete(self, response: str) -> bool:
         """Check if conversation is complete"""

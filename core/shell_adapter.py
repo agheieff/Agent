@@ -253,6 +253,20 @@ class ShellTranspiler:
         """Clear the command conversion cache"""
         self.command_cache.clear()
 
+class NuOutputParser:
+    @staticmethod
+    def parse_table(output: str) -> List[Dict]:
+        try:
+            # Use Nu's native JSON output
+            return json.loads(output.replace('\n', ''))
+        except json.JSONDecodeError:
+            logger.error(f"Failed parsing Nu table output: {output}")
+            return [{"error": "Failed parsing Nu table"}]
+
+    @staticmethod
+    def is_table_output(output: str) -> bool:
+        return output.strip().startswith('[') and output.strip().endswith(']')
+
 class ShellAdapter:
     """Hybrid shell adapter supporting both Nu shell and Bash"""
     
@@ -261,62 +275,44 @@ class ShellAdapter:
         self.transpiler = ShellTranspiler()
         self.command_history: List[Dict] = []
         self.working_dir = Path.cwd()
+        self.nu_parser = NuOutputParser()
         
     async def execute(self, command: str) -> Tuple[str, str, int]:
         """Execute command in preferred shell with automatic transpilation"""
         try:
             # Prepare command based on shell preference
             if self.preferred_shell == ShellType.NU:
-                if self._is_bash_specific(command):
-                    conversion = self.transpiler.to_nu(command)
-                    if conversion.success:
-                        exec_command = conversion.converted_command
-                        shell = 'nu'
-                    else:
-                        exec_command = command
-                        shell = 'bash'
-                else:
-                    exec_command = command
-                    shell = 'nu'
-            else:
-                if self._is_nu_specific(command):
-                    conversion = self.transpiler.to_bash(command)
-                    if conversion.success:
-                        exec_command = conversion.converted_command
-                        shell = 'bash'
-                    else:
-                        exec_command = command
-                        shell = 'nu'
-                else:
-                    exec_command = command
-                    shell = 'bash'
-            
+                if not command.endswith('--json') and not command.endswith('| to json'):
+                    command += " | to json"  # Force structured output
+                    
             # Execute command
             process = await asyncio.create_subprocess_shell(
-                exec_command,
+                command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.working_dir),
-                env={'SHELL': f'/bin/{shell}'}
+                env={'SHELL': f'/bin/{self.preferred_shell.value}'}
             )
             
             stdout, stderr = await process.communicate()
+            stdout_str = stdout.decode() if stdout else ""
+            stderr_str = stderr.decode() if stderr else ""
+            
+            # Parse Nu output if applicable
+            if self.preferred_shell == ShellType.NU and self.nu_parser.is_table_output(stdout_str):
+                parsed_output = self.nu_parser.parse_table(stdout_str)
+                stdout_str = json.dumps(parsed_output, indent=2)
             
             # Store command history
             self.command_history.append({
                 'command': command,
-                'shell': shell,
-                'executed_as': exec_command,
-                'stdout': stdout.decode() if stdout else "",
-                'stderr': stderr.decode() if stderr else "",
+                'shell': self.preferred_shell.value,
+                'stdout': stdout_str,
+                'stderr': stderr_str,
                 'code': process.returncode
             })
             
-            return (
-                stdout.decode() if stdout else "",
-                stderr.decode() if stderr else "",
-                process.returncode
-            )
+            return stdout_str, stderr_str, process.returncode
             
         except Exception as e:
             error_msg = f"Error executing command: {str(e)}"

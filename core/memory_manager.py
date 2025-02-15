@@ -175,6 +175,60 @@ class MemoryGraph:
             for node_id in related
         ]
 
+class TemporalContext:
+    def __init__(self, memory_graph):
+        self.graph = memory_graph
+        self.time_windows = {
+            'recent': 24 * 3600,  # 24 hours
+            'day': 24 * 3600,
+            'week': 7 * 24 * 3600,
+            'month': 30 * 24 * 3600
+        }
+        
+    def get_temporal_context(self, window: str = 'recent') -> List[Dict]:
+        """Get nodes within a specific time window"""
+        if window not in self.time_windows:
+            raise ValueError(f"Invalid time window: {window}")
+            
+        cutoff = time.time() - self.time_windows[window]
+        return [
+            node for node in self.graph.nodes.values()
+            if node.get('last_accessed', 0) > cutoff
+        ]
+        
+    def get_temporal_relations(self, node_id: str, window: str = 'recent') -> List[Dict]:
+        """Get temporally related nodes"""
+        if window not in self.time_windows:
+            raise ValueError(f"Invalid time window: {window}")
+            
+        cutoff = time.time() - self.time_windows[window]
+        node = self.graph.nodes.get(node_id)
+        if not node:
+            return []
+            
+        node_time = node.get('last_accessed', 0)
+        related = []
+        
+        for other_id, other in self.graph.nodes.items():
+            if other_id == node_id:
+                continue
+                
+            other_time = other.get('last_accessed', 0)
+            if abs(other_time - node_time) <= self.time_windows[window]:
+                related.append(other)
+                
+        return related
+        
+    def get_temporal_sequence(self, start_time: float, end_time: float) -> List[Dict]:
+        """Get sequence of nodes between timestamps"""
+        return sorted(
+            [
+                node for node in self.graph.nodes.values()
+                if start_time <= node.get('last_accessed', 0) <= end_time
+            ],
+            key=lambda x: x.get('last_accessed', 0)
+        )
+
 class MemoryManager:
     """Enhanced memory manager with graph-based storage and hierarchical organization"""
     
@@ -188,6 +242,7 @@ class MemoryManager:
             
         self.graph = MemoryGraph(self.base_path)
         self.hierarchy = MemoryHierarchy(self.base_path)
+        self.temporal = TemporalContext(self.graph)
         
     def save_document(self, title: str, content: str, tags: List[str] = None,
                      metadata: Dict = None, category_id: Optional[str] = None) -> str:
@@ -373,3 +428,15 @@ class MemoryManager:
         except Exception as e:
             logger.error(f"Error getting node path: {e}")
             return []
+
+    def get_recent_context(self, hours: int = 24) -> List[Dict]:
+        """Get recently accessed nodes"""
+        return self.temporal.get_temporal_context(f"{hours}h")
+        
+    def get_related_in_timeframe(self, node_id: str, hours: int = 24) -> List[Dict]:
+        """Get nodes temporally related to the given node"""
+        return self.temporal.get_temporal_relations(node_id, f"{hours}h")
+        
+    def get_activity_sequence(self, start_time: float, end_time: float) -> List[Dict]:
+        """Get sequence of memory activity between timestamps"""
+        return self.temporal.get_temporal_sequence(start_time, end_time)

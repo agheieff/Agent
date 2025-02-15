@@ -53,25 +53,30 @@ class CommandExtractor:
     """Extracts commands from LLM responses using XML tags"""
     
     COMMAND_TAGS = ['bash', 'python']
+    THINKING_TAG = 'thinking'
     
     @staticmethod
     def extract_commands(response: str) -> List[Tuple[str, str]]:
-        """
-        Extract commands from response text using XML tags
-        Returns a list of (command_type, command) tuples
-        """
+        """Extract commands from response"""
         commands = []
-        
         for tag in CommandExtractor.COMMAND_TAGS:
             pattern = f"<{tag}>(.*?)</{tag}>"
             matches = re.finditer(pattern, response, re.DOTALL)
-            
             for match in matches:
                 command = match.group(1).strip()
                 if command:
                     commands.append((tag, command))
         
         return commands
+    
+    @staticmethod
+    def extract_thinking(response: str) -> List[str]:
+        """Extract thinking blocks from response"""
+        pattern = f"<{CommandExtractor.THINKING_TAG}>(.*?)</{CommandExtractor.THINKING_TAG}>"
+        matches = re.finditer(pattern, response, re.DOTALL)
+        return [
+            match.group(1).strip() for match in matches
+        ]
 
     @staticmethod
     def extract_heredocs(response: str) -> List[Dict[str, str]]:
@@ -218,10 +223,20 @@ class AutonomousAgent:
         except Exception as e:
             logger.error(f"Error saving session summary: {e}")
 
-    def print_response(self, content: str):
+    def _print_response(self, content: str):
         """Print agent's response with clear formatting"""
         print("\n=== CLAUDE ===")
         print(content)
+        
+        # Extract and store thinking process
+        thinking_blocks = self.command_extractor.extract_thinking(content)
+        if thinking_blocks:
+            self.memory_manager.save_document(
+                "reasoning",
+                "\n\n".join(thinking_blocks),
+                tags=["chain_of_thought"]
+            )
+            
         print("=============")
 
     async def process_heredocs(self, response: str) -> None:

@@ -31,7 +31,7 @@ command2
 
 ## Persistent Memory Protocol
 1. Document EVERY action in memory/docs/YYYY-MM-DD_HH-MM-SS_[action].md
-2. Maintain /memory/MAIN.md as root documentation
+2. Maintain memory/MAIN.md as root documentation
 3. Use vector search for recall:
     <bash>cat /memory/vector_index/mapping.csv</bash>
 

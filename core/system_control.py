@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime
 from .interactive_handler import InteractiveCommandHandler, InteractionPattern
 from .memory_manager import MemoryManager
+from .shell_adapter import ShellAdapter
 
 UNSAFE_COMMANDS = {
     "rm -rf /": "FULL_SYSTEM_WIPE",
@@ -25,6 +26,7 @@ class BashExecutor(CommandExecutor):
     def __init__(self, interactive_handler: InteractiveCommandHandler, working_dir: Optional[Path] = None):
         self.interactive_handler = interactive_handler
         self.working_dir = working_dir or Path.cwd()
+        self.shell_adapter = ShellAdapter(preferred_shell='bash')
 
     async def execute(self, command: str) -> Tuple[str, str, int]:
         try:
@@ -36,16 +38,8 @@ class BashExecutor(CommandExecutor):
                     custom_patterns=custom_patterns
                 )
 
-            # Standard command execution
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.working_dir)
-            )
-            
-            stdout, stderr = await process.communicate()
-            return stdout.decode() if stdout else "", stderr.decode() if stderr else "", process.returncode
+            # Use shell adapter for command execution
+            return await self.shell_adapter.execute(command)
 
         except Exception as e:
             error_msg = f"Error executing bash command: {str(e)}"
@@ -79,6 +73,31 @@ class PythonExecutor(CommandExecutor):
         except Exception as e:
             return "", str(e), 1
 
+class NuShellExecutor(CommandExecutor):
+    """Handles Nu shell command execution"""
+    def __init__(self, interactive_handler: InteractiveCommandHandler, working_dir: Optional[Path] = None):
+        self.interactive_handler = interactive_handler
+        self.working_dir = working_dir or Path.cwd()
+        self.shell_adapter = ShellAdapter(preferred_shell='nu')
+
+    async def execute(self, command: str) -> Tuple[str, str, int]:
+        try:
+            # Use interactive handler for interactive commands
+            if SystemControl._is_interactive_command(command):
+                custom_patterns = SystemControl._get_custom_patterns(command)
+                return await self.interactive_handler.run_interactive_command(
+                    command,
+                    custom_patterns=custom_patterns
+                )
+
+            # Use shell adapter for command execution
+            return await self.shell_adapter.execute(command)
+
+        except Exception as e:
+            error_msg = f"Error executing nu shell command: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return "", error_msg, 1
+
 class SystemControl:
     """Enhanced system control with support for multiple command types"""
     
@@ -101,15 +120,17 @@ class SystemControl:
         'more': []
     }
 
-    def __init__(self, user: str = None, working_dir: Optional[Path] = None):
+    def __init__(self, user: str = None, working_dir: Optional[Path] = None, preferred_shell: str = 'nu'):
         self.memory_manager = MemoryManager()
         self.working_dir = working_dir or Path.cwd()
         self.interactive_handler = InteractiveCommandHandler()
+        self.preferred_shell = preferred_shell
         
         # Initialize executors
         self.executors = {
             'bash': BashExecutor(self.interactive_handler, self.working_dir),
             'python': PythonExecutor(),
+            'nu': NuShellExecutor(self.interactive_handler, self.working_dir)
         }
 
     @staticmethod
@@ -166,7 +187,6 @@ class SystemControl:
         
         return patterns
 
-
     def _sanitize_command(self, command: str) -> str:
         """Log warnings instead of blocking"""
         for pattern, danger_type in UNSAFE_COMMANDS.items():
@@ -180,6 +200,10 @@ class SystemControl:
 
     async def execute_command(self, command_type: str, command: str) -> Tuple[str, str, int]:
         """Execute a command of the specified type"""
+        # Default to preferred shell for shell commands
+        if command_type.lower() in ['bash', 'shell', 'nu']:
+            command_type = self.preferred_shell
+            
         executor = self.executors.get(command_type.lower())
         if not executor:
             return "", f"Unsupported command type: {command_type}", 1
@@ -206,5 +230,7 @@ class SystemControl:
 
     def cleanup(self):
         """Cleanup resources"""
-        # Add any cleanup logic here
-        pass
+        # Add cleanup for shell adapters
+        for executor in self.executors.values():
+            if hasattr(executor, 'shell_adapter'):
+                executor.shell_adapter.clear_history()

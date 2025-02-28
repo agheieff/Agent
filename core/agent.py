@@ -103,10 +103,14 @@ class CommandExtractor:
 
     @staticmethod
     def is_exit_command(command_type: str, command: str) -> bool:
-        """Check if command is an exit command"""
-        if command_type == 'bash':
-            return command.strip().lower() in ['exit', 'quit', 'bye']
-        return False
+        """
+        Check if command is an exit command. 
+        We'll accept "exit", "quit", "bye", "done" (bash or python).
+        """
+        lower_cmd = command.strip().lower()
+        exit_cmds = {"exit", "quit", "bye", "done"}
+        return lower_cmd in exit_cmds
+
 
 class AutonomousAgent:
     def __init__(
@@ -144,25 +148,133 @@ class AutonomousAgent:
         self.heartbeat_task = None
         self.test_mode = test_mode
 
-        # New: Local conversation history for archiving
+        # Local conversation history for multi-turn dialogues
+        # Each element is a dict like: {"role": "user"/"assistant"/"system", "content": "..."}
         self.local_conversation_history: List[Dict[str, str]] = []
 
     async def run(self, initial_prompt: str, system_prompt: str) -> None:
-        """Run agent with enhanced error handling"""
+        """
+        Run the agent in a multi-turn conversation loop:
+        1. We create a session
+        2. Provide system prompt + initial prompt
+        3. The agent responds with commands
+        4. We execute them and return the output as the next user message
+        5. Repeat until the agent triggers an exit command or completes the session
+        """
         try:
-            print("\nStarting agent session...")
-            print("\nInitializing...")
-            
-            # Start heartbeat task
+            print("\nInitializing new session...")
+            # Start heartbeat task for periodic state saving
             self.heartbeat_task = asyncio.create_task(self.heartbeat())
-            
-            await self.think_and_act(initial_prompt, system_prompt)
-            
+
+            # Start a new session in session manager
+            # Typically, you can specify shell, environment, etc. For now, keep it minimal.
+            env = dict(os.environ)
+            self.session_manager.start_session(
+                shell_preference="bash",
+                working_directory=str(Path.cwd()),
+                environment=env
+            )
+
+            # Add system message
+            system_msg = {"role": "system", "content": system_prompt}
+            self.local_conversation_history.append(system_msg)
+
+            # Add initial user message (the "task" given)
+            user_msg = {"role": "user", "content": initial_prompt}
+            self.local_conversation_history.append(user_msg)
+
+            # Multi-turn loop
+            while not self.should_exit:
+                # Get LLM response (assistant message)
+                response = await self.llm.get_response(
+                    prompt=None,
+                    system=None,
+                    conversation_history=self.local_conversation_history,
+                    tool_usage=False
+                )
+                if not response:
+                    logger.warning("No response from LLM.")
+                    break
+
+                # Store assistant message
+                assistant_msg = {"role": "assistant", "content": response}
+                self.local_conversation_history.append(assistant_msg)
+                self._print_response(response)
+
+                # Extract and store chain of thought (thinking)
+                thinking_blocks = self.command_extractor.extract_thinking(response)
+                if thinking_blocks:
+                    self.memory_manager.save_document(
+                        "reasoning",
+                        "\n\n".join(thinking_blocks),
+                        tags=["chain_of_thought"]
+                    )
+
+                # Process potential heredocs
+                await self.process_heredocs(response)
+
+                # Extract commands
+                commands = self.command_extractor.extract_commands(response)
+                if not commands:
+                    # If no commands, check if there's an explicit exit or session end
+                    # We can also scan the raw text for "session_end" or a stand-alone "done"
+                    # But for now let's see if there's some other condition
+                    if "session_end" in response.lower():
+                        print("Agent declared session end.")
+                        self.should_exit = True
+                        break
+                    # Otherwise continue to next turn
+                    # Provide a minimal output to simulate "OK" from environment
+                    next_user_msg = {
+                        "role": "user",
+                        "content": "(No commands found - continuing...)"
+                    }
+                    self.local_conversation_history.append(next_user_msg)
+                    continue
+
+                # If there are commands, let's execute them
+                all_outputs = []
+                for cmd_type, cmd_content in commands:
+                    if self.command_extractor.is_exit_command(cmd_type, cmd_content):
+                        print("Agent used an exit command. Ending session.")
+                        self.should_exit = True
+                        break
+
+                    # Actually execute the commands
+                    if self.test_mode:
+                        # In test mode, we don't really execute
+                        output = f"[TEST MODE] Would have executed {cmd_type} command: {cmd_content}"
+                        print(output)
+                        all_outputs.append(output)
+                        # Log to memory manager
+                        self.memory_manager.add_command_to_history(cmd_content, cmd_type, success=True)
+                    else:
+                        stdout, stderr, code = await self.system_control.execute_command(cmd_type, cmd_content)
+                        # Save command usage
+                        self.memory_manager.add_command_to_history(cmd_content, cmd_type, code == 0)
+                        # Merge outputs
+                        if code != 0:
+                            logger.warning(f"Command failed with exit code {code}")
+                        combined_output = f"STDOUT:\n{stdout}\nSTDERR:\n{stderr}\nEXIT CODE: {code}"
+                        all_outputs.append(combined_output)
+
+                    if self.should_exit:
+                        break
+
+                # Provide the combined output as the next 'user' message for the agent
+                if all_outputs and not self.should_exit:
+                    combined_message = "\n\n".join(all_outputs)
+                    next_user_msg = {
+                        "role": "user",
+                        "content": combined_message
+                    }
+                    self.local_conversation_history.append(next_user_msg)
+
             if self.should_exit:
-                print("\nSession ended by agent")
+                print("\nSession ended by agent.")
             else:
-                print("\nSession completed naturally")
-                
+                print("\nSession completed naturally or stopped by empty response.")
+
         except Exception as e:
             logger.error(f"Run failed: {e}")
             raise
@@ -175,6 +287,19 @@ class AutonomousAgent:
                 except asyncio.CancelledError:
                     pass
             self.cleanup()
+
+    async def process_heredocs(self, response: str) -> None:
+        """Process and save heredoc content to files"""
+        heredocs = self.command_extractor.extract_heredocs(response)
+        for doc in heredocs:
+            try:
+                filepath = Path(doc['filename'])
+                filepath.parent.mkdir(parents=True, exist_ok=True)
+                with open(filepath, 'w') as f:
+                    f.write(doc['content'])
+                logger.info(f"Created file: {filepath}")
+            except Exception as e:
+                logger.error(f"Error creating file {doc['filename']}: {e}")
 
     def _setup_storage(self):
         """Ensure required directories exist under ./memory/"""
@@ -224,89 +349,7 @@ class AutonomousAgent:
         """Print agent's response with clear formatting"""
         print("\n=== LLM RESPONSE ===")
         print(content)
-        
-        thinking_blocks = self.command_extractor.extract_thinking(content)
-        if thinking_blocks:
-            self.memory_manager.save_document(
-                "reasoning",
-                "\n\n".join(thinking_blocks),
-                tags=["chain_of_thought"]
-            )
-            
         print("=====================")
-
-    async def process_heredocs(self, response: str) -> None:
-        """Process and save heredoc content to files"""
-        heredocs = self.command_extractor.extract_heredocs(response)
-        for doc in heredocs:
-            try:
-                filepath = Path(doc['filename'])
-                filepath.parent.mkdir(parents=True, exist_ok=True)
-                with open(filepath, 'w') as f:
-                    f.write(doc['content'])
-                logger.info(f"Created file: {filepath}")
-            except Exception as e:
-                logger.error(f"Error creating file {doc['filename']}: {e}")
-
-    async def think_and_act(self, initial_prompt: str, system_prompt: str) -> None:
-        """
-        Build the conversation with a single system message that includes both
-        the temporal context and the user-supplied system_prompt, then a user message.
-        Store messages in local_conversation_history for archiving.
-        """
-        messages = []
-        
-        temporal_context = self.memory_manager.get_execution_context()
-        combined_system = f"TEMPORAL CONTEXT:\n{temporal_context}\n\n{system_prompt}"
-        if self.test_mode:
-            combined_system += "\n## TEST MODE ENABLED: Commands will NOT actually execute."
-        
-        system_msg = {"role": "system", "content": combined_system}
-        user_msg = {"role": "user", "content": initial_prompt}
-        
-        # Append to local conversation history for archiving
-        self.local_conversation_history.append(system_msg)
-        self.local_conversation_history.append(user_msg)
-        
-        messages.append(system_msg)
-        messages.append(user_msg)
-        
-        response = await self.llm.get_response(
-            prompt=None,
-            system=None,
-            conversation_history=messages,
-            tool_usage=False
-        )
-        if not response:
-            logger.warning("No response from LLM.")
-            return
-
-        # Save the assistant response in the local conversation history
-        self.local_conversation_history.append({"role": "assistant", "content": response})
-
-        self._print_response(response)
-
-        commands = self.command_extractor.extract_commands(response)
-        await self.process_heredocs(response)
-
-        for cmd_type, cmd_content in commands:
-            if self.command_extractor.is_exit_command(cmd_type, cmd_content):
-                self.should_exit = True
-                break
-
-            if self.test_mode:
-                print(f"[TEST MODE] Would have executed {cmd_type} command: {cmd_content}")
-                continue
-
-            stdout, stderr, code = await self.system_control.execute_command(cmd_type, cmd_content)
-            self.memory_manager.add_command_to_history(cmd_content, cmd_type, code == 0)
-
-            if code != 0:
-                logger.warning(f"Command failed with exit code {code}")
-                break
-
-        # Archive the session conversation after processing commands
-        self.archive_session()
 
     def archive_session(self):
         """
@@ -347,6 +390,8 @@ class AutonomousAgent:
             with open(history_path, 'w') as f:
                 json.dump(self.command_history, f, indent=2)
             self.system_control.cleanup()
+            # Archive the final session conversation
+            self.archive_session()
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
 
@@ -357,7 +402,7 @@ class AutonomousAgent:
             await asyncio.sleep(300)
 
     def _save_state(self):
-        """Save critical state information"""
+        """Save critical state information periodically"""
         state = {
             "tasks": self.task_manager.active_tasks,
             "environment": dict(os.environ),
@@ -367,7 +412,7 @@ class AutonomousAgent:
         self.memory_manager.save_document("system_state", json.dumps(state))
 
     async def compress_context(self, messages: List[Dict]) -> List[Dict]:
-        """Keep conversation under ~4k tokens using vector search (placeholder)"""
+        """Keep conversation under ~4k tokens (placeholder for possible context compression)"""
         if len(str(messages)) > 3500:
             relevant_memories = self.memory_manager.search_memory(
                 "Recent important system changes"

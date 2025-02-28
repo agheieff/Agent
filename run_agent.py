@@ -99,7 +99,7 @@ async def main():
             print(agent.last_session_summary)
             print("-" * 40)
         
-        print("\nStarting agent...\n")
+        print("\nStarting multi-turn session...\n")
         system_prompt = load_system_prompt(str(system_prompt_path))
 
         # If test mode, add note to the system prompt as well

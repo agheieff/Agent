@@ -194,7 +194,6 @@ class CommandManager:
                     timeout=command.timeout
                 )
                 
-                # Save execution result to memory
                 self.memory_manager.save_document(
                     f"command_execution_{command.id}_{datetime.now().isoformat()}",
                     f"Command: {command.command}\nType: {command.command_type}\n"
@@ -211,7 +210,7 @@ class CommandManager:
                     
                 if attempt < command.retry_count:
                     logger.warning(f"Command {command.id} failed, retrying...")
-                    await asyncio.sleep(1)  # Wait before retry
+                    await asyncio.sleep(1)
                     
             except asyncio.TimeoutError:
                 logger.error(f"Command {command.id} timed out")
@@ -245,4 +244,4 @@ class CommandManager:
                 node in sequence.failed and sequence.graph.nodes[node]['command'].required
                 for node in sequence.graph.nodes
             )
-        } 
+        }

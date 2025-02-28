@@ -64,4 +64,7 @@ DEP_END : '</dependencies>';
 
 NAME : [a-zA-Z_][a-zA-Z0-9_]*;
 STRING : '"' (~["])* '"';
-WS : [ \t\r\n]+ -> skip; 
+WS : [ \t\r\n]+ -> skip;
+
+ID_REF : '#' [a-zA-Z0-9_]+;
+TASK_REF : '@' [a-zA-Z0-9_]+;

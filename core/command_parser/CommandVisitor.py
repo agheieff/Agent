@@ -212,4 +212,6 @@ class CommandVisitor(CommandParser.CommandVisitorImpl):
 
     def visitDescription_block(self, ctx: CommandParser.Description_blockContext) -> str:
         """Visit a description block and return its content"""
-        return ctx.CONTENT().getText().strip() 
+        # Adjusted to match the grammar tokens properly
+        content = ''.join([t.getText() for t in ctx.children])
+        return content.strip("<description>").strip("</description>").strip()

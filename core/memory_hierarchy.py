@@ -1,11 +1,11 @@
 import logging
-from typing import Dict, List, Optional, Set, Any, Union
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
-from datetime import datetime
+import time
 import networkx as nx
 from pathlib import Path
 import json
-import time
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -71,26 +71,17 @@ class MemoryHierarchy:
         self._load_hierarchy()
         
     def _load_hierarchy(self):
-        """Load hierarchy from disk"""
         try:
-            # Load categories
             cat_file = self.storage_path / "categories.json"
             if cat_file.exists():
                 with open(cat_file, 'r') as f:
                     data = json.load(f)
                     for cat_data in data:
                         category = MemoryCategory.from_dict(cat_data)
-                        self.category_graph.add_node(
-                            category.id,
-                            category=category
-                        )
+                        self.category_graph.add_node(category.id, category=category)
                         if category.parent_id:
-                            self.category_graph.add_edge(
-                                category.parent_id,
-                                category.id
-                            )
+                            self.category_graph.add_edge(category.parent_id, category.id)
                             
-            # Load relations
             rel_file = self.storage_path / "relations.json"
             if rel_file.exists():
                 with open(rel_file, 'r') as f:
@@ -107,9 +98,7 @@ class MemoryHierarchy:
             logger.error(f"Error loading hierarchy: {e}")
             
     def _save_hierarchy(self):
-        """Save hierarchy to disk"""
         try:
-            # Save categories
             categories = [
                 self.category_graph.nodes[node]['category'].to_dict()
                 for node in self.category_graph.nodes
@@ -117,21 +106,18 @@ class MemoryHierarchy:
             with open(self.storage_path / "categories.json", 'w') as f:
                 json.dump(categories, f, indent=2)
                 
-            # Save relations
             relations = [
                 self.relation_graph.edges[edge]['relation'].to_dict()
                 for edge in self.relation_graph.edges
             ]
             with open(self.storage_path / "relations.json", 'w') as f:
                 json.dump(relations, f, indent=2)
-                
         except Exception as e:
             logger.error(f"Error saving hierarchy: {e}")
             
     def add_category(self, name: str, description: str,
-                    parent_id: Optional[str] = None,
-                    attributes: Dict[str, Any] = None) -> str:
-        """Add a new category to the hierarchy"""
+                     parent_id: Optional[str] = None,
+                     attributes: Dict[str, Any] = None) -> str:
         category = MemoryCategory(
             id=f"cat_{int(time.time())}",
             name=name,
@@ -139,19 +125,17 @@ class MemoryHierarchy:
             parent_id=parent_id,
             attributes=attributes or {}
         )
-        
         self.category_graph.add_node(category.id, category=category)
         if parent_id and parent_id in self.category_graph:
             self.category_graph.add_edge(parent_id, category.id)
-            
         self._save_hierarchy()
         return category.id
         
     def add_relation(self, source_id: str, target_id: str,
-                    relation_type: str, strength: float = 1.0,
-                    attributes: Dict[str, Any] = None) -> bool:
-        """Add a relationship between nodes"""
+                     relation_type: str, strength: float = 1.0,
+                     attributes: Dict[str, Any] = None) -> bool:
         if source_id not in self.relation_graph or target_id not in self.relation_graph:
+            # Could add a check or auto-add, but here we just fail
             return False
             
         relation = MemoryRelation(
@@ -161,99 +145,68 @@ class MemoryHierarchy:
             strength=strength,
             attributes=attributes or {}
         )
-        
-        self.relation_graph.add_edge(
-            source_id,
-            target_id,
-            relation=relation
-        )
-        
+        self.relation_graph.add_edge(source_id, target_id, relation=relation)
         self._save_hierarchy()
         return True
         
     def get_category(self, category_id: str) -> Optional[MemoryCategory]:
-        """Get a category by ID"""
         if category_id in self.category_graph:
             return self.category_graph.nodes[category_id]['category']
         return None
         
-    def get_subcategories(self, category_id: str,
-                         recursive: bool = False) -> List[MemoryCategory]:
-        """Get subcategories of a category"""
+    def get_subcategories(self, category_id: str, recursive: bool = False) -> List[MemoryCategory]:
         if category_id not in self.category_graph:
             return []
-            
         if recursive:
             descendants = nx.descendants(self.category_graph, category_id)
-            return [
-                self.category_graph.nodes[node]['category']
-                for node in descendants
-            ]
+            return [self.category_graph.nodes[node]['category'] for node in descendants]
         else:
-            return [
-                self.category_graph.nodes[succ]['category']
-                for succ in self.category_graph.successors(category_id)
-            ]
+            return [self.category_graph.nodes[succ]['category'] for succ in self.category_graph.successors(category_id)]
             
     def get_category_path(self, category_id: str) -> List[MemoryCategory]:
-        """Get path from root to category"""
         if category_id not in self.category_graph:
             return []
-            
         path = []
         current = category_id
         while current is not None:
             category = self.category_graph.nodes[current]['category']
             path.append(category)
             current = category.parent_id
-            
         return list(reversed(path))
         
     def get_related_nodes(self, node_id: str,
-                         relation_types: Optional[List[str]] = None,
-                         min_strength: float = 0.0) -> List[Dict]:
-        """Get nodes related to a given node"""
+                          relation_types: Optional[List[str]] = None,
+                          min_strength: float = 0.0) -> List[Dict]:
         if node_id not in self.relation_graph:
             return []
-            
         related = []
         for neighbor in self.relation_graph.neighbors(node_id):
             relation = self.relation_graph.edges[node_id, neighbor]['relation']
-            
             if relation_types and relation.relation_type not in relation_types:
                 continue
-                
             if relation.strength < min_strength:
                 continue
-                
             related.append({
                 'node_id': neighbor,
                 'relation': relation.to_dict()
             })
-            
         return related
         
     def strengthen_relation(self, source_id: str, target_id: str,
-                          amount: float = 0.1) -> bool:
-        """Strengthen a relationship between nodes"""
+                            amount: float = 0.1) -> bool:
         if not self.relation_graph.has_edge(source_id, target_id):
             return False
-            
         relation = self.relation_graph.edges[source_id, target_id]['relation']
         relation.strength = min(1.0, relation.strength + amount)
         relation.last_accessed = time.time()
-        
         self._save_hierarchy()
         return True
         
     def get_category_stats(self, category_id: str) -> Dict[str, Any]:
-        """Get statistics for a category"""
         if category_id not in self.category_graph:
             return {}
-            
         category = self.category_graph.nodes[category_id]['category']
         subcats = self.get_subcategories(category_id, recursive=True)
-        
         return {
             'name': category.name,
             'total_subcategories': len(subcats),
@@ -264,20 +217,15 @@ class MemoryHierarchy:
         }
         
     def merge_categories(self, source_id: str, target_id: str) -> bool:
-        """Merge source category into target category"""
         if (source_id not in self.category_graph or
             target_id not in self.category_graph):
             return False
-            
         try:
-            # Move all subcategories
             for succ in list(self.category_graph.successors(source_id)):
                 self.category_graph.remove_edge(source_id, succ)
                 self.category_graph.add_edge(target_id, succ)
                 succ_cat = self.category_graph.nodes[succ]['category']
                 succ_cat.parent_id = target_id
-                
-            # Move all relations
             for edge in list(self.relation_graph.edges(source_id)):
                 relation = self.relation_graph.edges[edge]['relation']
                 if edge[0] == source_id:
@@ -286,20 +234,11 @@ class MemoryHierarchy:
                 else:
                     new_source = edge[0]
                     new_target = target_id
-                    
                 self.relation_graph.remove_edge(*edge)
-                self.relation_graph.add_edge(
-                    new_source,
-                    new_target,
-                    relation=relation
-                )
-                
-            # Remove source category
+                self.relation_graph.add_edge(new_source, new_target, relation=relation)
             self.category_graph.remove_node(source_id)
-            
             self._save_hierarchy()
             return True
-            
         except Exception as e:
             logger.error(f"Error merging categories: {e}")
-            return False 
+            return False

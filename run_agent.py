@@ -3,8 +3,8 @@ import os
 import sys
 import argparse
 from pathlib import Path
-from typing import Optional
 from dotenv import load_dotenv
+
 from core.agent import AutonomousAgent
 
 def get_model_choice() -> str:
@@ -29,25 +29,20 @@ def get_initial_prompt() -> str:
     print("\nEnter your prompt (press Enter twice to finish):")
     lines = []
     last_line_empty = False
-    
     while True:
         try:
             line = input()
-            if not line and last_line_empty:  # Two empty lines in a row
+            if not line and last_line_empty:
                 break
             last_line_empty = not line
             lines.append(line)
         except EOFError:
             break
-    
-    # Remove the last empty line if it exists
     if lines and not lines[-1]:
         lines.pop()
-    
     return '\n'.join(lines)
 
 def load_system_prompt(path: str) -> str:
-    """Load system prompt from file"""
     try:
         with open(path, 'r') as f:
             return f.read().strip()
@@ -59,47 +54,45 @@ def load_system_prompt(path: str) -> str:
 
 async def main():
     load_dotenv()
-    
-    # Initialize system prompt path
+
+    parser = argparse.ArgumentParser(description="Run the Autonomous Agent.")
+    parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands executed).")
+    args = parser.parse_args()
+    test_mode = args.test
+
     system_prompt_path = Path("config/system_prompt.md")
-    if not system_prompt_path.is_absolute():
-        system_prompt_path = Path.cwd() / system_prompt_path
-    
-    # Create system prompt file if missing
     system_prompt_path.parent.mkdir(parents=True, exist_ok=True)
     if not system_prompt_path.exists():
-        default_prompt = Path(__file__).parent / "system_prompt.md"
         with open(system_prompt_path, 'w') as f:
-            f.write(default_prompt.read_text())
+            f.write("# Default system prompt\n")
 
-    # Get model choice interactively
     model = get_model_choice()
     
-    # Get API key
     api_key = os.getenv(f"{model.upper()}_API_KEY")
     if not api_key:
-        print(f"Error: {model.upper()}_API_KEY not found in environment")
-        print("Please set it in your .env file or environment variables")
+        print(f"Error: {model.upper()}_API_KEY not found in environment.")
+        print("Please set it in your .env file or environment variables.")
         sys.exit(1)
     
-    # Get initial prompt
     initial_prompt = get_initial_prompt()
     if not initial_prompt.strip():
-        print("Error: Empty prompt")
+        print("Error: Empty prompt.")
         sys.exit(1)
 
-    # Show configuration
     print("\nAgent Configuration:")
     print(f"- Model: {model}")
     print(f"- System Prompt: {system_prompt_path}")
     print(f"- Initial Prompt Length: {len(initial_prompt)} characters")
-    
+    print(f"- Test Mode: {'Enabled' if test_mode else 'Disabled'}")
+
     try:
-        # Initialize and run agent
         print("\nInitializing agent...")
-        agent = AutonomousAgent(api_key=api_key, model=model)
+        agent = AutonomousAgent(
+            api_key=api_key,
+            model=model,
+            test_mode=test_mode
+        )
         
-        # Show last session summary if available
         if agent.last_session_summary:
             print("\nLast Session Summary:")
             print("-" * 40)
@@ -108,6 +101,11 @@ async def main():
         
         print("\nStarting agent...\n")
         system_prompt = load_system_prompt(str(system_prompt_path))
+
+        # If test mode, add note to the system prompt as well
+        if test_mode:
+            system_prompt = "## TEST MODE: Commands are NOT executed.\n\n" + system_prompt
+
         await agent.run(initial_prompt, system_prompt)
         
     except KeyboardInterrupt:

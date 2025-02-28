@@ -6,25 +6,15 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
+
 from core.llm_client import get_llm_client
 from core.memory_manager import MemoryManager
 from core.system_control import SystemControl
 from core.task_manager import TaskManager
 from core.memory_preloader import MemoryPreloader
+from core.session_manager import SessionManager
 import networkx as nx
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('agent.log'),
-        logging.StreamHandler()
-    ]
-)
-
-console_handler = logging.getLogger().handlers[1]
-console_handler.setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 class CommandResult:
@@ -66,7 +56,6 @@ class CommandExtractor:
                 command = match.group(1).strip()
                 if command:
                     commands.append((tag, command))
-        
         return commands
     
     @staticmethod
@@ -122,33 +111,41 @@ class CommandExtractor:
         return False
 
 class AutonomousAgent:
-    def __init__(self, memory_manager, session_manager, api_key: str, model: str = "deepseek"):
+    def __init__(
+        self,
+        memory_manager: MemoryManager = None,
+        session_manager: SessionManager = None,
+        api_key: str = "",
+        model: str = "deepseek",
+        test_mode: bool = False
+    ):
         if not api_key:
             raise ValueError("API key required")
 
         self.memory_path = Path("memory")
-        self.memory_manager = memory_manager
+        self.memory_manager = memory_manager or MemoryManager()
         self.system_control = SystemControl()
         self.task_manager = TaskManager(self.memory_path)
-        self.session_manager = session_manager
-        self.preloader = MemoryPreloader(memory_manager)
+        self.session_manager = session_manager or SessionManager(self.memory_path, self.memory_manager)
+        self.preloader = MemoryPreloader(self.memory_manager)
         
-        # Then check for first-run setup
+        # If it's first run or memory not seeded, seed it
         if not (self.memory_path / "vector_index").exists():
             self.memory_manager.save_document(
                 "system_guide",
-                Path("config/system_prompt.md").read_text()  # Updated path
+                Path("config/system_prompt.md").read_text()
             )
 
-        # Rest of initialization
         self.llm = get_llm_client(model, api_key)
         self.current_conversation_id = None
         self.last_session_summary = self._load_last_session()
         self.command_extractor = CommandExtractor()
-        self._setup_storage()
         self.should_exit = False
         self.command_history = []
         self.heartbeat_task = None
+
+        # Test mode flag
+        self.test_mode = test_mode
 
     async def run(self, initial_prompt: str, system_prompt: str) -> None:
         """Run agent with enhanced error handling"""
@@ -198,7 +195,7 @@ class AutonomousAgent:
     def _load_system_prompt(self, path: Path) -> str:
         """Load system prompt from file"""
         try:
-            with open(Path("config/system_prompt.md")) as f:  # Updated path
+            with open(path) as f:
                 return f.read().strip()
         except FileNotFoundError:
             logger.warning(f"System prompt not found at {path}, using empty prompt")
@@ -225,7 +222,7 @@ class AutonomousAgent:
 
     def _print_response(self, content: str):
         """Print agent's response with clear formatting"""
-        print("\n=== CLAUDE ===")
+        print("\n=== LLM RESPONSE ===")
         print(content)
         
         # Extract and store thinking process
@@ -237,7 +234,7 @@ class AutonomousAgent:
                 tags=["chain_of_thought"]
             )
             
-        print("=============")
+        print("=====================")
 
     async def process_heredocs(self, response: str) -> None:
         """Process and save heredoc content to files"""
@@ -273,13 +270,20 @@ class AutonomousAgent:
             "content": system_prompt
         })
         
+        # Mention test mode in the conversation if enabled
+        if self.test_mode:
+            messages.append({
+                "role": "system",
+                "content": "## TEST MODE ENABLED: Commands will NOT actually execute."
+            })
+
         # Add initial prompt
         messages.append({
             "role": "user",
             "content": initial_prompt
         })
         
-        # Get active branch context if available
+        # Check for active branch context
         if self.session_manager.current_session and self.session_manager.current_session.active_branch_id:
             branch_context = self.session_manager.get_branch_context(
                 self.session_manager.current_session.active_branch_id
@@ -290,106 +294,53 @@ class AutonomousAgent:
                     "content": f"BRANCH CONTEXT:\n{json.dumps(branch_context, indent=2)}"
                 })
         
-        # Process command sequence with dependencies
-        try:
-            commands = self._parse_commands(initial_prompt)
-            ordered_commands = self._resolve_dependencies(commands)
-            
-            for command in ordered_commands:
-                result = await self._execute_command(command)
-                if not result.success:
-                    logger.error(f"Command execution failed: {result.error}")
-                    break
-                    
-                # Update branch history if in a branch
-                if (self.session_manager.current_session and 
-                    self.session_manager.current_session.active_branch_id):
-                    self.session_manager.add_command_to_branch(
-                        self.session_manager.current_session.active_branch_id,
-                        command.raw_command,
-                        command.type,
-                        result.success
-                    )
+        # For demonstration, we do a single response pass:
+        # In a more advanced loop, you'd repeatedly feed the LLM,
+        # parse commands, execute, etc.
+        response = await self.llm.get_response(
+            prompt=initial_prompt,
+            system=system_prompt,
+            conversation_history=messages,
+            tool_usage=False  # If tool usage is desired
+        )
+        if not response:
+            logger.warning("No response from LLM.")
+            return
         
-        except Exception as e:
-            logger.error(f"Error in think_and_act: {e}")
-            
-    def _resolve_dependencies(self, commands: List[Dict]) -> List[Dict]:
-        """Resolve command dependencies using topological sort"""
-        # Build dependency graph
-        graph = nx.DiGraph()
-        command_map = {}
-        
-        for i, cmd in enumerate(commands):
-            cmd_id = f"cmd_{i}"
-            graph.add_node(cmd_id, command=cmd)
-            command_map[cmd_id] = cmd
-            
-            if cmd['type'] == 'task' and 'dependencies' in cmd:
-                for dep in cmd['dependencies']:
-                    if dep.startswith('#'):
-                        # ID reference
-                        dep_id = dep[1:]
-                        if dep_id in command_map:
-                            graph.add_edge(dep_id, cmd_id)
-                    elif dep.startswith('@'):
-                        # Task reference - find most recent matching task
-                        task_name = dep[1:]
-                        for j in range(i-1, -1, -1):
-                            prev_cmd = commands[j]
-                            if (prev_cmd['type'] == 'task' and 
-                                prev_cmd.get('attributes', {}).get('name') == task_name):
-                                prev_id = f"cmd_{j}"
-                                graph.add_edge(prev_id, cmd_id)
-                                break
-        
-        # Check for cycles
-        try:
-            ordered = list(nx.topological_sort(graph))
-            return [command_map[cmd_id] for cmd_id in ordered]
-        except nx.NetworkXUnfeasible:
-            logger.error("Circular dependency detected in commands")
-            return commands  # Return original order if cycle detected
+        self._print_response(response)
 
-    def _is_conversation_complete(self, response: str) -> bool:
-        """Check if conversation is complete"""
-        completion_phrases = [
-            "task complete",
-            "finished",
-            "all done",
-            "completed successfully",
-            "goodbye",
-            "session ended"
-        ]
-        return any(phrase in response.lower() for phrase in completion_phrases)
+        # Extract commands from LLM response
+        commands = self.command_extractor.extract_commands(response)
+        # Possibly process heredocs
+        await self.process_heredocs(response)
+
+        for cmd_type, cmd_content in commands:
+            if CommandExtractor.is_exit_command(cmd_type, cmd_content):
+                self.should_exit = True
+                break
+
+            # Execute commands if not in test mode
+            if self.test_mode:
+                print(f"[TEST MODE] Would have executed {cmd_type} command: {cmd_content}")
+                continue
+
+            stdout, stderr, code = await self.system_control.execute_command(cmd_type, cmd_content)
+            self.memory_manager.add_command_to_history(cmd_content, cmd_type, code == 0)
+
+            # If command fails, we can break or handle differently
+            if code != 0:
+                logger.warning(f"Command failed with exit code {code}")
+                break
 
     def cleanup(self):
         """Cleanup resources and save state"""
         try:
-            # Save any pending state
-            if self.current_conversation_id:
-                self.memory_manager.save_conversation(
-                    self.current_conversation_id,
-                    []  # Add any pending messages here
-                )
-            
             # Save command history
             history_path = self.memory_path / "state/command_history.json"
             with open(history_path, 'w') as f:
                 json.dump(self.command_history, f, indent=2)
             
-            # Clean up temp directory
-            temp_dir = self.memory_path / "temp"
-            if temp_dir.exists():
-                for file in temp_dir.iterdir():
-                    try:
-                        file.unlink()
-                    except Exception as e:
-                        logger.error(f"Error cleaning up {file}: {e}")
-            
-            # Cleanup system control processes
             self.system_control.cleanup()
-                        
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
 
@@ -410,7 +361,7 @@ class AutonomousAgent:
         self.memory_manager.save_document("system_state", json.dumps(state))
 
     async def compress_context(self, messages: List[Dict]) -> List[Dict]:
-        """Keep conversation under 4k tokens using vector search"""
+        """Keep conversation under ~4k tokens using vector search"""
         if len(str(messages)) > 3500:
             relevant_memories = self.memory_manager.search_memory(
                 "Recent important system changes"

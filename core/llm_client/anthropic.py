@@ -17,14 +17,19 @@ class AnthropicClient(BaseLLMClient):
         system: str,
         conversation_history: List[Dict] = None,
         temperature: float = 0.5,
-        max_tokens: int = 4096
+        max_tokens: int = 4096,
+        tool_usage: bool = False  # Does not really support tool usage
     ) -> Optional[str]:
         try:
+            # Anthropic does not natively support function-calling tools
+            # We do not implement special logic for tool usage here.
             messages = conversation_history if conversation_history else []
             if prompt:
                 messages.append({"role": "user", "content": prompt})
             
             logger.debug(f"Sending request to Claude with {len(messages)} messages")
+            # The following model name is hypothetical
+            # Replace with the correct model version if needed
             message = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=max_tokens,

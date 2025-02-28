@@ -11,7 +11,8 @@ class BaseLLMClient(ABC):
         system: str,
         conversation_history: List[Dict] = None,
         temperature: float = 0.5,
-        max_tokens: int = 4096
+        max_tokens: int = 4096,
+        tool_usage: bool = False
     ) -> Optional[str]:
         """Get response from the model"""
         pass

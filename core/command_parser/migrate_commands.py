@@ -40,7 +40,6 @@ class CommandMigrator:
     def _convert_xml_to_antlr(self, content: str) -> str:
         """Convert XML command format to ANTLR format with nested structure support"""
         try:
-            # Replace XML commands with new format
             converted = content
             
             def convert_nested_commands(xml_str: str) -> str:
@@ -71,7 +70,9 @@ class CommandMigrator:
                                 if cmd.tag in ['bash', 'python', 'task']:
                                     result.append(convert_nested_commands(ET.tostring(cmd).decode()))
                                 else:
-                                    result.append(self._escape_content(cmd.text))
+                                    if cmd.text:
+                                        escaped = self._escape_content(cmd.text)
+                                        result.append(escaped)
                             result.append('</commands>')
                         elif child.tag == 'dependencies':
                             result.append('<dependencies>')
@@ -87,7 +88,6 @@ class CommandMigrator:
                     logger.error(f"Error converting nested commands: {e}")
                     return xml_str
             
-            # Convert top-level commands
             def convert_command(match):
                 try:
                     return convert_nested_commands(match.group(0))
@@ -151,7 +151,6 @@ class CommandMigrator:
                 attrs = block.group(1).strip()
                 if attrs:
                     try:
-                        # Validate attribute format
                         for attr in attrs.split():
                             if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*="[^"]*"$', attr):
                                 errors.append(f"Invalid attribute format in {tag}: {attr}")
@@ -168,29 +167,24 @@ class CommandMigrator:
         for tag, required in required_blocks.items():
             tag_contents = re.finditer(f'<{tag}.*?>(.*?)</{tag}>', content, re.DOTALL)
             for match in tag_contents:
-                content = match.group(1)
+                inner = match.group(1)
                 for req in required:
-                    if f'<{req}>' not in content:
+                    if f'<{req}>' not in inner:
                         errors.append(f"{tag} missing {req} block")
                         
         # Check for nested structure validity
-        def check_nesting(content: str, depth: int = 0) -> List[str]:
+        def check_nesting(c: str, depth: int = 0) -> List[str]:
             if depth > 10:
                 return ["Maximum nesting depth exceeded"]
                 
-            errors = []
-            # Find all command blocks
-            blocks = re.finditer(r'<(bash|python|task|service|package).*?>(.*?)</\1>', content, re.DOTALL)
-            
-            for block in blocks:
-                tag = block.group(1)
-                inner = block.group(2)
-                
-                # Check inner content
-                if tag in ['task', 'service', 'package']:
-                    errors.extend(check_nesting(inner, depth + 1))
-                    
-            return errors
+            errs = []
+            blocks = re.finditer(r'<(bash|python|task|service|package).*?>(.*?)</\1>', c, re.DOTALL)
+            for b in blocks:
+                tag2 = b.group(1)
+                inner2 = b.group(2)
+                if tag2 in ['task', 'service', 'package']:
+                    errs.extend(check_nesting(inner2, depth + 1))
+            return errs
             
         errors.extend(check_nesting(content))
         
@@ -218,6 +212,6 @@ def main():
                 total_errors += len(errors)
                 
     print(f"\nValidation complete: {total_errors} total errors found")
-    
+
 if __name__ == "__main__":
-    main() 
+    main()

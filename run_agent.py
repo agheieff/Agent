@@ -25,22 +25,22 @@ def get_model_choice() -> str:
             sys.exit(0)
 
 def get_initial_prompt() -> str:
-    """Get initial prompt with double-return detection"""
-    print("\nEnter your prompt (press Enter twice to finish):")
+    """
+    Get initial prompt by reading until the user enters
+    a blank line (press Enter on an empty line to finish).
+    """
+    print("\nEnter your prompt (press Enter on a blank line to finish):")
     lines = []
-    last_line_empty = False
     while True:
         try:
             line = input()
-            if not line and last_line_empty:
+            # If the line is empty (no text), we finish collecting.
+            if not line.strip():
                 break
-            last_line_empty = not line
             lines.append(line)
         except EOFError:
             break
-    if lines and not lines[-1]:
-        lines.pop()
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 def load_system_prompt(path: str) -> str:
     try:

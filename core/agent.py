@@ -11,7 +11,6 @@ from core.llm_client import get_llm_client
 from core.memory_manager import MemoryManager
 from core.system_control import SystemControl
 from core.task_manager import TaskManager
-from core.memory_preloader import MemoryPreloader
 from core.session_manager import SessionManager
 import networkx as nx
 
@@ -83,7 +82,6 @@ class CommandExtractor:
                         'content': '\n'.join(content_lines)
                     })
                     content_lines = []
-                
                 # Extract filename
                 current_doc = line.strip().split('>')[1].strip()
                 continue
@@ -123,13 +121,14 @@ class AutonomousAgent:
             raise ValueError("API key required")
 
         self.memory_path = Path("memory")
+        self._setup_storage()
+
         self.memory_manager = memory_manager or MemoryManager()
         self.system_control = SystemControl()
         self.task_manager = TaskManager(self.memory_path)
         self.session_manager = session_manager or SessionManager(self.memory_path, self.memory_manager)
-        self.preloader = MemoryPreloader(self.memory_manager)
-        
-        # If it's first run or memory not seeded, seed it
+
+        # Seed memory if vector_index doesn't exist
         if not (self.memory_path / "vector_index").exists():
             self.memory_manager.save_document(
                 "system_guide",
@@ -143,9 +142,10 @@ class AutonomousAgent:
         self.should_exit = False
         self.command_history = []
         self.heartbeat_task = None
-
-        # Test mode flag
         self.test_mode = test_mode
+
+        # New: Local conversation history for archiving
+        self.local_conversation_history: List[Dict[str, str]] = []
 
     async def run(self, initial_prompt: str, system_prompt: str) -> None:
         """Run agent with enhanced error handling"""
@@ -168,7 +168,6 @@ class AutonomousAgent:
             raise
         finally:
             print("\nCleaning up...")
-            # Cancel heartbeat task if it exists
             if self.heartbeat_task and not self.heartbeat_task.done():
                 self.heartbeat_task.cancel()
                 try:
@@ -178,7 +177,7 @@ class AutonomousAgent:
             self.cleanup()
 
     def _setup_storage(self):
-        """Ensure required directories exist"""
+        """Ensure required directories exist under ./memory/"""
         dirs = [
             'conversations',
             'logs',
@@ -187,7 +186,8 @@ class AutonomousAgent:
             'scripts',
             'data',
             'temp',
-            'state'
+            'state',
+            'sessions'
         ]
         for dir_name in dirs:
             (self.memory_path / dir_name).mkdir(parents=True, exist_ok=True)
@@ -225,7 +225,6 @@ class AutonomousAgent:
         print("\n=== LLM RESPONSE ===")
         print(content)
         
-        # Extract and store thinking process
         thinking_blocks = self.command_extractor.extract_thinking(content)
         if thinking_blocks:
             self.memory_manager.save_document(
@@ -243,83 +242,58 @@ class AutonomousAgent:
             try:
                 filepath = Path(doc['filename'])
                 filepath.parent.mkdir(parents=True, exist_ok=True)
-                
                 with open(filepath, 'w') as f:
                     f.write(doc['content'])
-                    
                 logger.info(f"Created file: {filepath}")
             except Exception as e:
                 logger.error(f"Error creating file {doc['filename']}: {e}")
 
     async def think_and_act(self, initial_prompt: str, system_prompt: str) -> None:
+        """
+        Build the conversation with a single system message that includes both
+        the temporal context and the user-supplied system_prompt, then a user message.
+        Store messages in local_conversation_history for archiving.
+        """
         messages = []
         
-        # Initialize session context
-        self.preloader.initialize_session()
-        
-        # Add temporal context
         temporal_context = self.memory_manager.get_execution_context()
-        messages.append({
-            "role": "system",
-            "content": f"TEMPORAL CONTEXT:\n{temporal_context}"
-        })
-        
-        # Add system prompt
-        messages.append({
-            "role": "system",
-            "content": system_prompt
-        })
-        
-        # Mention test mode in the conversation if enabled
+        combined_system = f"TEMPORAL CONTEXT:\n{temporal_context}\n\n{system_prompt}"
         if self.test_mode:
-            messages.append({
-                "role": "system",
-                "content": "## TEST MODE ENABLED: Commands will NOT actually execute."
-            })
-
-        # Add initial prompt
-        messages.append({
-            "role": "user",
-            "content": initial_prompt
-        })
+            combined_system += "\n## TEST MODE ENABLED: Commands will NOT actually execute."
         
-        # Check for active branch context
-        if self.session_manager.current_session and self.session_manager.current_session.active_branch_id:
-            branch_context = self.session_manager.get_branch_context(
-                self.session_manager.current_session.active_branch_id
-            )
-            if branch_context:
-                messages.append({
-                    "role": "system",
-                    "content": f"BRANCH CONTEXT:\n{json.dumps(branch_context, indent=2)}"
-                })
+        system_msg = {"role": "system", "content": combined_system}
+        user_msg = {"role": "user", "content": initial_prompt}
         
-        # For demonstration, we do a single response pass:
-        # In a more advanced loop, you'd repeatedly feed the LLM,
-        # parse commands, execute, etc.
+        # Append to local conversation history for archiving
+        self.local_conversation_history.append(system_msg)
+        self.local_conversation_history.append(user_msg)
+        
+        messages.append(system_msg)
+        messages.append(user_msg)
+        
         response = await self.llm.get_response(
-            prompt=initial_prompt,
-            system=system_prompt,
+            prompt=None,
+            system=None,
             conversation_history=messages,
-            tool_usage=False  # If tool usage is desired
+            tool_usage=False
         )
         if not response:
             logger.warning("No response from LLM.")
             return
-        
+
+        # Save the assistant response in the local conversation history
+        self.local_conversation_history.append({"role": "assistant", "content": response})
+
         self._print_response(response)
 
-        # Extract commands from LLM response
         commands = self.command_extractor.extract_commands(response)
-        # Possibly process heredocs
         await self.process_heredocs(response)
 
         for cmd_type, cmd_content in commands:
-            if CommandExtractor.is_exit_command(cmd_type, cmd_content):
+            if self.command_extractor.is_exit_command(cmd_type, cmd_content):
                 self.should_exit = True
                 break
 
-            # Execute commands if not in test mode
             if self.test_mode:
                 print(f"[TEST MODE] Would have executed {cmd_type} command: {cmd_content}")
                 continue
@@ -327,19 +301,51 @@ class AutonomousAgent:
             stdout, stderr, code = await self.system_control.execute_command(cmd_type, cmd_content)
             self.memory_manager.add_command_to_history(cmd_content, cmd_type, code == 0)
 
-            # If command fails, we can break or handle differently
             if code != 0:
                 logger.warning(f"Command failed with exit code {code}")
                 break
 
+        # Archive the session conversation after processing commands
+        self.archive_session()
+
+    def archive_session(self):
+        """
+        Archive the entire conversation in memory by writing it to a file under
+        memory/sessions and also storing it as a conversation node in the memory graph.
+        """
+        timestamp = int(datetime.now().timestamp())
+        session_filename = f"{timestamp}_session.json"
+        session_path = self.memory_path / "sessions" / session_filename
+
+        data_to_save = {
+            "conversation": self.local_conversation_history,
+            "ended_at": datetime.now().isoformat()
+        }
+
+        try:
+            with open(session_path, "w") as f:
+                json.dump(data_to_save, f, indent=2)
+            logger.info(f"Session archived to {session_path}")
+        except Exception as e:
+            logger.error(f"Error writing session archive: {e}")
+
+        try:
+            conversation_id = f"session_{timestamp}"
+            self.memory_manager.save_conversation(
+                conversation_id,
+                messages=self.local_conversation_history,
+                metadata={"archived_at": datetime.now().isoformat()}
+            )
+            logger.info(f"Session also saved in memory graph as conversation {conversation_id}")
+        except Exception as e:
+            logger.error(f"Error saving session to memory graph: {e}")
+
     def cleanup(self):
         """Cleanup resources and save state"""
         try:
-            # Save command history
             history_path = self.memory_path / "state/command_history.json"
             with open(history_path, 'w') as f:
                 json.dump(self.command_history, f, indent=2)
-            
             self.system_control.cleanup()
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
@@ -361,7 +367,7 @@ class AutonomousAgent:
         self.memory_manager.save_document("system_state", json.dumps(state))
 
     async def compress_context(self, messages: List[Dict]) -> List[Dict]:
-        """Keep conversation under ~4k tokens using vector search"""
+        """Keep conversation under ~4k tokens using vector search (placeholder)"""
         if len(str(messages)) > 3500:
             relevant_memories = self.memory_manager.search_memory(
                 "Recent important system changes"

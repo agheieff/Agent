@@ -16,34 +16,37 @@ class DeepSeekClient(BaseLLMClient):
         
     async def get_response(
         self,
-        prompt: str,
-        system: str,
+        prompt: Optional[str],
+        system: Optional[str],
         conversation_history: List[Dict] = None,
         temperature: float = 0.5,
         max_tokens: int = 4096,
         tool_usage: bool = False
     ) -> Optional[str]:
         """
-        Example of how we might handle 'tool_usage' in an OpenAI-like client.
-        If tool_usage is True, we do a hypothetical function calling approach.
+        Modified so that if 'conversation_history' is provided,
+        we do NOT forcibly insert system or user from prompt/system.
+        That helps avoid repeated or "successive" user/system messages.
         """
         try:
-            messages = conversation_history if conversation_history else []
-            if system:
-                messages.insert(0, {"role": "system", "content": system})
-            if prompt:
-                messages.append({"role": "user", "content": prompt})
+            if conversation_history:
+                messages = conversation_history
+            else:
+                messages = []
+                if system:
+                    messages.append({"role": "system", "content": system})
+                if prompt:
+                    messages.append({"role": "user", "content": prompt})
 
             logger.debug(f"Sending request to DeepSeek-Reasoner with {len(messages)} messages")
             
             if tool_usage:
-                # Hypothetical approach for function calling or tool usage:
-                # The real logic would differ depending on the API.
-                # We place a placeholder to illustrate where you'd handle it:
+                # Hypothetical approach for function calling or tool usage
                 response = self.client.chat.completions.create(
                     model="deepseek-reasoner-tools",
                     messages=messages,
                     max_tokens=max_tokens,
+                    temperature=temperature,
                     functions=[{
                         "name": "my_tool",
                         "description": "Example tool usage placeholder",
@@ -51,14 +54,12 @@ class DeepSeekClient(BaseLLMClient):
                     }],
                     function_call="auto"
                 )
-                
-                # The user would parse out function calls from 'response' here.
-                # This is purely illustrative.
             else:
                 response = self.client.chat.completions.create(
                     model="deepseek-reasoner",
                     messages=messages,
-                    max_tokens=max_tokens
+                    max_tokens=max_tokens,
+                    temperature=temperature
                 )
             
             if response.choices and len(response.choices) > 0:

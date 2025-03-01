@@ -1,190 +1,106 @@
-# Agent Improvements
+# Arcadia Agent Improvements
 
-## Timeout Handling and Stability Enhancements
+## Memory Stability and Long-Term Planning - 2025-03-01
 
-### Core Improvements Made
+1. **Enhanced Task Manager System**
+   - Complete rewrite of the TaskManager class
+   - Added task dependencies and blockers for complex workflows
+   - Implemented recurring task scheduling
+   - Added task versioning and history tracking
+   - Proper task relationship management (dependency graphs)
+   - Automatic backup and recovery mechanisms
+   - Status transitions with validation
+   - Task search and filtering capabilities
 
-1. **Shell Adapter**
-   - Added robust timeout handling for both regular and interactive commands
-   - Implemented process termination for commands that exceed timeout limits
-   - Enhanced interactive command execution with more prompt patterns
-   - Added output buffering and improved error handling
-   - Added command history tracking
+2. **Improved Scheduler**
+   - Implemented a robust TaskScheduler for time-based scheduling
+   - Priority-based execution queue
+   - Thread-safe operations with locking
+   - Persistent scheduling that survives restarts
+   - Graceful shutdown handling
+   - Error recovery with statistics tracking
+   - Support for both one-time and recurring tasks
+   - Backup and recovery mechanisms
 
-2. **System Control**
-   - Added proper timeout parameter passing to command execution
-   - Implemented timeout tracking in command statistics
-   - Added better error handling for timeouts
-   - Improved resource monitoring with timeout-specific metrics
-   - Fixed handling of different command types
+3. **Advanced File Operations**
+   - Added NotebookReader for Jupyter notebook handling
+   - Added file comparison tools for diffing files
+   - Added file moving, renaming, and backup capabilities
+   - More robust error handling during file operations
+   - Automatic backups before file modification
+   - Recovery mechanisms for failed operations
 
-3. **Agent Core**
-   - Added timeout handling for LLM responses
-   - Implemented intelligent timeout selection based on command type
-   - Fixed duplicate method issues that could cause conflicts
-   - Added better error reporting for timeouts
-   - Enhanced memory pruning capability
+4. **Setup Script Improvements**
+   - Expanded setup.sh to handle multiple operations
+   - Added restore capability to reset agent to clean state
+   - Added update feature to pull changes from Git
+   - Interactive menu-based operation
+   - Better error handling and reporting
+   - Support for preserving or recreating virtual environments
 
-4. **Dependencies**
-   - Added psutil for better system resource monitoring
-   - Removed unnecessary CUDA dependencies
-   - Ensured all necessary vector search libraries are included
+## API Cost Tracking and Reliability Improvements - 2025-03-01
 
-### Test Results
+1. **Added Token Usage Tracking**
+   - Implemented `TokenUsage` class in base LLM client to track token consumption
+   - Added cost calculation based on model-specific pricing
+   - Detailed tracking of input tokens, output tokens, and their respective costs
+   - Real-time display of token usage and costs at the end of sessions
 
-All implemented timeout mechanisms were tested with the following results:
+2. **Enhanced Error Handling**
+   - Added retry mechanisms with exponential backoff for transient errors
+   - Improved failure recovery for API calls and command execution
+   - Better organization of error types for more robust error handling
+   - Added error context to command execution for better diagnostics
 
-1. **Shell Command Execution Test**
-   - Simple commands completed successfully
-   - Commands with artificial delays worked correctly
-   - Commands that should timeout were properly terminated after the specified timeout period
+3. **Output Filtering**
+   - Changed output format to show just `<message>` tag contents and commands
+   - More structured presentation of command results
+   - Cleaner user interface with focused information display
 
-2. **LLM Timeout Test**
-   - Normal LLM calls completed successfully
-   - Slow/hanging LLM calls were properly terminated after the specified timeout
-   - Graceful error messages were generated for timeout cases
+4. **Interactive Command Support**
+   - Added better detection of commands requiring interactive input
+   - Support for additional package managers (apt, npm, pip, gem, brew, yum, dnf, pacman)
+   - Improved handling of confirmation prompts
 
-3. **Agent Initialization Test**
-   - Agent initializes correctly with both supported models
-   - Memory system is loaded correctly
-   - Timeout configuration is properly applied
+5. **Command Execution Resilience**
+   - Added retry capability for failed commands
+   - Intelligent identification of retriable error conditions
+   - Better timeout handling with appropriate user feedback
 
-### Known Issues
+6. **Other Improvements**
+   - Fixed the "response not defined" error in run_agent.py
+   - Added CLI support for directly specifying model via --model flag
+   - Better emergency state saving when errors occur
+   - Improved error handling in system prompt loading
 
-1. **DeepSeek API Format Error**
-   - The DeepSeek LLM client expects a specific message format (user message first)
-   - Error occurs when the conversation history doesn't match this requirement
-   - Further adjustment needed in the agent.py run method
+## Next Steps for Autonomous Operation
 
-2. **API Rate Limiting**
-   - Need to implement backoff and retry logic for API rate limiting
+1. **Self-Modification Safety**
+   - Implement safe code modification with validation
+   - Add test framework for self-modifications
+   - Add automatic rollback for failed modifications
+   - Implement a dedicated "agent diagnostics" mode
 
-## Performance Optimizations
+2. **Continuous Operation**
+   - Implement daemon mode for continuous background operation
+   - Add comprehensive logging and monitoring
+   - Implement resource usage limiting
+   - Add self-healing capabilities
 
-1. **Memory Usage**
-   - Implemented memory pruning to prevent excessive memory growth
-   - Added working memory size limits
+3. **Advanced Planning**
+   - Implement a planning layer with goal decomposition
+   - Add plan verification and validation
+   - Support for conditional execution paths
+   - Add reasoning about plan failures
 
-2. **Command Execution**
-   - Added adaptive timeouts for different command types
-   - Optimized context compression to reduce LLM token usage
+4. **Memory Enhancements**
+   - Implement hierarchical memory compression
+   - Add automatic summarization of old memories
+   - Improve relevance scoring for memory retrieval
+   - Add ontology-based memory organization
 
-## System Analysis Report (2025-03-01)
-
-### 1. Security Audit Findings
-
-**Positive Security Features:**
-- Security manager successfully blocked dangerous commands
-- Protected system directories from unauthorized modifications
-- Test mode available for safe command validation
-
-**Security Gaps:**
-- Temporary execution files accumulating in memory/temp without cleanup
-- No automatic cleanup mechanism for old exec_*.py files
-- Potential privilege escalation issues in shell_adapter.py
-- No validation of temporary file creation patterns
-
-### 2. Codebase Health Assessment
-
-**Strong Components:**
-- Modular LLM client architecture (anthropic/deepseek)
-- Proper async implementation in main loop
-- Environment variable handling
-- System prompt templating system
-
-**Areas for Improvement:**
-- Multiple test files with overlapping functionality
-- Temporary files not using secure temp directory
-- Hardcoded paths in memory/temp
-- No version differentiation in exec_*.py files
-- Missing type hints in many methods
-
-### 3. Critical Improvements Needed
-
-#### A. Security Enhancements (Urgent)
-
-1. Implement secure temp file handling:
-   - Use tempfile module with guaranteed cleanup
-   - Add file permission restrictions (0600)
-   
-2. Enhance security manager rules:
-   - Block recursive deletes beyond reasonable depth
-   - Prevent sensitive path access
-   - Add filesystem write quotas
-
-3. Add memory temp file rotation:
-   - Scheduled cleanup of old temp files
-   - Retention policy for important execution records
-
-#### B. Architectural Improvements
-
-1. Introduce dependency injection for core services
-2. Create proper AbstractBaseClass for LLM clients
-3. Implement unified temp file manager
-4. Add watchdog for memory directory
-5. Standardize error codes across modules
-
-### 4. Execution Reliability Report
-
-**Successful Operations:**
-- File editing/replacement in isolated directories
-- Python code execution tracking
-- System prompt augmentation
-- Multi-model support
-
-**Failed Operations:**
-1. Pattern matching inconsistencies
-   - Line ending normalization issues
-   - Fix: Normalize line endings during replacements
-
-2. Temporary file accumulation
-   - Cause: No automatic cleanup
-   - Fix: Add LRU cache with sensible limits
-
-### 5. Self-Improvement Roadmap
-
-#### Immediate Priorities
-
-1. Security hardening
-   - Temp file sandboxing
-   - System call filtering
-   - Resource limits
-
-2. Memory system overhaul
-   - Versioned file operations
-   - Automatic temp file cleanup
-   - Memory compression
-
-3. Error handling upgrade
-   - Retry with exponential backoff
-   - Error context preservation
-   - Transaction rollback system
-
-#### Mid-Term Goals
-
-1. Implement system monitor dashboard
-2. Build CI/CD pipeline for agent updates
-3. Develop auto-healing mechanism
-4. Create knowledge graph integration
-5. Add hardware resource awareness
-
-## Next Steps
-
-1. **Fix DeepSeek Message Format Issue**
-   - Ensure all message sequences start with a user message
-   - Add validation to prevent invalid message sequences
-
-2. **Implement Security Enhancements**
-   - Secure temp file handling with proper permissions
-   - Enhance security manager with better path protection
-   - Add memory temp file rotation
-
-3. **Improve Error Handling**
-   - Add retry mechanisms with exponential backoff
-   - Implement error context preservation
-   - Create transaction rollback system
-
-4. **Enhanced Monitoring**
-   - Add detailed performance metrics
-   - Implement better logging for debugging
-   - Create system monitoring dashboard
+5. **Usage and Resource Management**
+   - Implement token usage budgeting
+   - Add time-based operation scheduling
+   - Add resource usage monitoring and limiting
+   - Implement adaptive throttling based on system load

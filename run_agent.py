@@ -76,6 +76,7 @@ async def main():
 
     parser = argparse.ArgumentParser(description="Run the Autonomous Agent.")
     parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands executed).")
+    parser.add_argument('--model', choices=['anthropic', 'deepseek'], help="Specify model directly instead of prompting.")
     args = parser.parse_args()
     test_mode = args.test
 
@@ -86,7 +87,8 @@ async def main():
         with open(system_prompt_path, 'w') as f:
             f.write("# Default system prompt\n")
 
-    model = get_model_choice()
+    # Get model choice from argument or interactive prompt
+    model = args.model if args.model else get_model_choice()
     
     api_key = os.getenv(f"{model.upper()}_API_KEY")
     if not api_key:
@@ -94,9 +96,13 @@ async def main():
         print("Please set it in your .env file or environment variables.")
         sys.exit(1)
     
-    initial_prompt = get_initial_prompt()
-    if not initial_prompt.strip():
-        print("Error: Empty prompt.")
+    try:
+        initial_prompt = get_initial_prompt()
+        if not initial_prompt.strip():
+            print("Error: Empty prompt.")
+            sys.exit(1)
+    except Exception as e:
+        print(f"Error getting initial prompt: {str(e)}")
         sys.exit(1)
 
     print("\nAgent Configuration:")
@@ -111,7 +117,9 @@ async def main():
     print("- Task Planning: The agent can create and track long-term tasks")
     print("- System Detection: The agent will automatically detect and adapt to your OS environment")
     print("- File Operations: Enhanced file manipulation capabilities")
+    print("- API Cost Tracking: Monitors and reports token usage and costs")
 
+    agent = None
     try:
         print("\nInitializing agent...")
         agent = AutonomousAgent(
@@ -129,7 +137,12 @@ async def main():
         print("\nStarting multi-turn session...\n")
 
         # Load system prompt and prepend system status
-        system_prompt = load_and_augment_system_prompt(str(system_prompt_path))
+        try:
+            system_prompt = load_and_augment_system_prompt(str(system_prompt_path))
+        except Exception as e:
+            print(f"Warning: Error loading system prompt: {str(e)}")
+            print("Continuing with empty system prompt...")
+            system_prompt = ""
 
         # If test mode, add note to the system prompt as well
         if test_mode:
@@ -141,8 +154,25 @@ async def main():
         print("\nShutting down agent (Ctrl+C pressed)...")
     except Exception as e:
         print(f"\nError running agent: {str(e)}")
+        if agent:
+            try:
+                # Try to save current state if possible
+                agent.memory_manager.create_backup(force=True)
+                print("Emergency state backup created.")
+            except Exception as backup_error:
+                print(f"Failed to create emergency backup: {str(backup_error)}")
         raise
     finally:
+        # Display API usage summary if available
+        if agent and hasattr(agent, 'llm') and hasattr(agent.llm, 'usage_history') and agent.llm.usage_history:
+            print("\n=== API USAGE SUMMARY ===")
+            print(f"Total API Calls: {len(agent.llm.usage_history)}")
+            print(f"Total Tokens: {agent.llm.total_tokens:,}")
+            print(f"  - Input Tokens: {agent.llm.total_prompt_tokens:,}")
+            print(f"  - Output Tokens: {agent.llm.total_completion_tokens:,}")
+            print(f"Total Cost: ${agent.llm.total_cost:.6f}")
+            print("=========================")
+        
         print("\nAgent session ended")
 
 if __name__ == "__main__":
@@ -155,6 +185,7 @@ if __name__ == "__main__":
         print(f"\nFatal error: {str(e)}")
         sys.exit(1)
 
-# Message tag validation check
-if '<message>' not in response:
-    raise ValueError('All responses must contain <message> tag')
+# This section below was causing an error as 'response' is not defined
+# It seems to be a leftover from previous code
+# if '<message>' not in response:
+#     raise ValueError('All responses must contain <message> tag')

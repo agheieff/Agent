@@ -416,20 +416,67 @@ class AutonomousAgent:
                     try:
                         # Apply a timeout to the LLM call to prevent hanging
                         llm_timeout = 120  # 2 minutes timeout for LLM calls
-                        response = await asyncio.wait_for(
-                            self.llm.get_response(
-                                prompt=None,
-                                system=None,
-                                conversation_history=compressed_history,
-                                tool_usage=False
-                            ),
-                            timeout=llm_timeout
-                        )
+                        
+                        # Implement retry logic for potential API failures
+                        max_retries = 3
+                        retry_count = 0
+                        retry_delay = 2  # Initial delay in seconds
+                        
+                        while retry_count < max_retries:
+                            try:
+                                response = await asyncio.wait_for(
+                                    self.llm.get_response(
+                                        prompt=None,
+                                        system=None,
+                                        conversation_history=compressed_history,
+                                        tool_usage=False
+                                    ),
+                                    timeout=llm_timeout
+                                )
+                                if response:  # If we got a valid response, break the retry loop
+                                    break
+                                    
+                                # If we got None but no exception, it's an API error, so retry
+                                retry_count += 1
+                                if retry_count >= max_retries:
+                                    logger.error(f"LLM API call failed after {max_retries} attempts")
+                                    # Create fallback response
+                                    response = "I apologize, but I encountered issues connecting to the API. " + \
+                                              "Let me try a simpler approach. Please give me a moment to reconsider."
+                                    break
+                                    
+                                logger.warning(f"Retrying LLM API call (attempt {retry_count}/{max_retries})")
+                                await asyncio.sleep(retry_delay)
+                                retry_delay *= 2  # Exponential backoff
+                                
+                            except (asyncio.TimeoutError, Exception) as api_error:
+                                retry_count += 1
+                                err_type = "timeout" if isinstance(api_error, asyncio.TimeoutError) else "error"
+                                logger.error(f"LLM API {err_type} (attempt {retry_count}/{max_retries}): {str(api_error)}")
+                                
+                                if retry_count >= max_retries:
+                                    # Create a special error response after all retries failed
+                                    if isinstance(api_error, asyncio.TimeoutError):
+                                        response = "I apologize, but my response was taking too long to generate. " + \
+                                                  "Let me try a simpler approach. Please give me a moment to reconsider."
+                                    else:
+                                        response = f"I encountered an issue: {str(api_error)}. " + \
+                                                  "Let me try a different approach. Please give me a moment to reconsider."
+                                    break
+                                    
+                                # Wait before retry with exponential backoff
+                                await asyncio.sleep(retry_delay)
+                                retry_delay *= 2  # Exponential backoff
+                                
                     except asyncio.TimeoutError:
                         logger.error(f"LLM response timed out after {llm_timeout} seconds")
                         # Create a special error response
                         response = "I apologize, but my response was taking too long to generate. " + \
                                   "Let me try a simpler approach. Please give me a moment to reconsider."
+                    except Exception as e:
+                        logger.error(f"Unexpected error in LLM API call: {str(e)}")
+                        response = f"I apologize, but I encountered an unexpected error: {str(e)}. " + \
+                                  "Let me try a different approach. Please give me a moment to reconsider."
                     
                     # Handle empty response
                     if not response:
@@ -847,10 +894,41 @@ class AutonomousAgent:
             logger.error(f"Error saving session summary: {e}")
 
     def _print_response(self, content: str):
-        """Print agent's response with clear formatting"""
-        print("\n=== LLM RESPONSE ===")
-        print(content)
-        print("=====================")
+        """Print only the message content from the agent's response, plus any commands"""
+        # Extract message tag content if present
+        message_content = None
+        message_match = re.search(r'<message>(.*?)</message>', content, re.DOTALL)
+        if message_match:
+            message_content = message_match.group(1).strip()
+        
+        # Extract commands for display
+        commands = []
+        for tag in self.command_extractor.COMMAND_TAGS + self.command_extractor.FILE_OP_TAGS:
+            pattern = f"<{tag}>(.*?)</{tag}>"
+            matches = re.finditer(pattern, content, re.DOTALL)
+            for match in matches:
+                cmd = match.group(1).strip()
+                commands.append(f"<{tag}>\n{cmd}\n</{tag}>")
+        
+        # Print message content if found
+        if message_content:
+            print("\n=== MESSAGE ===")
+            print(message_content)
+            print("===============")
+        
+        # Print commands if any
+        if commands:
+            print("\n=== COMMANDS ===")
+            for cmd in commands:
+                print(cmd)
+                print("---------------")
+            print("================")
+        
+        # If no message tag, fall back to printing the whole response
+        if not message_content and not commands:
+            print("\n=== LLM RESPONSE ===")
+            print(content)
+            print("=====================")
 
     def archive_session(self):
         """
@@ -1449,10 +1527,17 @@ class AutonomousAgent:
                         )
                     else:
                         # Execute standard command with timeout
+                        # Check if this command should be executed in interactive mode
+                        interactive_cmd = (cmd_type == 'bash' and 
+                                          any(pkg_cmd in cmd_content for pkg_cmd in [
+                                              'apt', 'apt-get', 'npm', 'pip install', 'pip3 install', 
+                                              'gem', 'brew', 'yum', 'dnf', 'pacman'
+                                          ]))
+                        
                         stdout, stderr, code = await self.system_control.execute_command(
                             cmd_type, 
                             cmd_content, 
-                            interactive=(cmd_type == 'bash' and ('apt' in cmd_content or 'npm' in cmd_content)),
+                            interactive=interactive_cmd,
                             timeout=command_timeout
                         )
                         

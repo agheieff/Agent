@@ -2,18 +2,49 @@ import logging
 import re
 from typing import Optional, List, Dict, Any, Tuple
 from openai import OpenAI
-from .base import BaseLLMClient
+from .base import BaseLLMClient, TokenUsage
 
 logger = logging.getLogger(__name__)
 
+# DeepSeek API pricing (as of March 2025) - subject to changes
+DEEPSEEK_PRICING = {
+    "deepseek-reasoner": {
+        "input": 0.20 / 1_000_000,     # $0.20 per million input tokens
+        "output": 0.80 / 1_000_000,    # $0.80 per million output tokens
+    },
+    "deepseek-reasoner-tools": {
+        "input": 0.20 / 1_000_000,     # $0.20 per million input tokens
+        "output": 0.80 / 1_000_000,    # $0.80 per million output tokens
+    },
+    # Default pricing for unknown models
+    "default": {
+        "input": 0.20 / 1_000_000,     # $0.20 per million input tokens
+        "output": 0.80 / 1_000_000,    # $0.80 per million output tokens
+    }
+}
+
 class DeepSeekClient(BaseLLMClient):
     def __init__(self, api_key: str):
+        super().__init__()
         if not api_key:
             raise ValueError("DeepSeek API key is required")
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.deepseek.com"
-        )
+            
+        # Validate API key format
+        if len(api_key) < 10:  # Simple length check
+            logger.warning("DeepSeek API key may be invalid (too short)")
+            
+        try:
+            self.client = OpenAI(
+                api_key=api_key,
+                base_url="https://api.deepseek.com"
+            )
+            # Minimal check that the client was initialized
+            if hasattr(self.client, 'api_key'):
+                logger.info("DeepSeek client initialized successfully")
+        except Exception as e:
+            raise ValueError(f"Failed to initialize DeepSeek client: {str(e)}")
+            
+        self.default_model = "deepseek-reasoner"
         
     async def get_response(
         self,
@@ -22,7 +53,8 @@ class DeepSeekClient(BaseLLMClient):
         conversation_history: List[Dict] = None,
         temperature: float = 0.5,
         max_tokens: int = 4096,
-        tool_usage: bool = False
+        tool_usage: bool = False,
+        model: Optional[str] = None
     ) -> Optional[str]:
         """
         Modified so that if 'conversation_history' is provided,
@@ -41,10 +73,13 @@ class DeepSeekClient(BaseLLMClient):
 
             logger.debug(f"Sending request to DeepSeek-Reasoner with {len(messages)} messages")
             
+            # Use specified model or default based on tool usage
+            model_name = model or ("deepseek-reasoner-tools" if tool_usage else self.default_model)
+            
             if tool_usage:
-                # Hypothetical approach for function calling or tool usage
+                # Approach for function calling or tool usage
                 response = self.client.chat.completions.create(
-                    model="deepseek-reasoner-tools",
+                    model=model_name,
                     messages=messages,
                     max_tokens=max_tokens,
                     temperature=temperature,
@@ -57,11 +92,35 @@ class DeepSeekClient(BaseLLMClient):
                 )
             else:
                 response = self.client.chat.completions.create(
-                    model="deepseek-reasoner",
+                    model=model_name,
                     messages=messages,
                     max_tokens=max_tokens,
                     temperature=temperature
                 )
+            
+            # Track token usage if available
+            if hasattr(response, "usage"):
+                usage_data = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens
+                }
+                
+                # Calculate costs
+                costs = self.calculate_token_cost(usage_data, model_name)
+                
+                # Create and record token usage
+                token_usage = TokenUsage(
+                    prompt_tokens=usage_data["prompt_tokens"],
+                    completion_tokens=usage_data["completion_tokens"],
+                    total_tokens=usage_data["total_tokens"],
+                    prompt_cost=costs["prompt_cost"],
+                    completion_cost=costs["completion_cost"],
+                    total_cost=costs["total_cost"],
+                    model=model_name
+                )
+                
+                self.add_usage(token_usage)
             
             if response.choices and len(response.choices) > 0:
                 message = response.choices[0].message
@@ -82,6 +141,21 @@ class DeepSeekClient(BaseLLMClient):
         except Exception as e:
             logger.error(f"DeepSeek-Reasoner API call failed: {str(e)}", exc_info=True)
             return None
+    
+    def calculate_token_cost(self, usage: Dict[str, int], model: str) -> Dict[str, float]:
+        """Calculate cost based on token usage and model"""
+        # Get pricing for this model or use default if not found
+        pricing = DEEPSEEK_PRICING.get(model, DEEPSEEK_PRICING["default"])
+        
+        prompt_cost = usage["prompt_tokens"] * pricing["input"]
+        completion_cost = usage["completion_tokens"] * pricing["output"]
+        total_cost = prompt_cost + completion_cost
+        
+        return {
+            "prompt_cost": prompt_cost,
+            "completion_cost": completion_cost,
+            "total_cost": total_cost
+        }
             
     async def check_for_user_input_request(self, response: str) -> Tuple[bool, Optional[str]]:
         """

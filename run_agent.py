@@ -73,7 +73,7 @@ def load_and_augment_system_prompt(path: str) -> str:
         if memory_config.exists():
             with open(memory_config, 'r') as f:
                 memory_directory = f.read().strip()
-    except:
+    except SystemExit:
         memory_directory = os.environ.get("AGENT_MEMORY_DIR", "")
 
     # Get projects directory from config
@@ -83,7 +83,7 @@ def load_and_augment_system_prompt(path: str) -> str:
         if projects_config.exists():
             with open(projects_config, 'r') as f:
                 projects_directory = f.read().strip()
-    except:
+    except SystemExit:
         projects_directory = os.environ.get("AGENT_PROJECTS_DIR", "")
 
     # Replace placeholders
@@ -152,13 +152,13 @@ async def main():
         signal.signal(signal.SIGTSTP, handle_pause_signal)
 
     parser = argparse.ArgumentParser(description="Run the Autonomous Agent.")
-    parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands ex...  # truncated for line length
+    parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands ex)
 
-    parser.add_argument('--model', choices=['anthropic', 'deepseek'], help="Specify model directly...  # truncated for line length
+    parser.add_argument('--model', choices=['anthropic', 'deepseek'], help="Specify model directly)
 
-    parser.add_argument('--memory-dir', help="Path to memory directory (will be saved in memory.co...  # truncated for line length
+    parser.add_argument('--memory-dir', help="Path to memory directory (will be saved in memory.co)
 
-    parser.add_argument('--projects-dir', help="Path to projects directory (will be saved in proje...  # truncated for line length
+    parser.add_argument('--projects-dir', help="Path to projects directory (will be saved in proje)
 
     args = parser.parse_args()
     test_mode = args.test
@@ -197,7 +197,7 @@ async def main():
                 # Save it for future use
                 with open(current_dir / "projects.config", 'w') as f:
                     f.write(str(default_projects_dir))
-        except:
+        except SystemExit:
             # Use default projects path if config read fails
             default_projects_dir = current_dir.parent / "Projects"
             default_projects_dir.mkdir(exist_ok=True)
@@ -230,14 +230,14 @@ async def main():
                 print("  /help     - Show this help message")
                 print("  /compact  - Compact conversation history to save context space")
                 print("  /pause    - Pause to add additional context to the conversation")
-                print("\nExample usage: Just type '/compact' as your input to compress the convers...  # truncated for line length
+                print("\nExample usage: Just type '/compact' as your input to compress the convers)
 
                 sys.exit(0)
 
         if not initial_prompt.strip():
             print("Error: Empty prompt.")
             sys.exit(1)
-    except Exception as e:
+    except (RuntimeError, IOError) as e:
         print(f"Error getting initial prompt: {str(e)}")
         sys.exit(1)
 
@@ -245,7 +245,7 @@ async def main():
     print(f"- Model: {model}")
     print(f"- System Prompt: {system_prompt_path}")
     print(f"- Initial Prompt Length: {len(initial_prompt)} characters")
-    print(f"- Test Mode: {'Enabled - commands will NOT actually execute' if test_mode else 'Disabl...  # truncated for line length
+    print(f"- Test Mode: {'Enabled - commands will NOT actually execute' if test_mode else 'Disabl)
 
 
     # Display feature information
@@ -253,7 +253,7 @@ async def main():
     print("- User Input Requests: The agent can pause and ask for additional information")
     print("- Human Context Pause: Press Ctrl+Z to pause and add context to the conversation")
     print("- Task Planning: The agent can create and track long-term tasks")
-    print("- System Detection: The agent will automatically detect and adapt to your OS environment")
+    print("- System Detection: The agent will automatically detect and adapt to your OS environmen)
 
     print("- File Operations: Enhanced file manipulation capabilities")
     print("- API Cost Tracking: Monitors and reports token usage and costs")
@@ -281,7 +281,7 @@ async def main():
         # Load system prompt and prepend system status
         try:
             system_prompt = load_and_augment_system_prompt(str(system_prompt_path))
-        except Exception as e:
+        except (RuntimeError, IOError) as e:
             print(f"Warning: Error loading system prompt: {str(e)}")
             print("Continuing with empty system prompt...")
             system_prompt = ""
@@ -294,7 +294,7 @@ async def main():
 
     except KeyboardInterrupt:
         print("\nShutting down agent (Ctrl+C pressed)...")
-    except Exception as e:
+    except (RuntimeError, IOError) as e:
         print(f"\nError running agent: {str(e)}")
         if agent:
             try:
@@ -306,7 +306,7 @@ async def main():
         raise
     finally:
         # Display API usage summary if available
-        if agent and hasattr(agent, 'llm') and hasattr(agent.llm, 'usage_history') and agent.llm.u...  # truncated for line length
+        if agent and hasattr(agent, 'llm') and hasattr(agent.llm, 'usage_history') and agent.llm.u)
 
             print("\n=== API USAGE SUMMARY ===")
             print(f"Total API Calls: {len(agent.llm.usage_history)}")
@@ -324,7 +324,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nShutdown complete")
         sys.exit(0)
-    except Exception as e:
+    except (RuntimeError, IOError) as e:
         print(f"\nFatal error: {str(e)}")
         sys.exit(1)
 

@@ -253,6 +253,10 @@ class AutonomousAgent:
     ):
         if not api_key:
             raise ValueError("API key required")
+            
+        # Conversation state tracking for human pause feature
+        self.last_assistant_response = None
+        self.paused_for_human_context = False
 
         # Get memory location from memory_manager or create a new one
         if memory_manager:
@@ -533,6 +537,9 @@ class AutonomousAgent:
                     self.local_conversation_history.append(assistant_msg)
                     self._print_response(response)
                     
+                    # Store the last assistant response for potential human context pausing
+                    self.last_assistant_response = response
+                    
                     # Check if the model is requesting user input
                     should_pause, question = await self.llm.check_for_user_input_request(response)
                     if should_pause:
@@ -557,21 +564,111 @@ class AutonomousAgent:
                             if cmd == '/compact':
                                 # Force compression of context
                                 print("\nCompacting conversation context...")
+                                
+                                # Save info about active state before compression
+                                try:
+                                    if hasattr(self.memory_manager, 'add_agent_note'):
+                                        task_info = self.working_memory.get('current_task', 'Unknown task')
+                                        state_note = f"Context compaction triggered at turn {self.memory_manager.conversation_turn_count}. Active task: {task_info}"
+                                        self.memory_manager.add_agent_note(
+                                            state_note,
+                                            note_type="context_state",
+                                            importance="high",
+                                            tags=["compression", "context_window", "state"]
+                                        )
+                                except Exception as note_error:
+                                    logger.error(f"Error saving state before compression: {note_error}")
+                                
+                                # Perform compression
                                 compressed_history = await self.compress_context(self.local_conversation_history, force=True)
+                                
                                 # Replace the history with the compressed version
                                 self.local_conversation_history = compressed_history
-                                # Add a note about the compression
+                                
+                                # Record important working memory items in notes for persistence
+                                try:
+                                    for key in ['important_files', 'current_task']:
+                                        if key in self.working_memory:
+                                            if key == 'important_files' and isinstance(self.working_memory[key], list):
+                                                files_note = f"Important files: {', '.join(self.working_memory[key][:10])}"
+                                                if len(self.working_memory[key]) > 10:
+                                                    files_note += f" and {len(self.working_memory[key]) - 10} more"
+                                                
+                                                self.memory_manager.add_agent_note(
+                                                    files_note,
+                                                    note_type="important_files",
+                                                    importance="normal",
+                                                    tags=["files", "state"]
+                                                )
+                                            elif key == 'current_task':
+                                                self.memory_manager.add_agent_note(
+                                                    f"Current task: {self.working_memory[key]}",
+                                                    note_type="task_state",
+                                                    importance="high", 
+                                                    tags=["task", "state"]
+                                                )
+                                except Exception as mem_error:
+                                    logger.error(f"Error preserving working memory items: {mem_error}")
+                                
+                                # Add a note about the compression with context about what to continue
+                                continue_task = self.working_memory.get('current_task', 'the previous task')
                                 user_msg = {
                                     "role": "user",
-                                    "content": "I've requested the conversation context to be compacted. Please continue with the previous task."
+                                    "content": f"I've requested the conversation context to be compacted to save memory. Please continue with {continue_task}."
                                 }
                                 self.local_conversation_history.append(user_msg)
+                                continue
+                            elif cmd == '/pause':
+                                # Handle pause command to add context
+                                print("\n" + "="*60)
+                                print("CONVERSATION PAUSED FOR ADDITIONAL CONTEXT")
+                                print("-"*60)
+                                print("Enter additional context to add to the conversation.")
+                                print("This will be added to the agent's last response before continuing.")
+                                print("Press Enter on a blank line when finished.")
+                                print("-"*60)
+                                
+                                # Collect multi-line input
+                                lines = []
+                                while True:
+                                    try:
+                                        line = input()
+                                        if not line.strip():
+                                            break
+                                        lines.append(line)
+                                    except EOFError:
+                                        break
+                                        
+                                additional_context = "\n".join(lines)
+                                
+                                if additional_context.strip():
+                                    # Add the context to the conversation
+                                    await self.add_human_context(additional_context)
+                                    print("="*60)
+                                    print("Context added. Conversation will continue.")
+                                    print("="*60 + "\n")
+                                    
+                                    # Add a message indicating the context was added
+                                    user_msg = {
+                                        "role": "user",
+                                        "content": "I've added additional context above. Please continue with that in mind."
+                                    }
+                                    self.local_conversation_history.append(user_msg)
+                                else:
+                                    print("No additional context provided. Continuing without changes.")
+                                    # Add a simple continuation message
+                                    user_msg = {
+                                        "role": "user",
+                                        "content": "Please continue with the previous task."
+                                    }
+                                    self.local_conversation_history.append(user_msg)
                                 continue
                             elif cmd == '/help':
                                 # Show help and continue
                                 help_text = "\nAvailable Commands:\n"
                                 help_text += "  /help     - Show this help message\n"
                                 help_text += "  /compact  - Compact conversation history to save context space\n"
+                                help_text += "  /pause    - Pause to add additional context to the conversation\n"
                                 
                                 print(help_text)
                                 
@@ -631,11 +728,56 @@ class AutonomousAgent:
                                 "role": "user",
                                 "content": filtered_message
                             }
+                        elif slash_cmd == '/pause':
+                            # Handle pause in output
+                            print("\n" + "="*60)
+                            print("CONVERSATION PAUSED FOR ADDITIONAL CONTEXT")
+                            print("-"*60)
+                            print("Enter additional context to add to the conversation.")
+                            print("This will be added to the agent's last response before continuing.")
+                            print("Press Enter on a blank line when finished.")
+                            print("-"*60)
+                            
+                            # Collect multi-line input
+                            lines = []
+                            while True:
+                                try:
+                                    line = input()
+                                    if not line.strip():
+                                        break
+                                    lines.append(line)
+                                except EOFError:
+                                    break
+                                    
+                            additional_context = "\n".join(lines)
+                            
+                            if additional_context.strip():
+                                # Add the context to the conversation
+                                await self.add_human_context(additional_context)
+                                print("="*60)
+                                print("Context added. Conversation will continue.")
+                                print("="*60 + "\n")
+                                
+                                # Add a message indicating the context was added
+                                filtered_message = combined_message.replace('/pause', '(Context added)')
+                                next_user_msg = {
+                                    "role": "user",
+                                    "content": f"{filtered_message}\n\nI've added additional context to your last response. Please continue with that in mind."
+                                }
+                            else:
+                                print("No additional context provided. Continuing without changes.")
+                                # Add a simple continuation message with filtered command
+                                filtered_message = combined_message.replace('/pause', '(Pause requested but no context added)')
+                                next_user_msg = {
+                                    "role": "user",
+                                    "content": filtered_message
+                                }
                         elif slash_cmd == '/help':
                             # Show help
                             help_text = "\nAvailable Commands:\n"
                             help_text += "  /help     - Show this help message\n"
                             help_text += "  /compact  - Compact conversation history to save context space\n"
+                            help_text += "  /pause    - Pause to add additional context to the conversation\n"
                             print(help_text)
                             # Replace the command with a note
                             filtered_message = combined_message.replace('/help', '(Help displayed)')
@@ -871,13 +1013,34 @@ class AutonomousAgent:
 - Test Mode: {'Enabled - commands will not actually execute' if self.test_mode else 'Disabled - commands will execute normally'}
 """
             
+            # Add conversation metrics
+            conversation_metrics = ""
+            if hasattr(self.memory_manager, 'conversation_turn_count'):
+                # Update metrics to get latest values
+                metrics = self.memory_manager.update_conversation_metrics(increment_turns=False)
+                risk_level = "low"
+                if metrics["turns"] > 50 or metrics["duration_minutes"] > 60:
+                    risk_level = "high"
+                elif metrics["turns"] > 30 or metrics["duration_minutes"] > 45:
+                    risk_level = "medium"
+                
+                conversation_metrics = f"""
+# Conversation Status
+- Turn count: {metrics["turns"]}
+- Duration: {metrics["duration_minutes"]:.1f} minutes
+- Context window risk: {risk_level}
+- Use /compact command if conversation is getting too long
+"""
+            
             # Add memory stats if available
             memory_stats = ""
             if hasattr(self.memory_manager, 'memory_stats'):
                 memory_stats = "\n# Memory Status\n"
-                for k, v in self.memory_manager.memory_stats.items():
-                    if k != 'last_backup_time':  # Skip timestamp fields
-                        memory_stats += f"- {k}: {v}\n"
+                # Only show key memory stats to avoid clutter
+                key_stats = ['nodes_added', 'documents_saved', 'mind_maps_created', 'notes_added']
+                for k in key_stats:
+                    if k in self.memory_manager.memory_stats:
+                        memory_stats += f"- {k}: {self.memory_manager.memory_stats[k]}\n"
             
             # Add important files if any have been stored
             files_section = ""
@@ -892,9 +1055,72 @@ class AutonomousAgent:
                 tasks_section = "\n# Active Tasks\n"
                 for task in self.working_memory['tasks'][-3:]:  # Show last 3 tasks
                     tasks_section += f"- {task.get('title', 'Untitled task')} (Status: {task.get('status', 'pending')})\n"
+            
+            # Add mind maps if available
+            mind_maps_section = ""
+            if hasattr(self.memory_manager, 'mind_maps') and self.memory_manager.mind_maps:
+                # Show only the most recently modified mind maps
+                recent_maps = sorted(
+                    self.memory_manager.mind_maps.values(),
+                    key=lambda m: m.get("last_modified", 0),
+                    reverse=True
+                )[:2]
+                
+                if recent_maps:
+                    mind_maps_section = "\n# Active Mind Maps\n"
+                    for mind_map in recent_maps:
+                        mind_maps_section += f"- {mind_map.get('title')} ({mind_map.get('metadata', {}).get('node_count', 0)} concepts)\n"
+            
+            # Add note about memory management
+            memory_management = """
+# Memory Management
+- Leave SHORT, CONCISE notes about important information with memory_manager.add_agent_note()
+- Track task status with memory_manager.log_task_status()
+- Create mind maps for complex topics with memory_manager.create_mind_map()
+- Add permanent knowledge to memory_manager.add_to_knowledge_base()
+- Minimize file output in stdout - focus on showing only essential information
+"""
+            
+            # Add persistent memory from previous sessions if available
+            persistent_memory_section = ""
+            try:
+                if hasattr(self.memory_manager, 'get_session_persistent_memory'):
+                    persistent_data = self.memory_manager.get_session_persistent_memory()
                     
+                    if persistent_data and any(persistent_data.values()):
+                        persistent_memory_section = "\n# Previous Session Context\n"
+                        
+                        # Add agent notes
+                        if persistent_data.get("agent_notes"):
+                            persistent_memory_section += "\n## Important Agent Notes\n"
+                            for note in persistent_data["agent_notes"][:5]:  # Limit to top 5
+                                persistent_memory_section += f"- {note.get('content', '')}\n"
+                        
+                        # Add task statuses
+                        if persistent_data.get("task_statuses"):
+                            persistent_memory_section += "\n## Recent Task Statuses\n"
+                            for status in persistent_data["task_statuses"][:3]:  # Limit to top 3
+                                persistent_memory_section += f"- {status.get('content', '')}\n"
+                        
+                        # Add mind maps
+                        if persistent_data.get("mind_maps"):
+                            persistent_memory_section += "\n## Active Mind Maps\n"
+                            for mind_map in persistent_data["mind_maps"]:
+                                persistent_memory_section += f"- {mind_map.get('title', '')} ({mind_map.get('nodes_count', 0)} concepts)\n"
+                        
+                        # Add knowledge base items
+                        if persistent_data.get("knowledge_base"):
+                            persistent_memory_section += "\n## Knowledge Base\n"
+                            for item in persistent_data["knowledge_base"]:
+                                truncated_content = item.get('content', '')
+                                if len(truncated_content) > 100:
+                                    truncated_content = truncated_content[:97] + "..."
+                                persistent_memory_section += f"- {item.get('title', '')}: {truncated_content}\n"
+            except Exception as e:
+                logger.error(f"Error adding persistent memory to system prompt: {e}")
+            
             # Combine all sections
-            combined_prompt = f"{system_prompt}\n\n{identity_section}{system_info_section}{memory_stats}{files_section}{tasks_section}"
+            combined_prompt = f"{system_prompt}\n\n{identity_section}{system_info_section}{conversation_metrics}{persistent_memory_section}{memory_stats}{files_section}{tasks_section}{mind_maps_section}{memory_management}"
             return combined_prompt
             
         except Exception as e:
@@ -997,7 +1223,10 @@ class AutonomousAgent:
             logger.error(f"Error saving session summary: {e}")
 
     def _print_response(self, content: str):
-        """Print only the message content from the agent's response, plus any commands"""
+        """
+        Print only the message content from the agent's response, plus any commands.
+        Formats the output to be more concise and avoids showing file contents.
+        """
         # Extract message tag content if present
         message_content = None
         message_match = re.search(r'<message>(.*?)</message>', content, re.DOTALL)
@@ -1006,32 +1235,94 @@ class AutonomousAgent:
         
         # Extract commands for display
         commands = []
-        for tag in self.command_extractor.COMMAND_TAGS + self.command_extractor.FILE_OP_TAGS:
+        for tag in self.command_extractor.COMMAND_TAGS:
             pattern = f"<{tag}>(.*?)</{tag}>"
             matches = re.finditer(pattern, content, re.DOTALL)
             for match in matches:
                 cmd = match.group(1).strip()
-                commands.append(f"<{tag}>\n{cmd}\n</{tag}>")
+                # For bash commands, only show the first line or a shortened version
+                if tag == "bash" and len(cmd.split('\n')) > 1:
+                    cmd_first_line = cmd.split('\n')[0]
+                    commands.append(f"$ {cmd_first_line}")
+                else:
+                    # Truncate long commands
+                    if len(cmd) > 100:
+                        cmd = cmd[:97] + "..."
+                    commands.append(f"$ {cmd}")
         
-        # Print message content if found
+        # Handle file operations specially - just show a summary
+        file_ops = []
+        for tag in self.command_extractor.FILE_OP_TAGS:
+            pattern = f"<{tag}>(.*?)</{tag}>"
+            matches = re.finditer(pattern, content, re.DOTALL)
+            for match in matches:
+                cmd = match.group(1).strip()
+                
+                # Parse parameters to get file path
+                params = {}
+                try:
+                    if cmd.strip().startswith('{') and cmd.strip().endswith('}'):
+                        params = json.loads(cmd)
+                    else:
+                        # Try line-by-line parsing for key: value format
+                        for line in cmd.split('\n'):
+                            if ':' in line:
+                                key, value = line.split(':', 1)
+                                params[key.strip()] = value.strip()
+                except:
+                    pass
+                
+                # Create a concise summary based on operation type
+                if tag == "view" and "file_path" in params:
+                    file_ops.append(f"📄 Reading {params['file_path']}")
+                elif tag == "edit" and "file_path" in params:
+                    file_ops.append(f"✏️ Editing {params['file_path']}")
+                elif tag == "replace" and "file_path" in params:
+                    file_ops.append(f"🔄 Replacing {params['file_path']}")
+                elif tag == "glob" and "pattern" in params:
+                    file_ops.append(f"🔍 Finding files matching {params['pattern']}")
+                elif tag == "grep" and "pattern" in params:
+                    file_ops.append(f"🔍 Searching for '{params['pattern']}' in files")
+                elif tag == "ls" and "path" in params:
+                    file_ops.append(f"📁 Listing directory {params['path']}")
+                else:
+                    file_ops.append(f"{tag.upper()}: Operation on files")
+                    
+        # Extract thinking blocks for better context awareness
+        thinking_blocks = self.command_extractor.extract_thinking(content)
+        planning_blocks = self.command_extractor.extract_plan(content)
+        
+        # Print in a more compact way
+        print("\n", end="")
+        
+        # Show agent's actual message first as it's most important
         if message_content:
-            print("\n=== MESSAGE ===")
-            print(message_content)
-            print("===============")
+            print(message_content.strip())
+            print("")
         
-        # Print commands if any
+        # Compact command display
         if commands:
-            print("\n=== COMMANDS ===")
+            print("Commands:")
             for cmd in commands:
-                print(cmd)
-                print("---------------")
-            print("================")
+                print(f"  {cmd}")
+            print("")
         
-        # If no message tag, fall back to printing the whole response
-        if not message_content and not commands:
-            print("\n=== LLM RESPONSE ===")
-            print(content)
-            print("=====================")
+        # Show file operations
+        if file_ops:
+            print("File Operations:")
+            for op in file_ops:
+                print(f"  {op}")
+            print("")
+        
+        # If nothing found in the structured format, fall back to printing the whole response
+        if not message_content and not commands and not file_ops:
+            # Strip XML tags for cleaner output
+            clean_content = re.sub(r'<[^>]+>', '', content)
+            print(clean_content.strip())
+            
+        # Update the conversation turn count in memory manager
+        if hasattr(self.memory_manager, 'update_conversation_metrics'):
+            self.memory_manager.update_conversation_metrics()
 
     def archive_session(self):
         """
@@ -1086,7 +1377,10 @@ class AutonomousAgent:
             logger.error(f"Error saving session to memory graph: {e}")
             
     def _generate_session_summary(self) -> str:
-        """Generate a summary of the current session"""
+        """
+        Generate a comprehensive summary of the current session with enhanced intelligence.
+        This summary is used for both the user and for maintaining context between sessions.
+        """
         try:
             # Extract all user messages
             user_msgs = [m['content'] for m in self.local_conversation_history if m.get('role') == 'user']
@@ -1094,64 +1388,204 @@ class AutonomousAgent:
             # Extract all assistant messages
             assistant_msgs = [m['content'] for m in self.local_conversation_history if m.get('role') == 'assistant']
             
-            # Extract all decisions, plans, and summaries
+            # Get all reasoning blocks that help understand the session
             decisions = []
             plans = []
             summaries = []
+            thinking = []
             for msg in assistant_msgs:
                 decisions.extend(self.command_extractor.extract_decision(msg))
                 plans.extend(self.command_extractor.extract_plan(msg))
                 summaries.extend(self.command_extractor.extract_summary(msg))
+                thinking.extend(self.command_extractor.extract_thinking(msg))
             
-            # Extract commands executed
-            commands = []
+            # Extract commands executed (separate by type for better organization)
+            commands_by_type = {}
             for msg in assistant_msgs:
                 for tag in self.command_extractor.COMMAND_TAGS:
                     pattern = f"<{tag}>(.*?)</{tag}>"
                     matches = re.finditer(pattern, msg, re.DOTALL)
                     for match in matches:
                         cmd = match.group(1).strip().split('\n')[0]  # First line only
-                        commands.append(f"{tag}: {cmd}")
+                        if tag not in commands_by_type:
+                            commands_by_type[tag] = []
+                        commands_by_type[tag].append(cmd)
             
             # Create a comprehensive summary
             summary_parts = []
             
-            # Initial task
-            if user_msgs:
-                summary_parts.append("# Session Summary\n")
-                summary_parts.append("## Initial Task")
-                summary_parts.append(user_msgs[0][:300] + ("..." if len(user_msgs[0]) > 300 else ""))
+            # Start with session metadata
+            summary_parts.append("# Session Summary\n")
+            summary_parts.append(f"Generated: {datetime.now().isoformat()}")
+            summary_parts.append(f"Session ID: {self.agent_id}")
+            summary_parts.append(f"Duration: {len(self.local_conversation_history)//2} turns")
             
-            # Key decisions 
+            # Add initial task with the original request for context
+            if user_msgs:
+                summary_parts.append("\n## Initial Task")
+                # More comprehensive initial task - it's important for continuity
+                initial_task = user_msgs[0]
+                # Keep more of the initial task if it's not too long
+                if len(initial_task) > 500:
+                    summary_parts.append(initial_task[:500] + "...")
+                else:
+                    summary_parts.append(initial_task)
+            
+            # Extract key insights from thinking blocks
+            if thinking:
+                insights = []
+                for thought in thinking:
+                    lines = thought.split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        if any(marker in line.lower() for marker in ['important', 'key insight', 'conclusion', 'critical']):
+                            if line and len(line) > 10:
+                                insights.append(line)
+                
+                if insights:
+                    summary_parts.append("\n## Key Insights")
+                    for insight in insights[:5]:  # Limit to 5 most important insights
+                        summary_parts.append(f"- {insight}")
+            
+            # Key decisions with higher priority - they're important
             if decisions:
                 summary_parts.append("\n## Key Decisions")
-                summary_parts.append("\n".join(decisions[:3]))
+                for i, decision in enumerate(decisions[:3]):
+                    # Format multi-line decisions
+                    decision_text = decision.replace('\n', ' ').strip()
+                    if len(decision_text) > 300:
+                        decision_text = decision_text[:297] + "..."
+                    summary_parts.append(f"{i+1}. {decision_text}")
             
-            # Plans developed
+            # Add task accomplishments if detected
+            task_accomplishments = []
+            for msg in assistant_msgs[-3:]:  # Look at last 3 messages for accomplishments
+                lines = msg.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if any(marker in line.lower() for marker in 
+                          ['completed', 'finished', 'implemented', 'created', 'fixed', 'solved', 'built']):
+                        if len(line) > 10 and not line.startswith('<') and not line.endswith('>'):
+                            task_accomplishments.append(line)
+            
+            if task_accomplishments:
+                summary_parts.append("\n## Accomplishments")
+                for task in task_accomplishments[:5]:
+                    summary_parts.append(f"- {task}")
+            
+            # Plans developed (structured as a list for clarity)
             if plans:
                 summary_parts.append("\n## Plans")
-                summary_parts.append("\n".join(plans[:2]))
+                for plan in plans[:2]:  # Only include top 2 plans
+                    # Format plans as bullet points if multi-line
+                    plan_lines = plan.split('\n')
+                    if len(plan_lines) > 1:
+                        summary_parts.append("Plan steps:")
+                        for line in plan_lines[:5]:  # Limit to first 5 steps
+                            if line.strip():
+                                summary_parts.append(f"- {line.strip()}")
+                        if len(plan_lines) > 5:
+                            summary_parts.append(f"- ...and {len(plan_lines) - 5} more steps")
+                    else:
+                        summary_parts.append(plan)
             
-            # Key commands executed
-            if commands:
+            # Key commands executed (organized by type)
+            if commands_by_type:
                 summary_parts.append("\n## Key Commands")
-                summary_parts.append("\n".join(commands[:10]))
-                if len(commands) > 10:
-                    summary_parts.append(f"...and {len(commands) - 10} more commands")
+                for tag, cmds in commands_by_type.items():
+                    # Only show a few examples of each command type
+                    if cmds:
+                        summary_parts.append(f"\n{tag.upper()} Commands:")
+                        for cmd in cmds[:5]:  # Limit to 5 per type
+                            summary_parts.append(f"- {cmd}")
+                        if len(cmds) > 5:
+                            summary_parts.append(f"- ...and {len(cmds) - 5} more {tag} commands")
             
-            # Final outcome
+            # Created/modified files (from working memory)
+            if 'important_files' in self.working_memory and self.working_memory['important_files']:
+                summary_parts.append("\n## Important Files")
+                for file_path in self.working_memory['important_files']:
+                    summary_parts.append(f"- {file_path}")
+            
+            # Final outcome - prioritize explicit summaries over last messages
             if summaries:
                 summary_parts.append("\n## Results and Outcomes")
-                summary_parts.append("\n".join(summaries))
+                summary_parts.append("\n".join(summaries[:2]))  # Limit to top 2 summaries
             elif assistant_msgs:
                 # If no explicit summaries, use the last assistant message
-                summary_parts.append("\n## Final Message")
-                summary_parts.append(assistant_msgs[-1][:300] + ("..." if len(assistant_msgs[-1]) > 300 else ""))
+                summary_parts.append("\n## Final Status")
+                # Remove XML tags from the last message for cleaner summary
+                last_msg = re.sub(r'<[^>]+>', '', assistant_msgs[-1])
+                # Take a larger portion of the last message, it's important for continuity
+                if len(last_msg) > 400:
+                    summary_parts.append(last_msg[:400] + "...")
+                else:
+                    summary_parts.append(last_msg)
             
-            return "\n\n".join(summary_parts)
+            # Generate recommendations for future sessions
+            recommendations = []
+            
+            # Check for unfinished tasks
+            if 'tasks' in self.working_memory:
+                unfinished = [t for t in self.working_memory['tasks'] 
+                             if t.get('status', '') not in ['completed', 'done']]
+                if unfinished:
+                    recommendations.append("Continue working on unfinished tasks from this session")
+            
+            # Check if any plans were not fully implemented
+            if plans and not any(word in ' '.join(summaries).lower() 
+                               for word in ['completed', 'finished', 'done', 'implemented']):
+                recommendations.append("Complete implementation of plans from this session")
+            
+            # Add recommendations if any were generated
+            if recommendations:
+                summary_parts.append("\n## Recommendations for Next Session")
+                for rec in recommendations:
+                    summary_parts.append(f"- {rec}")
+            
+            # Combine all parts into a coherent summary
+            full_summary = "\n".join(summary_parts)
+            
+            # Save the summary as an agent note for future reference
+            try:
+                if hasattr(self.memory_manager, 'add_agent_note'):
+                    # Create a condensed version for the agent note (first 500 chars)
+                    condensed = f"Session summary: {' '.join(summary_parts[:3])}..."
+                    if len(condensed) > 500:
+                        condensed = condensed[:497] + "..."
+                    
+                    self.memory_manager.add_agent_note(
+                        condensed,
+                        note_type="session_summary",
+                        importance="high",
+                        tags=["session", "summary", "important"]
+                    )
+                    
+                    # Also save full details as a knowledge base item if long enough
+                    if len(full_summary) > 300 and hasattr(self.memory_manager, 'add_to_knowledge_base'):
+                        self.memory_manager.add_to_knowledge_base(
+                            f"Session Summary - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                            full_summary,
+                            tags=["session", "summary", "history"]
+                        )
+            except Exception as note_error:
+                logger.error(f"Error saving session summary as agent note: {note_error}")
+            
+            return full_summary
+            
         except Exception as e:
-            logger.error(f"Error generating session summary: {e}")
-            return f"Session completed at {datetime.now().isoformat()}"
+            logger.error(f"Error generating enhanced session summary: {e}")
+            # Create a fallback minimal summary
+            try:
+                fallback = f"Session completed at {datetime.now().isoformat()}\n"
+                if self.local_conversation_history and len(self.local_conversation_history) > 1:
+                    user_msgs = [m for m in self.local_conversation_history if m.get('role') == 'user']
+                    if user_msgs:
+                        fallback += f"Initial request: {user_msgs[0]['content'][:100]}...\n"
+                    fallback += f"Total exchanges: {len(self.local_conversation_history) // 2}"
+                return fallback
+            except:
+                return f"Session completed at {datetime.now().isoformat()}"
 
     def cleanup(self):
         """Cleanup resources and save state"""
@@ -1175,6 +1609,83 @@ class AutonomousAgent:
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
 
+    async def add_human_context(self, additional_context: str):
+        """
+        Add human-provided context to the last assistant response and continue the conversation.
+        This allows humans to pause the conversation and provide more context.
+        
+        Args:
+            additional_context: The additional context provided by the human
+        """
+        if not self.last_assistant_response:
+            logger.warning("No previous assistant response to add context to")
+            return
+            
+        # Mark that we're paused for human context
+        self.paused_for_human_context = True
+        
+        try:
+            # Remove the last assistant message from history
+            if self.local_conversation_history and self.local_conversation_history[-1].get('role') == 'assistant':
+                last_assistant_msg = self.local_conversation_history.pop()
+                original_content = last_assistant_msg['content']
+                
+                # Format the combined content with clear separation
+                formatted_context = f"""
+{original_content}
+
+[HUMAN_ADDED_CONTEXT]
+{additional_context}
+[/HUMAN_ADDED_CONTEXT]
+"""
+                
+                # Create a new message with combined content
+                merged_msg = {
+                    "role": "assistant", 
+                    "content": formatted_context
+                }
+                
+                # Add it back to the conversation history
+                self.local_conversation_history.append(merged_msg)
+                self.last_assistant_response = formatted_context
+                
+                # Record this pause and context addition in working memory
+                if 'human_context_additions' not in self.working_memory:
+                    self.working_memory['human_context_additions'] = []
+                    
+                self.working_memory['human_context_additions'].append({
+                    'timestamp': datetime.now().isoformat(),
+                    'context_added': additional_context,
+                    'turn': len(self.local_conversation_history) // 2
+                })
+                
+                # Also record in memory manager for persistence
+                try:
+                    self.memory_manager.save_document(
+                        f"human_context_{int(time.time())}",
+                        f"Human added context at turn {len(self.local_conversation_history) // 2}:\n\n{additional_context}",
+                        tags=["human_context", "conversation", "pause"],
+                        metadata={
+                            "timestamp": time.time(),
+                            "turn": len(self.local_conversation_history) // 2,
+                            "content_length": len(additional_context)
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Error saving human context addition to memory: {e}")
+                
+                # Log the context addition
+                logger.info(f"Added human context of {len(additional_context)} chars to conversation")
+                
+            else:
+                logger.warning("Cannot add context: Last message in history is not from assistant")
+                
+        except Exception as e:
+            logger.error(f"Error adding human context: {e}")
+        finally:
+            # Reset the pause state
+            self.paused_for_human_context = False
+    
     async def heartbeat(self):
         """Auto-save state every 2 minutes and perform health checks"""
         try:
@@ -1307,8 +1818,8 @@ class AutonomousAgent:
 
     async def compress_context(self, messages: List[Dict], token_limit: int = 16000, force: bool = False) -> List[Dict]:
         """
-        Compress conversation context when it gets too large.
-        Implements smart summarization of earlier exchanges while keeping recent messages intact.
+        Compress conversation context when it gets too large, with enhanced information prioritization.
+        Implements intelligent summarization of earlier exchanges while keeping recent messages intact.
         
         Args:
             messages: List of conversation messages
@@ -1334,22 +1845,141 @@ class AutonomousAgent:
             user_messages = [msg for msg in messages if msg.get('role') == 'user']
             assistant_messages = [msg for msg in messages if msg.get('role') == 'assistant']
             
-            # Always keep system messages
+            # Always keep system messages (they're important for context)
             kept_messages = system_messages.copy()
             
-            # Determine how many recent exchanges to keep
-            # One exchange is one user message followed by one assistant message
-            exchanges_to_keep = min(3, len(user_messages))
+            # Identify and mark key information in messages before compressing
+            # 1. Messages with high-value information (decisions, code, important findings)
+            # 2. First message and messages establishing task context
+            # 3. Recent messages that maintain continuity
             
-            # Keep recent exchanges (user + assistant pairs)
+            # Tag messages with their importance score
+            scored_messages = []
+            
+            # First message gets high score (often contains initial task description)
+            if user_messages:
+                initial_msg = user_messages[0]
+                scored_messages.append((initial_msg, 10, 0))  # (message, score, original_index)
+            
+            # Score each assistant message
+            for i, msg in enumerate(assistant_messages):
+                score = 0
+                content = msg.get('content', '')
+                
+                # Check for key content types that indicate importance
+                # Code blocks are high value
+                if re.search(r'```[a-z]*\n[\s\S]*?\n```', content):
+                    score += 5
+                
+                # Decision blocks are high value
+                if len(self.command_extractor.extract_decision(content)) > 0:
+                    score += 8
+                
+                # Planning blocks are high value
+                if len(self.command_extractor.extract_plan(content)) > 0:
+                    score += 7
+                
+                # Task definitions are high value
+                if len(self.command_extractor.extract_tasks(content)) > 0:
+                    score += 6
+                
+                # Command execution is medium value
+                if len(re.findall(r'<(bash|python)>.*?</(bash|python)>', content, re.DOTALL)) > 0:
+                    score += 4
+                
+                # Summary blocks are medium value
+                if len(self.command_extractor.extract_summary(content)) > 0:
+                    score += 5
+                
+                # Recent messages get a recency boost
+                recency_boost = max(0, 5 - min(5, (len(assistant_messages) - i)))
+                score += recency_boost
+                
+                # Store original index to maintain order
+                original_index = messages.index(msg)
+                scored_messages.append((msg, score, original_index))
+            
+            # Score each user message
+            for i, msg in enumerate(user_messages[1:], 1):  # Skip the first message, already added
+                score = 0
+                content = msg.get('content', '')
+                
+                # Messages with code snippets are valuable
+                if re.search(r'```[a-z]*\n[\s\S]*?\n```', content):
+                    score += 5
+                
+                # Messages with direct questions are valuable
+                if '?' in content:
+                    score += 4
+                
+                # Messages with commands or instructions are valuable
+                if any(cmd in content.lower() for cmd in ['create', 'make', 'implement', 'build', 'fix', 'update']):
+                    score += 3
+                
+                # Recent messages get a recency boost
+                recency_boost = max(0, 5 - min(5, (len(user_messages) - i)))
+                score += recency_boost
+                
+                # Store original index to maintain order
+                original_index = messages.index(msg)
+                scored_messages.append((msg, score, original_index))
+            
+            # Sort by score (descending)
+            scored_messages.sort(key=lambda x: x[1], reverse=True)
+            
+            # Determine how many exchanges to keep based on context size
+            base_exchanges = 3
+            if estimated_tokens > token_limit * 1.5:  # If severely over token limit
+                exchanges_to_keep = 2  # Keep fewer messages
+            elif estimated_tokens <= token_limit * 1.2:  # If only slightly over
+                exchanges_to_keep = min(5, len(user_messages))  # May keep more messages
+            else:
+                exchanges_to_keep = base_exchanges
+            
+            # Keep most recent exchanges (user + assistant pairs) regardless of score
+            # These maintain conversation continuity
             for i in range(1, exchanges_to_keep + 1):
                 if i <= len(user_messages):
-                    kept_messages.append(user_messages[-i])
+                    user_msg = user_messages[-i]
+                    
+                    # Check if already in kept_messages
+                    if user_msg not in [m for m, _, _ in scored_messages[:exchanges_to_keep]]:
+                        # Add with high score to ensure it's kept, but after the top scored messages
+                        scored_messages.insert(exchanges_to_keep, 
+                                             (user_msg, 100 - i, messages.index(user_msg)))
+                    
                     if i <= len(assistant_messages):
-                        kept_messages.append(assistant_messages[-i])
+                        asst_msg = assistant_messages[-i]
+                        
+                        # Check if already in kept_messages
+                        if asst_msg not in [m for m, _, _ in scored_messages[:exchanges_to_keep*2]]:
+                            # Add with high score to ensure it's kept
+                            scored_messages.insert(exchanges_to_keep*2, 
+                                                 (asst_msg, 100 - i, messages.index(asst_msg)))
+            
+            # Calculate how many high-value messages we can keep (based on token budget)
+            # We want to keep about 70% of the token budget for the highest value messages
+            token_target = token_limit * 0.7
+            kept_tokens = sum(len(str(msg.get('content', ''))) for msg in system_messages) // 4
+            
+            # Add highest scored messages until we reach the target
+            high_value_messages = []
+            for msg, score, original_index in scored_messages:
+                msg_tokens = len(str(msg.get('content', ''))) // 4
+                if kept_tokens + msg_tokens <= token_target:
+                    high_value_messages.append((msg, original_index))
+                    kept_tokens += msg_tokens
+                else:
+                    # If we can't fit more high-value messages, stop
+                    break
             
             # Sort by original order
-            kept_messages.sort(key=lambda m: messages.index(m))
+            high_value_messages.sort(key=lambda x: x[1])
+            
+            # Add high-value messages to kept_messages
+            for msg, _ in high_value_messages:
+                if msg not in kept_messages:
+                    kept_messages.append(msg)
             
             # Messages to summarize are ones not kept
             to_summarize = [m for m in messages if m not in kept_messages]
@@ -1361,134 +1991,347 @@ class AutonomousAgent:
             user_to_summarize = [m['content'] for m in to_summarize if m.get('role') == 'user']
             assistant_to_summarize = [m['content'] for m in to_summarize if m.get('role') == 'assistant']
             
+            # Get key information from agent notes if available
+            agent_notes = []
+            try:
+                if hasattr(self.memory_manager, 'search_memory'):
+                    agent_notes = self.memory_manager.search_memory(
+                        "important", 
+                        tags=["agent_notes", "important"], 
+                        limit=5,
+                        recency_boost=True
+                    )
+                    
+                    # Additionally, get task-specific notes
+                    if 'current_task' in self.working_memory:
+                        task_notes = self.memory_manager.search_memory(
+                            self.working_memory['current_task'], 
+                            tags=["agent_notes"], 
+                            limit=3,
+                            recency_boost=True
+                        )
+                        # Combine without duplicates
+                        existing_ids = set(note.get('id', '') for note in agent_notes)
+                        for note in task_notes:
+                            if note.get('id', '') not in existing_ids:
+                                agent_notes.append(note)
+            except Exception as note_error:
+                logger.error(f"Error getting agent notes during compression: {note_error}")
+            
+            # Get knowledge base items
+            knowledge_items = []
+            try:
+                if hasattr(self.memory_manager, 'search_memory'):
+                    knowledge_items = self.memory_manager.search_memory(
+                        "knowledge_base", 
+                        tags=["knowledge_base", "permanent"],
+                        limit=2,
+                        recency_boost=False  # Knowledge items don't need recency bias
+                    )
+            except Exception as kb_error:
+                logger.error(f"Error getting knowledge base items during compression: {kb_error}")
+            
             # Create summary
             summary_parts = []
             
             # Add a clear header to indicate this is a summary
             summary_parts.append("## PREVIOUS CONVERSATION SUMMARY")
-            summary_parts.append(f"(Summarizing {len(to_summarize)} earlier messages)")
+            summary_parts.append(f"(Compressed {len(to_summarize)} earlier messages at turn {self.memory_manager.conversation_turn_count})")
             
-            # Summarize user messages
+            # Add high-priority agent notes first
+            if agent_notes:
+                summary_parts.append("\n### Important Agent Notes")
+                for note in agent_notes:
+                    note_content = note.get('content', '').strip()
+                    if len(note_content) > 200:
+                        note_content = note_content[:197] + "..."
+                    summary_parts.append(f"- {note_content}")
+            
+            # Add knowledge base items for continuity
+            if knowledge_items:
+                summary_parts.append("\n### Knowledge Base")
+                for item in knowledge_items:
+                    content = item.get('content', '').strip()
+                    if len(content) > 200:
+                        content = content[:197] + "..."
+                    summary_parts.append(f"- **{item.get('title', '')}**: {content}")
+            
+            # Extract important mind maps if available
+            mind_maps = []
+            try:
+                if hasattr(self.memory_manager, 'search_mind_maps'):
+                    # Get most relevant mind maps to current context
+                    if user_messages and len(user_messages[-1]['content']) > 10:
+                        query = user_messages[-1]['content'][:100]  # Use latest user message
+                        mind_maps = self.memory_manager.search_mind_maps(query, limit=1)
+                        
+                        # If no results based on latest message, try with current task
+                        if not mind_maps and 'current_task' in self.working_memory:
+                            task_query = self.working_memory['current_task']
+                            mind_maps = self.memory_manager.search_mind_maps(task_query, limit=1)
+            except Exception as mind_map_error:
+                logger.error(f"Error getting mind maps during compression: {mind_map_error}")
+            
+            # Include mind map summary if available
+            if mind_maps and hasattr(self.memory_manager, 'extract_mind_map_summary'):
+                try:
+                    map_id = mind_maps[0]['id']
+                    map_summary = self.memory_manager.extract_mind_map_summary(map_id)
+                    # Only include first part to save tokens
+                    if len(map_summary) > 500:
+                        map_lines = map_summary.split('\n')
+                        short_summary = '\n'.join(map_lines[:10]) + "\n(mind map truncated to save context space)"
+                        summary_parts.append(f"\n{short_summary}")
+                    else:
+                        summary_parts.append(f"\n{map_summary}")
+                except Exception as e:
+                    logger.error(f"Error extracting mind map summary: {e}")
+            
+            # Summarize user messages with refined extraction
             if user_to_summarize:
-                summary_parts.append("\n### User Messages")
-                # Extract key questions
+                summary_parts.append("\n### User Requests & Questions")
+                
+                # Extract key questions and commands
                 questions = []
+                commands = []
+                requirements = []
+                
                 for msg in user_to_summarize:
                     # Look for question marks or implied questions
                     lines = msg.split('\n')
                     for line in lines:
-                        if '?' in line or any(starter in line.lower() for starter in 
-                                            ['how ', 'what ', 'when ', 'where ', 'why ', 'can you', 'please ']):
-                            questions.append(line.strip())
+                        line = line.strip()
+                        if not line:
+                            continue
+                            
+                        # Identify command-like statements
+                        if line.startswith('/') or any(cmd in line.lower() for cmd in 
+                                                     ['run', 'execute', 'install', 'create', 'generate', 
+                                                      'implement', 'build', 'make']):
+                            commands.append(line)
+                        # Identify questions
+                        elif '?' in line or any(starter in line.lower() for starter in 
+                                              ['how ', 'what ', 'when ', 'where ', 'why ', 'can you', 'please ']):
+                            questions.append(line)
+                        # Identify requirements or specifications
+                        elif any(req in line.lower() for req in 
+                                ['need', 'require', 'must', 'should', 'important', 'ensure', 'make sure']):
+                            requirements.append(line)
+                
+                # Add prioritized content
+                if commands:
+                    summary_parts.append("Key commands requested:")
+                    for i, cmd in enumerate(commands[:3]):  # Limit to 3 most important
+                        summary_parts.append(f"- {cmd[:100]}{'...' if len(cmd) > 100 else ''}")
                 
                 if questions:
-                    summary_parts.append("Key questions:")
-                    for i, q in enumerate(questions[:5]):
+                    summary_parts.append("Key questions asked:")
+                    for i, q in enumerate(questions[:3]):  # Limit to 3 most important
                         summary_parts.append(f"- {q[:100]}{'...' if len(q) > 100 else ''}")
-                    if len(questions) > 5:
-                        summary_parts.append(f"- ...and {len(questions) - 5} more questions")
-                else:
-                    # Just summarize general topics
-                    summary_parts.append("General topics mentioned:")
-                    topic_summary = "; ".join([m[:50] + ('...' if len(m) > 50 else '') for m in user_to_summarize[:3]])
+                
+                if requirements:
+                    summary_parts.append("Key requirements specified:")
+                    for i, req in enumerate(requirements[:3]):  # Limit to 3 most important
+                        summary_parts.append(f"- {req[:100]}{'...' if len(req) > 100 else ''}")
+                
+                # Add general topics as fallback
+                if not commands and not questions and not requirements:
+                    summary_parts.append("General topics discussed:")
+                    topic_summary = "; ".join([m[:40] + ('...' if len(m) > 40 else '') for m in user_to_summarize[:2]])
                     summary_parts.append(f"- {topic_summary}")
             
-            # Summarize assistant messages
+            # Summarize assistant actions with focus on important operations
             if assistant_to_summarize:
-                summary_parts.append("\n### Assistant Actions")
+                summary_parts.append("\n### Agent Actions & Decisions")
                 
-                # Extract command patterns as they're important
+                # Extract key information in order of priority
+                
+                # 1. Extract decision blocks (highest priority)
+                decisions = []
+                for msg in assistant_to_summarize:
+                    decisions.extend(self.command_extractor.extract_decision(msg))
+                
+                # 2. Extract plans 
+                plans = []
+                for msg in assistant_to_summarize:
+                    plans.extend(self.command_extractor.extract_plan(msg))
+                
+                # 3. Extract tasks and subtasks (important for continuity)
+                tasks = []
+                for msg in assistant_to_summarize:
+                    tasks.extend(self.command_extractor.extract_tasks(msg))
+                
+                # 4. Extract command patterns executed (important for continuity)
                 all_commands = []
                 for msg in assistant_to_summarize:
                     for tag in CommandExtractor.COMMAND_TAGS:
                         pattern = f"<{tag}>(.*?)</{tag}>"
                         matches = re.finditer(pattern, msg, re.DOTALL)
                         for match in matches:
-                            cmd = match.group(1).strip().split('\n')[0][:50]  # Just first line, limited length
+                            cmd = match.group(1).strip().split('\n')[0][:40]  # Just first line, limited length
                             all_commands.append(f"{tag}: {cmd}...")
                 
-                # Extract insights from reasoning blocks
+                # 5. Extract key insights from reasoning blocks
                 insights = []
-                thinking_patterns = ["<thinking>(.*?)</thinking>", "<decision>(.*?)</decision>", "<plan>(.*?)</plan>"]
+                thinking_patterns = ["<thinking>(.*?)</thinking>"]
                 for msg in assistant_to_summarize:
                     for pattern in thinking_patterns:
                         matches = re.finditer(pattern, msg, re.DOTALL)
                         for match in matches:
                             content = match.group(1).strip()
-                            # Extract key sentences
+                            # Extract key sentences with importance markers
                             sentences = re.split(r'[.!?]\s+', content)
                             for sentence in sentences:
                                 if len(sentence) > 10 and len(sentence) < 100:
-                                    if any(kw in sentence.lower() for kw in ['should', 'important', 'need', 'key', 'critical']):
+                                    if any(kw in sentence.lower() for kw in ['important', 'critical', 'key', 'must', 'should']):
                                         insights.append(sentence)
+                
+                # 6. Extract code blocks
+                code_blocks = []
+                for msg in assistant_to_summarize:
+                    # Match code blocks with language specifier
+                    code_pattern = r'```([a-z]*)\n([\s\S]*?)\n```'
+                    matches = re.finditer(code_pattern, msg, re.DOTALL)
+                    for match in matches:
+                        lang, code = match.groups()
+                        # Only keep short, important snippets
+                        if len(code.split('\n')) <= 5:
+                            if lang:
+                                code_blocks.append(f"{lang}: {code.strip()[:100]}...")
+                            else:
+                                code_blocks.append(f"Code: {code.strip()[:100]}...")
+                
+                # Add the extracted information in priority order
+                # Add decisions (highest priority)
+                if decisions:
+                    summary_parts.append("Key decisions made:")
+                    for decision in decisions[:2]:  # Limit to 2 most important decisions
+                        # Truncate long decisions
+                        if len(decision) > 150:
+                            decision = decision[:147] + "..."
+                        summary_parts.append(f"- {decision}")
+                
+                # Add tasks
+                if tasks:
+                    summary_parts.append("Tasks identified:")
+                    for task in tasks[:2]:  # Limit to 2 most important tasks
+                        # Format and truncate long tasks
+                        if len(task) > 150:
+                            task = task[:147] + "..."
+                        summary_parts.append(f"- {task}")
+                
+                # Add plans
+                if plans:
+                    summary_parts.append("Planning:")
+                    for plan in plans[:1]:  # Just the most recent plan
+                        # Format and truncate long plans
+                        plan_lines = plan.split('\n')
+                        if len(plan_lines) > 5:
+                            summary_parts.append(f"- {'. '.join(plan_lines[:5])}...")
+                        else:
+                            summary_parts.append(f"- {plan}")
                 
                 # Add commands executed
                 if all_commands:
-                    summary_parts.append("Previous commands:")
-                    for cmd in all_commands[:5]:
+                    summary_parts.append("Key commands executed:")
+                    for cmd in all_commands[:3]:  # Limit to most important commands
                         summary_parts.append(f"- {cmd}")
-                    if len(all_commands) > 5:
-                        summary_parts.append(f"- ...and {len(all_commands) - 5} more commands")
-                else:
-                    summary_parts.append("No commands were executed in the summarized portion.")
                 
-                # Add key insights
-                if insights:
-                    summary_parts.append("\nKey insights:")
-                    for insight in insights[:3]:
+                # Add code snippets if available
+                if code_blocks and len(summary_parts) < 30:  # Only add if summary not too long already
+                    summary_parts.append("Important code snippets:")
+                    for code in code_blocks[:2]:  # Limit to 2 code blocks
+                        summary_parts.append(f"- {code}")
+                
+                # Add key insights if space allows
+                if insights and len(summary_parts) < 30:  # Only add if summary not too long already
+                    summary_parts.append("Key insights:")
+                    for insight in insights[:2]:  # Limit to 2 key insights
                         summary_parts.append(f"- {insight}")
             
-            # Add important context from working memory
+            # Add important context from working memory (focus on current task)
             if self.working_memory:
-                summary_parts.append("\n### Important Context")
+                # Be selective about what working memory to include
+                important_keys = ['current_task', 'important_files', 'tasks']
+                has_important_items = any(key in self.working_memory for key in important_keys)
                 
-                # Add important files if tracked
-                if 'important_files' in self.working_memory and self.working_memory['important_files']:
-                    summary_parts.append("Important files:")
-                    for file in self.working_memory['important_files'][:5]:
-                        summary_parts.append(f"- {file}")
-                
-                # Add current task if available
-                if 'current_task' in self.working_memory:
-                    summary_parts.append(f"\nCurrent task: {self.working_memory['current_task']}")
+                if has_important_items:
+                    summary_parts.append("\n### Current Context")
+                    
+                    # Add current task if available (highest priority)
+                    if 'current_task' in self.working_memory:
+                        summary_parts.append(f"Current task: {self.working_memory['current_task']}")
+                    
+                    # Add tasks in progress if available
+                    if 'tasks' in self.working_memory and self.working_memory['tasks']:
+                        tasks_to_show = min(2, len(self.working_memory['tasks']))
+                        if tasks_to_show > 0:
+                            # Show only active tasks
+                            active_tasks = [t for t in self.working_memory['tasks'] 
+                                           if t.get('status', '') not in ['completed', 'done']]
+                            if active_tasks:
+                                summary_parts.append("Active tasks:")
+                                for task in active_tasks[:tasks_to_show]:
+                                    summary_parts.append(f"- {task.get('title', 'Untitled task')} (Status: {task.get('status', 'pending')})")
+                    
+                    # Add important files if tracked (limited set)
+                    if 'important_files' in self.working_memory and self.working_memory['important_files']:
+                        files_to_show = min(3, len(self.working_memory['important_files']))
+                        if files_to_show > 0:
+                            summary_parts.append("Important files:")
+                            for file in self.working_memory['important_files'][:files_to_show]:
+                                summary_parts.append(f"- {file}")
             
-            # Add relevant context from memory
-            if len(kept_messages) <= 7:  # Only add if we don't have many messages already
-                # Get recent memories that might be relevant based on the most recent user message
-                if user_messages:
-                    recent_query = user_messages[-1].get('content', '')
-                    if len(recent_query) > 10:
-                        results = self.memory_manager.search_memory(
-                            recent_query, 
-                            limit=3,
-                            tags=["important", "documentation", "decision"],
-                            recency_boost=True
-                        )
-                        if results:
-                            summary_parts.append("\n### Relevant Memory Items")
-                            for r in results:
-                                # Only include short snippets
-                                content = r.get('content', '')
-                                title = r.get('title', 'Untitled')
-                                if len(content) > 500:
-                                    content = content[:500] + "..."
-                                summary_parts.append(f"- {title}: {content}")
+            # Add a note about compression effects
+            summary_parts.append(f"\nNote: {len(to_summarize)} messages were compressed to save context space.")
+            summary_parts.append(f"Remember to use memory_manager.add_agent_note() for important information to improve context retention across compressions.")
             
-            # Combine all summary parts
+            # Combine all summary parts and ensure it's not too large
             summary = "\n".join(summary_parts)
             
+            # Record this compression in memory for future reference
+            try:
+                # Enhanced logging of compression with more details
+                self.memory_manager.add_agent_note(
+                    f"Compressed {len(to_summarize)} messages at turn {self.memory_manager.conversation_turn_count}. " +
+                    f"Keeping {len(kept_messages)} messages including {len(high_value_messages)} high-priority messages based on content value.",
+                    note_type="compression", 
+                    importance="normal",
+                    tags=["memory_management", "compression", "context_window"]
+                )
+                
+                # Also record the state of tasks or topics before compression
+                if 'current_task' in self.working_memory:
+                    self.memory_manager.add_agent_note(
+                        f"Task state before compression: {self.working_memory['current_task']}",
+                        note_type="task_state",
+                        importance="high",
+                        tags=["compression", "task_continuity"]
+                    )
+            except Exception as note_error:
+                logger.error(f"Error adding compression note: {note_error}")
+                
             # Create a document version of this summary for future reference
             summary_doc_id = f"context_summary_{int(time.time())}"
+            
+            # Add session ID if available
+            metadata = {
+                "original_messages": len(messages),
+                "kept_messages": len(kept_messages),
+                "summarized_messages": len(to_summarize),
+                "original_tokens": pre_compression_size,
+                "turn_count": getattr(self.memory_manager, "conversation_turn_count", 0),
+                "high_value_messages": len(high_value_messages)
+            }
+            
+            if 'session_id' in self.working_memory:
+                metadata["session_id"] = self.working_memory['session_id']
+            
             self.memory_manager.save_document(
                 summary_doc_id,
                 summary,
-                tags=["summary", "context", "compression"],
-                metadata={
-                    "original_messages": len(messages),
-                    "kept_messages": len(kept_messages),
-                    "summarized_messages": len(to_summarize),
-                    "original_tokens": pre_compression_size,
-                }
+                tags=["summary", "context", "compression", "session_state"],
+                metadata=metadata
             )
             
             # Add the summary as a system message at the start
@@ -1504,14 +2347,39 @@ class AutonomousAgent:
             # Print compression stats if this was a forced compression (from /compact command)
             if force:
                 print(f"✅ Context compressed: {pre_compression_size} → {post_size} tokens ({compression_percentage:.1f}% reduction)")
-                print(f"This will help the agent manage its memory more efficiently.")
+                print(f"Compressed {len(to_summarize)} messages, preserving {len(kept_messages)} messages including {len(high_value_messages)} high-priority messages.")
+                print(f"Essential context has been preserved, including {len(agent_notes)} agent notes and continuity information.")
             
             return kept_messages
             
         except Exception as e:
             logger.error(f"Error during context compression: {e}")
-            # Simple fallback - keep system message and last few exchanges
-            return messages[-10:] if len(messages) > 10 else messages
+            # More robust fallback - keep system message and last few exchanges
+            try:
+                system_msgs = [msg for msg in messages if msg.get('role') == 'system']
+                non_system_msgs = [msg for msg in messages if msg.get('role') != 'system']
+                # Keep last 10 non-system messages
+                fallback_msgs = system_msgs + non_system_msgs[-10:] if len(non_system_msgs) > 10 else non_system_msgs
+                
+                # Log the fallback
+                logger.warning("Using fallback compression due to error in main compression logic")
+                
+                # Record this in memory
+                try:
+                    self.memory_manager.add_agent_note(
+                        "Warning: Used fallback compression due to error in main compression logic. Some context may be lost.",
+                        note_type="compression_error",
+                        importance="high",
+                        tags=["error", "compression", "context_window"]
+                    )
+                except:
+                    pass
+                
+                return fallback_msgs
+            except:
+                # Ultimate fallback
+                logger.error("Critical compression failure - using minimal fallback")
+                return messages[-10:] if len(messages) > 10 else messages
     
     # Missing helper methods
     async def _handle_no_commands(self, response: str, session_id: str, turn_count: int) -> None:

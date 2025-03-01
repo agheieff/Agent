@@ -200,23 +200,177 @@ class TemporalContext:
         )
 
 class MemoryPreloader:
-    """Handles preloading of relevant memory context"""
+    """Handles preloading of relevant memory context with enhanced prioritization"""
     def __init__(self, memory_manager: 'MemoryManager'):
         self.memory_manager = memory_manager
-        self.context_keys = ["system_config", "tool_usage", "error_history", "active_projects"]
+        self.context_keys = [
+            "system_config", "tool_usage", "error_history", "active_projects", 
+            "agent_notes", "status_updates", "command_skills", "knowledge_base"
+        ]
         
     def initialize_session(self):
-        """No-op placeholder in this example"""
-        pass
+        """Initialize the session by preloading essential memory items"""
+        # Record session start in memory
+        self.memory_manager.add_agent_note(
+            "New session initialized. Loading context and knowledge.",
+            note_type="session_management",
+            importance="normal"
+        )
+        
+        # Load mind maps if they're not already loaded
+        self.memory_manager._load_mind_maps()
+        
+        # Ensure working memory state is available
+        self._create_transition_record()
+    
+    def _create_transition_record(self):
+        """Create a record of context transitions between sessions"""
+        try:
+            transitions_file = self.memory_manager.base_path / "context_transitions.json"
+            transition_data = {
+                "timestamp": time.time(),
+                "agent_notes_count": len(self.memory_manager.search_memory("agent_notes", limit=100)),
+                "knowledge_items_count": len(self.memory_manager.search_memory("knowledge_base", limit=100)),
+                "mind_maps_count": len(self.memory_manager.mind_maps)
+            }
+            
+            existing_transitions = []
+            if transitions_file.exists():
+                try:
+                    with open(transitions_file, 'r') as f:
+                        existing_transitions = json.load(f)
+                except:
+                    existing_transitions = []
+            
+            # Keep only the last 10 transitions
+            existing_transitions.append(transition_data)
+            if len(existing_transitions) > 10:
+                existing_transitions = existing_transitions[-10:]
+                
+            with open(transitions_file, 'w') as f:
+                json.dump(existing_transitions, f, indent=2)
+        except Exception as e:
+            logger.error(f"Error creating transition record: {e}")
 
     def get_session_context(self) -> str:
+        """
+        Get a comprehensive session context by intelligently prioritizing
+        the most relevant memory items for the current session
+        """
         context = []
-        for key in self.context_keys:
-            results = self.memory_manager.search_memory(key, limit=3)
+        
+        # Add a note about conversation length risk
+        context.append("## Memory Management")
+        context.append("IMPORTANT: As this conversation gets longer, there's an increasing risk of context loss.")
+        context.append("Use the /compact command when needed to compress conversation history.")
+        context.append("For complex tasks, break them into smaller sub-tasks to avoid memory limitations.")
+        context.append("You can create mind maps for complex topics with memory_manager.create_mind_map().")
+        context.append("Track important information with memory_manager.add_agent_note().")
+        
+        # Add mind maps first - they're high-level context and most valuable
+        active_mind_maps = self._get_active_mind_maps(limit=2)
+        if active_mind_maps:
+            context.append("\n## Active Mind Maps")
+            for mind_map in active_mind_maps:
+                # Get a summarized version of the mind map
+                map_summary = self.memory_manager.extract_mind_map_summary(mind_map["id"])
+                # Only use a truncated version to save context space
+                context.append(map_summary.split("\n\n")[0])  # Just include the header section
+                # Add key concepts
+                concept_section = "\nKey concepts:"
+                nodes = list(self.memory_manager.mind_maps[mind_map["id"]]["nodes"].values())
+                # Sort by importance (root node first, then by creation date)
+                nodes.sort(key=lambda n: (n["type"] != "root", n.get("created_at", 0)))
+                # Include only the first 5 nodes
+                for node in nodes[:5]:
+                    concept_section += f"\n- {node['title']}"
+                context.append(concept_section)
+        
+        # Add agent notes and status first as they're highest priority
+        for priority_key in ["agent_notes", "status_updates", "error_history"]:
+            results = self.memory_manager.search_memory(priority_key, limit=5, recency_boost=True)
             if results:
-                context.append(f"## {key.title()}")
-                context.extend([n['content'] for n in results[:3]])
+                context.append(f"\n## {priority_key.replace('_', ' ').title()}")
+                for n in results[:5]:
+                    # Format the content nicely
+                    note_content = n['content'].strip().replace("\n\n", "\n")
+                    context.append(f"- {note_content}")
+        
+        # Add knowledge base items (high value, permanent memory)
+        knowledge_items = self.memory_manager.search_memory(
+            "knowledge_base", 
+            tags=["knowledge_base", "permanent"],
+            limit=3
+        )
+        if knowledge_items:
+            context.append("\n## Knowledge Base")
+            for item in knowledge_items:
+                # Truncate content to save space
+                content = item.get('content', '').strip()
+                if len(content) > 200:
+                    content = content[:197] + "..."
+                context.append(f"- **{item.get('title', '')}**: {content}")
+        
+        # Add secondary context based on relevance scoring
+        # We prioritize context based on recency and access patterns
+        secondary_context = []
+        for key in self.context_keys:
+            if key not in ["agent_notes", "status_updates", "error_history", "knowledge_base"]:
+                results = self.memory_manager.search_memory(key, limit=3, recency_boost=True)
+                if results:
+                    section = f"\n## {key.replace('_', ' ').title()}\n"
+                    for n in results[:3]:
+                        # Format the content nicely
+                        content = n['content'].strip().replace("\n\n", "\n")
+                        section += f"- {content}\n"
+                    secondary_context.append((section, self._calculate_context_priority(key)))
+        
+        # Sort secondary context by priority score
+        secondary_context.sort(key=lambda x: x[1], reverse=True)
+        
+        # Add the top 3 secondary contexts
+        for section, _ in secondary_context[:3]:
+            context.append(section)
+        
         return "\n".join(context)
+    
+    def _get_active_mind_maps(self, limit: int = 2) -> List[Dict]:
+        """Get the most recently active mind maps"""
+        try:
+            if not self.memory_manager.mind_maps:
+                return []
+                
+            # Sort mind maps by last modified time
+            sorted_maps = sorted(
+                self.memory_manager.mind_maps.values(),
+                key=lambda m: m.get("last_modified", 0),
+                reverse=True
+            )
+            
+            return [{"id": m["id"], "title": m["title"]} for m in sorted_maps[:limit]]
+        except Exception as e:
+            logger.error(f"Error getting active mind maps: {e}")
+            return []
+    
+    def _calculate_context_priority(self, context_key: str) -> float:
+        """Calculate a priority score for each context section"""
+        # Base priorities
+        base_priorities = {
+            "command_skills": 0.8,
+            "system_config": 0.6,
+            "tool_usage": 0.7,
+            "active_projects": 0.9,
+        }
+        
+        # Add dynamic adjustment based on access patterns
+        # If this context has been accessed frequently, boost its priority
+        boost = 0.0
+        if hasattr(self.memory_manager, 'memory_stats'):
+            if context_key in self.memory_manager.memory_stats.get('access_patterns', {}):
+                access_count = self.memory_manager.memory_stats['access_patterns'][context_key]
+                boost = min(0.2, access_count * 0.02)  # Max boost of 0.2
+                
+        return base_priorities.get(context_key, 0.5) + boost
 
 class VectorIndex:
     """Implements vector-based semantic search for memory items"""
@@ -344,6 +498,13 @@ class VectorIndex:
 class MemoryManager:
     """High-level memory manager that composes a MemoryGraph + MemoryHierarchy + TemporalContext + VectorIndex"""
     
+    # Define common context keys
+    context_keys = [
+        "system_config", "tool_usage", "error_history", "active_projects", 
+        "agent_notes", "status_updates", "command_skills", "knowledge_base", 
+        "important", "task", "mind_map", "code", "project"
+    ]
+    
     def __init__(self, base_path: Path = None):
         # If no path provided, use the configuration from memory.config file
         if base_path is None:
@@ -351,6 +512,10 @@ class MemoryManager:
         
         self.base_path = base_path
         self.base_path.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize conversation tracking
+        self.conversation_turn_count = 0
+        self.conversation_start_time = time.time()
         
         # Save the configured path
         self._save_configured_path(self.base_path)
@@ -405,7 +570,7 @@ class MemoryManager:
         
         # Create all required directories
         for d in ['documents', 'conversations', 'vector_index', 'temporal', 'commands', 'backups',
-                  'tasks', 'reflections', 'notes', 'working_memory', 'archive']:
+                  'tasks', 'reflections', 'notes', 'working_memory', 'archive', 'mind_maps']:
             (self.base_path / d).mkdir(exist_ok=True)
             
         self.graph = MemoryGraph(self.base_path)
@@ -418,7 +583,19 @@ class MemoryManager:
             'documents_saved': 0,
             'conversations_saved': 0,
             'last_backup_time': 0,
-            'searches_performed': 0
+            'searches_performed': 0,
+            'mind_maps_created': 0,
+            'notes_added': 0,
+            'compressions_performed': 0,
+            'access_patterns': {},  # Track which context types are accessed most frequently
+            'retrieval_counts': {},  # Track which memory items are retrieved most often
+            'query_patterns': [],   # Store recent search patterns
+            'last_session_info': {
+                'timestamp': time.time(),
+                'duration_minutes': 0,
+                'turn_count': 0,
+                'tasks_completed': 0
+            }
         }
         
         # Initialize memory indexing limits
@@ -428,6 +605,10 @@ class MemoryManager:
             'max_backups': 10, 
             'backup_interval': 3600  # 1 hour
         }
+        
+        # Initialize mind map structure
+        self.mind_maps = {}
+        self._load_mind_maps()
         
         # Load existing command history if available
         self._load_command_history()
@@ -628,7 +809,7 @@ class MemoryManager:
             return ""
             
     def _check_for_recovery(self):
-        """Check if we need to recover from a crash"""
+        """Check if we need to recover from a crash and restore memory state"""
         try:
             backup_path = self.base_path / "backups" / "last_state.json"
             if backup_path.exists():
@@ -638,16 +819,106 @@ class MemoryManager:
                 current_state = self.base_path / "graph.json"
                 if not current_state.exists() or backup_path.stat().st_mtime > current_state.stat().st_mtime:
                     logger.warning("Found newer backup data. Recovering from backup.")
-                    # Perform recovery
-                    backup_graph = self.base_path / "backups" / "graph.json"
-                    if backup_graph.exists():
-                        os.replace(backup_graph, self.base_path / "graph.json")
-                        self.graph = MemoryGraph(self.base_path)  # Reload graph
+                    
+                    # Get the most recent backup directory
+                    backup_dirs = sorted([d for d in (self.base_path / "backups").glob("*") 
+                                         if d.is_dir() and d.name[0].isdigit()], 
+                                      key=lambda d: d.stat().st_mtime, reverse=True)
+                    
+                    if backup_dirs:
+                        recent_backup = backup_dirs[0]
+                        logger.info(f"Using most recent backup from {recent_backup}")
+                        
+                        # Perform graph recovery
+                        backup_graph = recent_backup / "graph.json"
+                        if backup_graph.exists():
+                            os.replace(backup_graph, self.base_path / "graph.json")
+                            self.graph = MemoryGraph(self.base_path)  # Reload graph
+                        
+                        # Recover mind maps
+                        mind_maps_dir = recent_backup / "mind_maps"
+                        if mind_maps_dir.exists() and mind_maps_dir.is_dir():
+                            for map_file in mind_maps_dir.glob("*.json"):
+                                try:
+                                    with open(map_file, 'r') as f:
+                                        mind_map = json.load(f)
+                                        map_id = map_file.stem
+                                        self.mind_maps[map_id] = mind_map
+                                        
+                                    # Also save to main mind_maps directory
+                                    dest_dir = self.base_path / "mind_maps"
+                                    dest_dir.mkdir(exist_ok=True)
+                                    shutil.copy2(map_file, dest_dir / map_file.name)
+                                except Exception as e:
+                                    logger.error(f"Error recovering mind map {map_file}: {e}")
+                        
+                        # Recover memory stats
+                        stats_dir = recent_backup / "stats"
+                        if stats_dir.exists() and stats_dir.is_dir():
+                            # Recover access patterns
+                            access_file = stats_dir / "access_patterns.json"
+                            if access_file.exists():
+                                try:
+                                    with open(access_file, 'r') as f:
+                                        self.memory_stats['access_patterns'] = json.load(f)
+                                except Exception as e:
+                                    logger.error(f"Error recovering access patterns: {e}")
+                            
+                            # Recover retrieval counts
+                            retrieval_file = stats_dir / "retrieval_counts.json"
+                            if retrieval_file.exists():
+                                try:
+                                    with open(retrieval_file, 'r') as f:
+                                        self.memory_stats['retrieval_counts'] = json.load(f)
+                                except Exception as e:
+                                    logger.error(f"Error recovering retrieval counts: {e}")
+                            
+                            # Recover query patterns
+                            query_file = stats_dir / "query_patterns.json"
+                            if query_file.exists():
+                                try:
+                                    with open(query_file, 'r') as f:
+                                        self.memory_stats['query_patterns'] = json.load(f)
+                                except Exception as e:
+                                    logger.error(f"Error recovering query patterns: {e}")
+                            
+                            # Recover conversation metrics
+                            metrics_file = stats_dir / "conversation_metrics.json"
+                            if metrics_file.exists():
+                                try:
+                                    with open(metrics_file, 'r') as f:
+                                        metrics = json.load(f)
+                                        # Store as last session info
+                                        self.memory_stats['last_session_info'] = {
+                                            'timestamp': metrics.get('timestamp', 0),
+                                            'duration_minutes': metrics.get('duration', 0) / 60,
+                                            'turn_count': metrics.get('turn_count', 0),
+                                            'tasks_completed': 0  # Can't recover this easily
+                                        }
+                                except Exception as e:
+                                    logger.error(f"Error recovering conversation metrics: {e}")
+                    
+                    # Log successful recovery
+                    logger.info("Recovery complete. Memory state restored.")
+                    
+                    # Create an agent note about the recovery
+                    try:
+                        self.add_agent_note(
+                            "Memory state recovered from backup. Previous session information restored.",
+                            note_type="system_event",
+                            importance="normal",
+                            tags=["recovery", "system"]
+                        )
+                    except Exception as note_error:
+                        logger.error(f"Error creating recovery note: {note_error}")
         except Exception as e:
             logger.error(f"Error during recovery check: {e}")
 
     def create_backup(self, force: bool = False):
-        """Create a backup of the current state with rotation and time-based limiting"""
+        """
+        Create a backup of the current state with rotation and time-based limiting.
+        Enhanced with memory stats preservation for continuity.
+        """
         try:
             current_time = time.time()
             
@@ -679,13 +950,55 @@ class MemoryManager:
                     if file.is_file():
                         shutil.copy2(file, backup_vector / file.name)
             
+            # Backup mind maps
+            if hasattr(self, 'mind_maps') and self.mind_maps:
+                mind_maps_dir = backup_timestamp_dir / "mind_maps"
+                mind_maps_dir.mkdir(exist_ok=True)
+                
+                # Save each mind map
+                for map_id, mind_map in self.mind_maps.items():
+                    with open(mind_maps_dir / f"{map_id}.json", 'w') as f:
+                        json.dump(mind_map, f, indent=2)
+            
+            # Save access patterns to preserve learning across restarts
+            stats_dir = backup_timestamp_dir / "stats"
+            stats_dir.mkdir(exist_ok=True)
+            
+            # Save access patterns
+            access_patterns_file = stats_dir / "access_patterns.json"
+            with open(access_patterns_file, 'w') as f:
+                json.dump(self.memory_stats.get('access_patterns', {}), f, indent=2)
+            
+            # Save retrieval counts (limited to top 100 to avoid bloat)
+            retrieval_counts = self.memory_stats.get('retrieval_counts', {})
+            top_items = sorted(retrieval_counts.items(), key=lambda x: x[1], reverse=True)[:100]
+            with open(stats_dir / "retrieval_counts.json", 'w') as f:
+                json.dump(dict(top_items), f, indent=2)
+            
+            # Save query patterns
+            with open(stats_dir / "query_patterns.json", 'w') as f:
+                json.dump(self.memory_stats.get('query_patterns', []), f, indent=2)
+            
+            # Save conversation metrics
+            with open(stats_dir / "conversation_metrics.json", 'w') as f:
+                json.dump({
+                    "turn_count": self.conversation_turn_count,
+                    "duration": time.time() - self.conversation_start_time,
+                    "timestamp": time.time()
+                }, f, indent=2)
+            
             # Save state metadata
             state = {
                 "timestamp": current_time,
                 "backup_date": datetime.now().isoformat(),
                 "num_nodes": len(self.graph.graph.nodes),
                 "num_edges": len(self.graph.graph.edges),
-                "memory_stats": self.memory_stats
+                "conversation_turn_count": self.conversation_turn_count,
+                "conversation_duration": time.time() - self.conversation_start_time,
+                "memory_stats": {
+                    key: value for key, value in self.memory_stats.items() 
+                    if key not in ['access_patterns', 'retrieval_counts', 'query_patterns']
+                }
             }
             with open(backup_timestamp_dir / "state.json", 'w') as f:
                 json.dump(state, f, indent=2)
@@ -706,7 +1019,7 @@ class MemoryManager:
                     shutil.rmtree(old_dir)
                     logger.info(f"Removed old backup: {old_dir}")
                 
-            logger.info(f"Created backup with {state['num_nodes']} nodes in {backup_timestamp_dir}")
+            logger.info(f"Created enhanced backup with {state['num_nodes']} nodes and memory stats preservation in {backup_timestamp_dir}")
             return True
         except Exception as e:
             logger.error(f"Error creating backup: {e}")
@@ -756,7 +1069,26 @@ class MemoryManager:
         """
         try:
             # Update search stats
+            search_start_time = time.time()
             self.memory_stats['searches_performed'] += 1
+            
+            # Track search patterns
+            # Record which context types are being searched for
+            if tags:
+                for tag in tags:
+                    if tag in self.context_keys:
+                        # Update access count for this context type
+                        self.memory_stats['access_patterns'][tag] = self.memory_stats['access_patterns'].get(tag, 0) + 1
+            
+            # Keep track of recent queries (limited to last 20)
+            self.memory_stats['query_patterns'].append({
+                'query': query,
+                'timestamp': time.time(),
+                'tags': tags,
+                'types': types
+            })
+            if len(self.memory_stats['query_patterns']) > 20:
+                self.memory_stats['query_patterns'] = self.memory_stats['query_patterns'][-20:]
             
             # First try vector search
             vector_results = []
@@ -783,6 +1115,14 @@ class MemoryManager:
                                 # Log decay function for recency
                                 recency_factor = 1.0 + min(2.0, 0.2 * math.log1p(age_days))
                                 score = score * recency_factor
+                                
+                            # Add access frequency boost - frequently accessed items get priority
+                            if 'metadata' in node and 'search_hits' in node['metadata']:
+                                access_count = node['metadata']['search_hits']
+                                # Logarithmic boost to prevent domination by very frequent items
+                                access_boost = max(0, 0.2 * math.log1p(access_count))
+                                # Apply boost (lower score is better for retrieval)
+                                score = score / (1.0 + access_boost)
                         
                         # Add result with vector score
                         node_copy = node.copy()
@@ -882,9 +1222,19 @@ class MemoryManager:
                     metadata['search_hits'] = search_hits
                     metadata['last_matched_query'] = query
                     self.graph.update_node(node_id, metadata=metadata)
+                    
+                    # Track retrieval counts for memory items in global stats
+                    self.memory_stats['retrieval_counts'][node_id] = self.memory_stats['retrieval_counts'].get(node_id, 0) + 1
+                    
+                    # If we're retrieving an item with tags, boost those context types
+                    item_tags = node.get('tags', [])
+                    for tag in item_tags:
+                        if tag in self.context_keys:
+                            self.memory_stats['access_patterns'][tag] = self.memory_stats['access_patterns'].get(tag, 0) + 1
             
             # Log search statistics
-            logger.debug(f"Memory search: '{query}' found {len(final_results)} results " +
+            search_time = time.time() - search_start_time
+            logger.debug(f"Memory search: '{query}' found {len(final_results)} results in {search_time:.3f}s " +
                         f"(keyword: {len(keyword_matches)}, vector: {len(vector_results)})")
                     
             # Return limited results
@@ -969,3 +1319,611 @@ class MemoryManager:
         # Keep last 1000
         if len(self.command_history) > 1000:
             self.command_history = self.command_history[-1000:]
+            
+    def add_agent_note(self, note: str, note_type: str = "general", importance: str = "normal", tags: List[str] = None):
+        """
+        Add a short note about the agent's current activity or system state.
+        These notes are high-priority memory items that persist across sessions.
+        
+        Args:
+            note: Content of the note
+            note_type: Type of note (activity, error, decision, etc.)
+            importance: Importance level (high, normal, low)
+            tags: Additional tags for categorization
+        
+        Returns:
+            ID of the saved note
+        """
+        # Ensure note is concise
+        if len(note) > 500:
+            note = note[:497] + "..."
+            
+        # Create standard tags
+        note_tags = ["agent_notes", note_type]
+        if tags:
+            note_tags.extend(tags)
+        if importance == "high":
+            note_tags.append("important")
+            
+        # Generate title based on note type and timestamp
+        title = f"{note_type.title()} Note - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        
+        # Set permanence based on importance
+        permanent = (importance == "high")
+        
+        # Save the note
+        node_id = self.save_document(
+            title=title,
+            content=note,
+            tags=note_tags,
+            metadata={
+                "note_type": note_type,
+                "importance": importance,
+                "conversation_turn": self.conversation_turn_count
+            },
+            permanent=permanent
+        )
+        
+        logger.info(f"Added agent note: {note[:50]}{'...' if len(note) > 50 else ''}")
+        return node_id
+        
+    def update_conversation_metrics(self, increment_turns: bool = True):
+        """
+        Update conversation metrics to track length and duration.
+        Call this method at each conversation turn.
+        
+        Args:
+            increment_turns: Whether to increment the turn counter
+        """
+        if increment_turns:
+            self.conversation_turn_count += 1
+            
+        # Calculate conversation duration
+        current_time = time.time()
+        duration_minutes = (current_time - self.conversation_start_time) / 60
+        
+        # Check if we should add warnings about conversation length
+        if self.conversation_turn_count % 10 == 0 or (duration_minutes > 30 and self.conversation_turn_count % 5 == 0):
+            risk_level = "low"
+            if self.conversation_turn_count > 50 or duration_minutes > 60:
+                risk_level = "high"
+            elif self.conversation_turn_count > 30 or duration_minutes > 45:
+                risk_level = "medium"
+                
+            # Add a status update about conversation length
+            if risk_level != "low":
+                self.add_agent_note(
+                    f"Conversation length: {self.conversation_turn_count} turns over {duration_minutes:.1f} minutes. " +
+                    f"Context window risk: {risk_level}. Consider using /compact command soon.",
+                    note_type="status_update",
+                    importance="high" if risk_level == "high" else "normal",
+                    tags=["conversation_length", "status_updates", risk_level]
+                )
+                
+        return {
+            "turns": self.conversation_turn_count,
+            "duration_minutes": duration_minutes
+        }
+        
+    def log_task_status(self, task_title: str, status: str, details: str = None):
+        """
+        Log the status of a task in progress.
+        
+        Args:
+            task_title: Title of the task
+            status: Current status (started, in_progress, completed, error)
+            details: Optional details about the status
+        """
+        status_note = f"Task: {task_title}\nStatus: {status}"
+        if details:
+            status_note += f"\nDetails: {details}"
+            
+        importance = "high" if status in ["completed", "error"] else "normal"
+        
+        self.add_agent_note(
+            status_note,
+            note_type="status_updates",
+            importance=importance,
+            tags=["task_status", status]
+        )
+        
+    def _load_mind_maps(self):
+        """Load existing mind maps from disk"""
+        try:
+            mind_maps_dir = self.base_path / "mind_maps"
+            for map_file in mind_maps_dir.glob("*.json"):
+                try:
+                    with open(map_file, 'r') as f:
+                        mind_map = json.load(f)
+                        map_id = map_file.stem
+                        self.mind_maps[map_id] = mind_map
+                except Exception as e:
+                    logger.error(f"Error loading mind map {map_file}: {e}")
+        except Exception as e:
+            logger.error(f"Error loading mind maps: {e}")
+            
+    def _save_mind_map(self, map_id: str):
+        """Save a mind map to disk"""
+        try:
+            mind_maps_dir = self.base_path / "mind_maps"
+            mind_maps_dir.mkdir(exist_ok=True)
+            
+            with open(mind_maps_dir / f"{map_id}.json", 'w') as f:
+                json.dump(self.mind_maps[map_id], f, indent=2)
+                
+            logger.info(f"Saved mind map {map_id}")
+        except Exception as e:
+            logger.error(f"Error saving mind map {map_id}: {e}")
+            
+    def create_mind_map(self, title: str, description: str = "", map_type: str = "task") -> str:
+        """
+        Create a new mind map for organizing memory by concepts and relationships.
+        
+        Args:
+            title: Title of the mind map
+            description: Description of the mind map's purpose
+            map_type: Type of mind map (task, project, concept, etc.)
+            
+        Returns:
+            ID of the created mind map
+        """
+        map_id = f"map_{int(time.time())}_{hash(title) % 10000}"
+        
+        # Create basic mind map structure
+        self.mind_maps[map_id] = {
+            "id": map_id,
+            "title": title,
+            "description": description,
+            "type": map_type,
+            "created_at": time.time(),
+            "last_modified": time.time(),
+            "nodes": {},
+            "links": [],
+            "metadata": {
+                "node_count": 0,
+                "link_count": 0,
+                "priority": "normal"
+            }
+        }
+        
+        # Add central/root node
+        root_node_id = self._add_mind_map_node(
+            map_id, 
+            title,
+            description, 
+            node_type="root",
+            position={"x": 0, "y": 0}
+        )
+        self.mind_maps[map_id]["root_node_id"] = root_node_id
+        
+        # Save to disk
+        self._save_mind_map(map_id)
+        
+        # Update stats
+        self.memory_stats['mind_maps_created'] += 1
+        
+        # Create a note about the mind map creation
+        self.add_agent_note(
+            f"Created new mind map: {title}",
+            note_type="mind_map_created",
+            importance="normal",
+            tags=["mind_map", map_type]
+        )
+        
+        return map_id
+        
+    def _add_mind_map_node(self, map_id: str, title: str, content: str, 
+                           node_type: str = "concept", position: Dict = None,
+                           metadata: Dict = None) -> str:
+        """Add a node to a mind map"""
+        if map_id not in self.mind_maps:
+            raise ValueError(f"Mind map {map_id} does not exist")
+            
+        # Generate a unique node ID
+        node_id = f"node_{int(time.time())}_{hash(title) % 10000}"
+        
+        # Set default position if not provided
+        if position is None:
+            position = {"x": 0, "y": 0}
+            
+        # Create the node
+        self.mind_maps[map_id]["nodes"][node_id] = {
+            "id": node_id,
+            "title": title,
+            "content": content,
+            "type": node_type,
+            "position": position,
+            "created_at": time.time(),
+            "last_accessed": time.time(),
+            "metadata": metadata or {}
+        }
+        
+        # Update node count
+        self.mind_maps[map_id]["metadata"]["node_count"] += 1
+        self.mind_maps[map_id]["last_modified"] = time.time()
+        
+        return node_id
+        
+    def add_mind_map_concept(self, map_id: str, title: str, content: str, 
+                            related_to: str = None, link_type: str = "related",
+                            position: Dict = None) -> str:
+        """
+        Add a concept to a mind map and optionally link it to another node.
+        
+        Args:
+            map_id: ID of the mind map
+            title: Title of the concept
+            content: Content/description of the concept
+            related_to: Optional ID of a node to link to
+            link_type: Type of relationship
+            position: Optional position {x, y} coordinates
+            
+        Returns:
+            ID of the created node
+        """
+        # Add the node
+        node_id = self._add_mind_map_node(
+            map_id,
+            title,
+            content,
+            node_type="concept",
+            position=position
+        )
+        
+        # Create link if related_to is provided
+        if related_to and related_to in self.mind_maps[map_id]["nodes"]:
+            self._add_mind_map_link(map_id, related_to, node_id, link_type)
+            
+        # Save changes
+        self._save_mind_map(map_id)
+        
+        return node_id
+        
+    def _add_mind_map_link(self, map_id: str, source_id: str, target_id: str, 
+                         link_type: str = "related", strength: float = 1.0):
+        """Add a link between two nodes in a mind map"""
+        if map_id not in self.mind_maps:
+            raise ValueError(f"Mind map {map_id} does not exist")
+            
+        # Create the link
+        link_id = f"link_{source_id}_{target_id}"
+        
+        # Check if link already exists
+        for link in self.mind_maps[map_id]["links"]:
+            if link["source"] == source_id and link["target"] == target_id:
+                # Update existing link
+                link["type"] = link_type
+                link["strength"] = strength
+                link["last_modified"] = time.time()
+                return link_id
+                
+        # Add new link
+        self.mind_maps[map_id]["links"].append({
+            "id": link_id,
+            "source": source_id,
+            "target": target_id,
+            "type": link_type,
+            "strength": strength,
+            "created_at": time.time(),
+            "last_modified": time.time()
+        })
+        
+        # Update link count
+        self.mind_maps[map_id]["metadata"]["link_count"] += 1
+        self.mind_maps[map_id]["last_modified"] = time.time()
+        
+        return link_id
+        
+    def get_mind_map(self, map_id: str) -> Dict:
+        """Get a mind map by ID"""
+        if map_id not in self.mind_maps:
+            raise ValueError(f"Mind map {map_id} does not exist")
+            
+        # Update access time
+        for node_id in self.mind_maps[map_id]["nodes"]:
+            self.mind_maps[map_id]["nodes"][node_id]["last_accessed"] = time.time()
+            
+        return self.mind_maps[map_id]
+        
+    def search_mind_maps(self, query: str, limit: int = 3) -> List[Dict]:
+        """
+        Search for relevant mind maps based on title, description, and content.
+        
+        Args:
+            query: Search query
+            limit: Maximum number of results
+            
+        Returns:
+            List of matching mind maps
+        """
+        results = []
+        query_lower = query.lower()
+        
+        for map_id, mind_map in self.mind_maps.items():
+            score = 0
+            
+            # Check title and description match
+            if query_lower in mind_map["title"].lower():
+                score += 10
+            if query_lower in mind_map.get("description", "").lower():
+                score += 5
+                
+            # Check node content match
+            content_matches = 0
+            for node_id, node in mind_map["nodes"].items():
+                if query_lower in node["title"].lower():
+                    score += 3
+                    content_matches += 1
+                if query_lower in node["content"].lower():
+                    score += 2
+                    content_matches += 1
+                    
+            # Bonus for multiple content matches
+            score += min(content_matches, 5)
+            
+            # If there's any match, add to results
+            if score > 0:
+                results.append({
+                    "id": map_id,
+                    "title": mind_map["title"],
+                    "description": mind_map.get("description", ""),
+                    "node_count": mind_map["metadata"]["node_count"],
+                    "score": score,
+                    "created_at": mind_map["created_at"]
+                })
+                
+        # Sort by score and limit results
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:limit]
+    
+    def extract_mind_map_summary(self, map_id: str) -> str:
+        """
+        Generate a text summary of a mind map for inclusion in context.
+        
+        Args:
+            map_id: ID of the mind map
+            
+        Returns:
+            Text summary of the mind map
+        """
+        if map_id not in self.mind_maps:
+            return "Mind map not found"
+            
+        mind_map = self.mind_maps[map_id]
+        
+        # Build summary parts
+        summary_parts = [
+            f"# Mind Map: {mind_map['title']}",
+            mind_map.get("description", "")
+        ]
+        
+        # Add key concepts (nodes)
+        summary_parts.append("\n## Key Concepts")
+        
+        # Sort nodes by type and creation time
+        nodes = list(mind_map["nodes"].values())
+        nodes.sort(key=lambda x: (x["type"] != "root", x["created_at"]))
+        
+        # Add nodes to summary
+        for i, node in enumerate(nodes):
+            if i < 10:  # Limit to 10 nodes to avoid overload
+                summary_parts.append(f"- {node['title']}: {node['content'][:100]}{'...' if len(node['content']) > 100 else ''}")
+        
+        if len(nodes) > 10:
+            summary_parts.append(f"...and {len(nodes) - 10} more concepts")
+            
+        # Generate a simple text representation of relationships
+        if mind_map["links"]:
+            summary_parts.append("\n## Relationships")
+            link_count = min(len(mind_map["links"]), 7)  # Limit to 7 relationships
+            
+            for i in range(link_count):
+                link = mind_map["links"][i]
+                source_node = mind_map["nodes"].get(link["source"], {})
+                target_node = mind_map["nodes"].get(link["target"], {})
+                
+                if source_node and target_node:
+                    summary_parts.append(f"- {source_node.get('title', 'Unknown')} → {link['type']} → {target_node.get('title', 'Unknown')}")
+                    
+            if len(mind_map["links"]) > link_count:
+                summary_parts.append(f"...and {len(mind_map['links']) - link_count} more relationships")
+                
+        return "\n".join(summary_parts)
+        
+    def get_session_persistent_memory(self) -> Dict[str, Any]:
+        """
+        Get the persistent memory data that should be shared across sessions.
+        This provides continuity between different agent sessions.
+        
+        Returns:
+            Dict containing persistent memory data
+        """
+        persistent_data = {
+            "agent_notes": [],
+            "task_statuses": [],
+            "mind_maps": [],
+            "important_files": [],
+            "knowledge_base": []
+        }
+        
+        # Get recent agent notes
+        try:
+            agent_notes = self.search_memory(
+                "important", 
+                tags=["agent_notes", "important"], 
+                limit=10,
+                recency_boost=True
+            )
+            
+            for note in agent_notes:
+                persistent_data["agent_notes"].append({
+                    "content": note.get("content", ""),
+                    "type": note.get("metadata", {}).get("note_type", "general"),
+                    "timestamp": note.get("metadata", {}).get("timestamp", 0),
+                    "importance": note.get("metadata", {}).get("importance", "normal")
+                })
+        except Exception as e:
+            logger.error(f"Error loading agent notes for persistent memory: {e}")
+        
+        # Get recent task statuses
+        try:
+            task_statuses = self.search_memory(
+                "task status", 
+                tags=["task_status", "status_updates"], 
+                limit=7,
+                recency_boost=True
+            )
+            
+            for status in task_statuses:
+                persistent_data["task_statuses"].append({
+                    "content": status.get("content", ""),
+                    "timestamp": status.get("created_at", 0)
+                })
+        except Exception as e:
+            logger.error(f"Error loading task statuses for persistent memory: {e}")
+        
+        # Get recent mind maps (limit to 2 most recent)
+        try:
+            if self.mind_maps:
+                recent_maps = sorted(
+                    self.mind_maps.values(),
+                    key=lambda m: m.get("last_modified", 0),
+                    reverse=True
+                )[:2]
+                
+                for mind_map in recent_maps:
+                    persistent_data["mind_maps"].append({
+                        "id": mind_map.get("id"),
+                        "title": mind_map.get("title"),
+                        "description": mind_map.get("description", ""),
+                        "nodes_count": mind_map.get("metadata", {}).get("node_count", 0),
+                        "links_count": mind_map.get("metadata", {}).get("link_count", 0)
+                    })
+        except Exception as e:
+            logger.error(f"Error loading mind maps for persistent memory: {e}")
+        
+        # Get general knowledge items
+        try:
+            knowledge_items = self.search_memory(
+                "important knowledge", 
+                tags=["knowledge_base", "permanent"], 
+                limit=5,
+                recency_boost=False  # Knowledge items don't need recency bias
+            )
+            
+            for item in knowledge_items:
+                persistent_data["knowledge_base"].append({
+                    "title": item.get("title", ""),
+                    "content": item.get("content", "")[:250] + ("..." if len(item.get("content", "")) > 250 else "")
+                })
+        except Exception as e:
+            logger.error(f"Error loading knowledge items for persistent memory: {e}")
+        
+        return persistent_data
+        
+    def add_to_knowledge_base(self, title: str, content: str, tags: List[str] = None) -> str:
+        """
+        Add an item to the permanent knowledge base.
+        Knowledge base items persist across sessions and are high priority items.
+        
+        Args:
+            title: Title of the knowledge item
+            content: Content of the knowledge item
+            tags: Additional tags for categorization
+            
+        Returns:
+            ID of the saved knowledge item
+        """
+        # Create standard tags
+        kb_tags = ["knowledge_base", "permanent"]
+        if tags:
+            kb_tags.extend(tags)
+        
+        # Save the knowledge item
+        node_id = self.save_document(
+            title=title,
+            content=content,
+            tags=kb_tags,
+            permanent=True,  # Knowledge base items are always permanent
+            metadata={
+                "type": "knowledge_base",
+                "added_at": time.time(),
+                "importance": "high"
+            }
+        )
+        
+        logger.info(f"Added knowledge base item: {title}")
+        
+        # Create a note about the addition
+        self.add_agent_note(
+            f"Added to knowledge base: {title}",
+            note_type="knowledge_base",
+            importance="high",
+            tags=["knowledge_base"]
+        )
+        
+        return node_id
+        
+    def prioritize_memory_items(self, query: str, items: List[Dict], top_k: int = 5) -> List[Dict]:
+        """
+        Prioritize memory items based on relevance to query and importance.
+        
+        Args:
+            query: The search query or current context
+            items: List of memory items to prioritize
+            top_k: Number of top items to return
+            
+        Returns:
+            List of prioritized items
+        """
+        if not items:
+            return []
+            
+        scored_items = []
+        query_terms = query.lower().split()
+        
+        for item in items:
+            score = 0
+            
+            # Base score from metadata importance
+            importance = item.get("metadata", {}).get("importance", "normal")
+            if importance == "high":
+                score += 10
+            elif importance == "normal":
+                score += 5
+            
+            # Score from relevance to query
+            content = item.get("content", "").lower()
+            title = item.get("title", "").lower()
+            
+            # Exact matches get higher score
+            if query.lower() in content or query.lower() in title:
+                score += 15
+            
+            # Term matches
+            term_matches = sum(1 for term in query_terms if term in content or term in title)
+            score += term_matches * 2
+            
+            # Recency bonus (logarithmic decay)
+            timestamp = item.get("metadata", {}).get("timestamp", 0)
+            if timestamp > 0:
+                time_diff = time.time() - timestamp
+                days_old = time_diff / (24 * 3600)
+                # Newer items get higher scores
+                recency_score = max(0, 5 - min(5, math.log(1 + days_old)))
+                score += recency_score
+            
+            # Tags bonus
+            tags = item.get("tags", [])
+            if "important" in tags:
+                score += 5
+            if "permanent" in tags:
+                score += 3
+            
+            scored_items.append((item, score))
+        
+        # Sort by score (descending)
+        scored_items.sort(key=lambda x: x[1], reverse=True)
+        
+        # Return top_k items
+        return [item for item, _ in scored_items[:top_k]]

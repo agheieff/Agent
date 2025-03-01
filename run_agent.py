@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 from dotenv import load_dotenv
 import socket
+import signal
 from datetime import datetime
 
 from core.agent import AutonomousAgent
@@ -93,8 +94,60 @@ def load_and_augment_system_prompt(path: str) -> str:
 
     return prompt_text
 
+# Global variable to store the agent instance for signal handling
+current_agent = None
+paused_for_context = False
+
+def handle_pause_signal(signum, frame):
+    """Handle SIGTSTP (Ctrl+Z) to pause the agent for adding context"""
+    global current_agent, paused_for_context
+    if current_agent and not paused_for_context:
+        paused_for_context = True
+        asyncio.create_task(pause_for_context_input())
+
+async def pause_for_context_input():
+    """Pause the agent and collect additional context from the user"""
+    global current_agent, paused_for_context
+    
+    print("\n" + "="*60)
+    print("AGENT PAUSED FOR ADDITIONAL CONTEXT")
+    print("-"*60)
+    print("Enter additional context to add to the conversation.")
+    print("This will be added to the agent's last response before continuing.")
+    print("Press Enter on a blank line when finished.")
+    print("-"*60)
+    
+    # Collect multi-line input
+    lines = []
+    while True:
+        try:
+            line = input()
+            if not line.strip():
+                break
+            lines.append(line)
+        except EOFError:
+            break
+            
+    additional_context = "\n".join(lines)
+    
+    if additional_context.strip():
+        # Add the context to the conversation with special formatting
+        await current_agent.add_human_context(additional_context)
+        print("="*60)
+        print("Context added. Conversation will continue.")
+        print("="*60 + "\n")
+    else:
+        print("No additional context provided. Continuing without changes.")
+    
+    paused_for_context = False
+
 async def main():
+    global current_agent
     load_dotenv()
+
+    # Register signal handler for SIGTSTP (Ctrl+Z)
+    if hasattr(signal, 'SIGTSTP'):  # Not available on Windows
+        signal.signal(signal.SIGTSTP, handle_pause_signal)
 
     parser = argparse.ArgumentParser(description="Run the Autonomous Agent.")
     parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands executed).")
@@ -170,6 +223,7 @@ async def main():
                 print("\nAvailable slash commands:")
                 print("  /help     - Show this help message")
                 print("  /compact  - Compact conversation history to save context space")
+                print("  /pause    - Pause to add additional context to the conversation")
                 print("\nExample usage: Just type '/compact' as your input to compress the conversation.")
                 sys.exit(0)
         
@@ -189,6 +243,7 @@ async def main():
     # Display feature information
     print("\nAvailable Features:")
     print("- User Input Requests: The agent can pause and ask for additional information")
+    print("- Human Context Pause: Press Ctrl+Z to pause and add context to the conversation")
     print("- Task Planning: The agent can create and track long-term tasks")
     print("- System Detection: The agent will automatically detect and adapt to your OS environment")
     print("- File Operations: Enhanced file manipulation capabilities")
@@ -202,6 +257,9 @@ async def main():
             model=model,
             test_mode=test_mode
         )
+        
+        # Store reference to agent for signal handler
+        current_agent = agent
         
         if agent.last_session_summary:
             print("\nLast Session Summary:")

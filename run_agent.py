@@ -185,7 +185,3 @@ if __name__ == "__main__":
         print(f"\nFatal error: {str(e)}")
         sys.exit(1)
 
-# This section below was causing an error as 'response' is not defined
-# It seems to be a leftover from previous code
-# if '<message>' not in response:
-#     raise ValueError('All responses must contain <message> tag')

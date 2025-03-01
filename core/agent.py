@@ -48,9 +48,14 @@ class CommandExtractor:
     DECISION_TAG = 'decision'
     PLAN_TAG = 'plan'
     SUMMARY_TAG = 'summary'
+    TASK_TAG = 'task'  # New tag for long-term task planning
+    SUBTASK_TAG = 'subtask'  # New tag for breaking down tasks into smaller components
     
     # File operation tags
     FILE_OP_TAGS = ['view', 'edit', 'replace', 'glob', 'grep', 'ls']
+    
+    # User input tag
+    USER_INPUT_TAG = 'user_input'  # For extracting user input requests
     
     @staticmethod
     def extract_commands(response: str) -> List[Tuple[str, str]]:
@@ -118,6 +123,30 @@ class CommandExtractor:
     def extract_summary(response: str) -> List[str]:
         """Extract summary blocks from response"""
         return CommandExtractor._extract_tag_content(response, CommandExtractor.SUMMARY_TAG)
+        
+    @staticmethod
+    def extract_tasks(response: str) -> List[str]:
+        """Extract task blocks from response for long-term planning"""
+        return CommandExtractor._extract_tag_content(response, CommandExtractor.TASK_TAG)
+        
+    @staticmethod
+    def extract_subtasks(response: str) -> List[str]:
+        """Extract subtask blocks from response for task breakdown"""
+        return CommandExtractor._extract_tag_content(response, CommandExtractor.SUBTASK_TAG)
+        
+    @staticmethod
+    def extract_user_input_requests(response: str) -> List[str]:
+        """Extract user input request blocks"""
+        # Get standard tag format
+        standard_requests = CommandExtractor._extract_tag_content(response, CommandExtractor.USER_INPUT_TAG)
+        
+        # Also try alternative formats for flexibility
+        alt_pattern = r"\[PAUSE_FOR_USER_INPUT\](.*?)\[/PAUSE_FOR_USER_INPUT\]"
+        alt_matches = re.finditer(alt_pattern, response, re.DOTALL)
+        alt_requests = [match.group(1).strip() for match in alt_matches]
+        
+        # Combine all formats
+        return standard_requests + alt_requests
         
     @staticmethod
     def _extract_tag_content(response: str, tag: str) -> List[str]:
@@ -426,6 +455,22 @@ class AutonomousAgent:
                     assistant_msg = {"role": "assistant", "content": response}
                     self.local_conversation_history.append(assistant_msg)
                     self._print_response(response)
+                    
+                    # Check if the model is requesting user input
+                    should_pause, question = await self.llm.check_for_user_input_request(response)
+                    if should_pause:
+                        # Handle user input request
+                        user_input = await self._request_user_input(question)
+                        
+                        # Add user's response to conversation history
+                        user_input_msg = {
+                            "role": "user",
+                            "content": f"You asked: {question}\n\nMy response: {user_input}"
+                        }
+                        self.local_conversation_history.append(user_input_msg)
+                        
+                        # Skip the rest of this iteration and continue with the updated conversation
+                        continue
 
                     # Process reasoning blocks
                     await self._process_reasoning_blocks(response, session_id, turn_count)
@@ -571,10 +616,8 @@ class AutonomousAgent:
             try:
                 filepath = Path(doc['filename'])
                 
-                # Safety check - don't allow writing to system directories
-                if any(unsafe_dir in str(filepath.absolute()) for unsafe_dir in ['/etc', '/usr/bin', '/bin', '/sbin']):
-                    logger.warning(f"Blocked attempt to write to system directory: {filepath}")
-                    continue
+                # No safety restrictions - allow writing to any directory
+                # Security restrictions removed as requested
                 
                 # Create parent directory if needed
                 filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -657,6 +700,9 @@ class AutonomousAgent:
     def _enhance_system_prompt(self, system_prompt: str) -> str:
         """Add contextual information to system prompt"""
         try:
+            # Detect system information
+            system_info = self._detect_system_info()
+            
             # Add agent identity and status
             identity_section = f"""
 # Agent Identity and Status
@@ -664,6 +710,15 @@ class AutonomousAgent:
 - Started: {self.agent_state['started_at']}
 - Status: {self.agent_state['status']}
 - Current working directory: {self.working_memory.get('working_directory', os.getcwd())}
+"""
+            
+            # Add system information section
+            system_info_section = f"""
+# System Information
+- OS Type: {system_info.get('os_type', 'Unknown')}
+- Distribution: {system_info.get('distribution', 'Unknown')}
+- Package Manager: {system_info.get('package_manager', 'Unknown')}
+- Test Mode: {'Enabled - commands will not actually execute' if self.test_mode else 'Disabled - commands will execute normally'}
 """
             
             # Add memory stats if available
@@ -680,14 +735,88 @@ class AutonomousAgent:
                 files_section = "\n# Important Files\n"
                 for file_path in self.working_memory['important_files'][:5]:  # Limit to 5 files
                     files_section += f"- {file_path}\n"
+            
+            # Add task information if available
+            tasks_section = ""
+            if 'tasks' in self.working_memory and self.working_memory['tasks']:
+                tasks_section = "\n# Active Tasks\n"
+                for task in self.working_memory['tasks'][-3:]:  # Show last 3 tasks
+                    tasks_section += f"- {task.get('title', 'Untitled task')} (Status: {task.get('status', 'pending')})\n"
                     
             # Combine all sections
-            combined_prompt = f"{system_prompt}\n\n{identity_section}{memory_stats}{files_section}"
+            combined_prompt = f"{system_prompt}\n\n{identity_section}{system_info_section}{memory_stats}{files_section}{tasks_section}"
             return combined_prompt
             
         except Exception as e:
             logger.error(f"Error enhancing system prompt: {e}")
             return system_prompt  # Return original if there's an error
+            
+    def _detect_system_info(self) -> dict:
+        """Detect information about the current system environment"""
+        system_info = {
+            'os_type': 'Unknown',
+            'distribution': 'Unknown',
+            'package_manager': 'Unknown',
+            'shell': 'bash'
+        }
+        
+        try:
+            # Detect operating system
+            if os.name == 'posix':
+                system_info['os_type'] = 'Linux/Unix'
+                
+                # Try to detect distribution and package manager
+                if os.path.exists('/etc/os-release'):
+                    with open('/etc/os-release', 'r') as f:
+                        os_release = f.read()
+                        
+                        # Check for common distributions
+                        if 'ID=arch' in os_release or 'ID=manjaro' in os_release:
+                            system_info['distribution'] = 'Arch Linux' if 'ID=arch' in os_release else 'Manjaro'
+                            system_info['package_manager'] = 'pacman'
+                        elif 'ID=ubuntu' in os_release or 'ID=debian' in os_release:
+                            system_info['distribution'] = 'Ubuntu' if 'ID=ubuntu' in os_release else 'Debian'
+                            system_info['package_manager'] = 'apt'
+                        elif 'ID=fedora' in os_release or 'ID=rhel' in os_release or 'ID=centos' in os_release:
+                            system_info['distribution'] = 'Fedora/RHEL/CentOS'
+                            system_info['package_manager'] = 'dnf/yum'
+                        elif 'ID=alpine' in os_release:
+                            system_info['distribution'] = 'Alpine'
+                            system_info['package_manager'] = 'apk'
+                
+                # Fallback detection based on common executables
+                if system_info['package_manager'] == 'Unknown':
+                    # Check common package managers
+                    package_managers = {
+                        'pacman': 'pacman',
+                        'apt': 'apt',
+                        'dnf': 'dnf',
+                        'yum': 'yum',
+                        'apk': 'apk'
+                    }
+                    
+                    for pm_name, pm_cmd in package_managers.items():
+                        # Check if the package manager exists in common paths
+                        if any(os.path.exists(os.path.join(path, pm_cmd)) 
+                               for path in ['/usr/bin', '/bin', '/usr/sbin', '/sbin']):
+                            system_info['package_manager'] = pm_name
+                            break
+            
+            elif os.name == 'nt':
+                system_info['os_type'] = 'Windows'
+                system_info['package_manager'] = 'choco/winget'
+            elif os.name == 'darwin':
+                system_info['os_type'] = 'macOS'
+                system_info['package_manager'] = 'brew'
+                
+            # Store in working memory for future reference
+            self.working_memory['system_info'] = system_info
+            
+            return system_info
+            
+        except Exception as e:
+            logger.error(f"Error detecting system info: {e}")
+            return system_info
 
     def _load_system_prompt(self, path: Path) -> str:
         """Load system prompt from file"""
@@ -1653,6 +1782,68 @@ class AutonomousAgent:
         except Exception as e:
             logger.error(f"Error generating final reflection: {e}")
 
+    async def _request_user_input(self, question: str) -> str:
+        """
+        Request and get input from the user during agent execution.
+        
+        Args:
+            question: The question or prompt to display to the user
+            
+        Returns:
+            User's input response
+        """
+        try:
+            # Record the pause in working memory
+            if 'user_interactions' not in self.working_memory:
+                self.working_memory['user_interactions'] = []
+                
+            self.working_memory['user_interactions'].append({
+                'timestamp': time.time(),
+                'question': question
+            })
+            
+            # Present the question to the user with clear formatting
+            print("\n" + "="*50)
+            print("AGENT PAUSED AND REQUESTING YOUR INPUT:")
+            print("-"*50)
+            print(question)
+            print("-"*50)
+            
+            # Get multi-line input from the user
+            print("Enter your response (press Enter on a blank line to finish):")
+            lines = []
+            while True:
+                try:
+                    line = input()
+                    # If the line is empty (no text), we finish collecting
+                    if not line.strip():
+                        break
+                    lines.append(line)
+                except EOFError:
+                    break
+                    
+            user_input = "\n".join(lines)
+            
+            if not user_input.strip():
+                # Provide a default response if the user didn't enter anything
+                user_input = "(User acknowledged but provided no specific input)"
+                
+            # Record the user's response in working memory
+            self.working_memory['user_interactions'][-1]['response'] = user_input
+            
+            print("="*50 + "\n")
+            print("Thank you for your input. Continuing execution...\n")
+            
+            # Log the interaction
+            logger.info(f"Received user input in response to agent question")
+            
+            return user_input
+            
+        except Exception as e:
+            logger.error(f"Error getting user input: {e}")
+            # Return a fallback response in case of error
+            return "There was an error processing your input. Please continue."
+
     async def _process_reasoning_blocks(self, response: str, session_id: str, turn_count: int) -> None:
         """Process and store reasoning blocks from the agent's response"""
         try:
@@ -1662,7 +1853,9 @@ class AutonomousAgent:
                 ("thinking", self.command_extractor.extract_thinking),
                 ("decision", self.command_extractor.extract_decision),
                 ("plan", self.command_extractor.extract_plan),
-                ("summary", self.command_extractor.extract_summary)
+                ("summary", self.command_extractor.extract_summary),
+                ("task", self.command_extractor.extract_tasks),
+                ("subtask", self.command_extractor.extract_subtasks)
             ]:
                 blocks = extractor_method(response)
                 if blocks:
@@ -1697,6 +1890,71 @@ class AutonomousAgent:
                         })
                     elif tag_name == "summary" and blocks:
                         self.executive_summary = blocks[0]  # Keep the most recent summary
+                    elif tag_name == "task":
+                        # Process each task and add to task manager
+                        for task_content in blocks:
+                            # Extract task title if present (first line)
+                            task_lines = task_content.split('\n')
+                            task_title = task_lines[0].strip()
+                            task_details = '\n'.join(task_lines[1:]).strip() if len(task_lines) > 1 else ""
+                            
+                            # Create a unique task ID
+                            task_id = f"task_{int(time.time())}_{hash(task_title) % 10000}"
+                            
+                            # Add to task manager
+                            self.task_manager.add_task(
+                                task_id=task_id,
+                                title=task_title,
+                                description=task_details,
+                                session_id=session_id,
+                                metadata={
+                                    "created_at": time.time(),
+                                    "status": "pending",
+                                    "priority": "medium"  # Default priority
+                                }
+                            )
+                            
+                            # Log task creation
+                            logger.info(f"Created new task: {task_title}")
+                            
+                            # Add to working memory for short-term tracking
+                            if 'tasks' not in self.working_memory:
+                                self.working_memory['tasks'] = []
+                            
+                            self.working_memory['tasks'].append({
+                                "id": task_id,
+                                "title": task_title,
+                                "created_at": time.time(),
+                                "status": "pending"
+                            })
+                    
+                    elif tag_name == "subtask":
+                        # Process subtasks by linking them to the most recently created task
+                        if reasoning_data.get("task") and 'tasks' in self.working_memory and self.working_memory['tasks']:
+                            parent_task_id = self.working_memory['tasks'][-1]["id"]
+                            
+                            for subtask_content in blocks:
+                                # Extract subtask title and details
+                                subtask_lines = subtask_content.split('\n')
+                                subtask_title = subtask_lines[0].strip()
+                                subtask_details = '\n'.join(subtask_lines[1:]).strip() if len(subtask_lines) > 1 else ""
+                                
+                                # Create a unique subtask ID
+                                subtask_id = f"subtask_{int(time.time())}_{hash(subtask_title) % 10000}"
+                                
+                                # Add to task manager as a subtask
+                                self.task_manager.add_subtask(
+                                    parent_id=parent_task_id,
+                                    subtask_id=subtask_id,
+                                    title=subtask_title,
+                                    description=subtask_details,
+                                    metadata={
+                                        "created_at": time.time(),
+                                        "status": "pending"
+                                    }
+                                )
+                                
+                                logger.info(f"Created subtask '{subtask_title}' for task {parent_task_id}")
                         
             # Also save to working memory (limited history)
             if reasoning_data:

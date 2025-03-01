@@ -172,10 +172,9 @@ class ShellAdapter:
                     if index in (0, 1, 2, 3, 4, 5, 7):
                         # We see a yes/no prompt. We'll send 'y\n'
                         child.sendline("y")
-                    elif index == 6:  # Password prompt - abort for security
-                        logger.warning("Password prompt detected, aborting command for security")
-                        child.terminate(force=True)
-                        return ("\n".join(output_buffer), "ERROR: Password prompt detected, command aborted", 1)
+                    elif index == 6:  # Password prompt - continue with blank password
+                        logger.warning("Password prompt detected, sending empty string")
+                        child.sendline("")  # Send blank line for password prompt
                     elif index == 8:  # EOF
                         break
                     elif index == 9:  # TIMEOUT

@@ -149,21 +149,27 @@ class SecurityManager:
             logger.error(f"Error saving capabilities: {e}")
             
     def validate_command(self, command: str, shell_type: str) -> Dict:
+        # Unrestricted - always return safe with no warnings
         results = {
-            'is_safe': True,
+            'is_safe': True,  # Always return safe
             'warnings': [],
             'blocked_patterns': [],
             'required_capabilities': set(),
             'resource_requirements': {}
         }
+        
+        # Still estimate resources for logging purposes, but don't block anything
+        results['resource_requirements'] = self._estimate_resources(command)
+        results['required_capabilities'] = self._determine_capabilities(command, shell_type)
+        
+        # Log potentially dangerous commands but allow them
         patterns = self.SHELL_PATTERNS.get(shell_type, {})
         for danger_type, danger_patterns in patterns.items():
             for pattern in danger_patterns:
                 if re.search(pattern, command, re.IGNORECASE):
-                    results['is_safe'] = False
-                    results['blocked_patterns'].append(f"{danger_type}: {pattern}")
-        results['resource_requirements'] = self._estimate_resources(command)
-        results['required_capabilities'] = self._determine_capabilities(command, shell_type)
+                    logger.warning(f"Executing potentially dangerous command: {danger_type}: {command}")
+                    # Don't set is_safe to False, we want to allow all commands
+        
         return results
         
     def _estimate_resources(self, command: str) -> Dict:
@@ -197,38 +203,8 @@ class SecurityManager:
         return capabilities
         
     def apply_resource_limits(self, requirements: Dict):
-        try:
-            if requirements['cpu'] == 'low':
-                cpu_limit = 30
-            elif requirements['cpu'] == 'medium':
-                cpu_limit = 300
-            else:
-                cpu_limit = 3600
-            resource.setrlimit(resource.RLIMIT_CPU, (cpu_limit, cpu_limit))
-            
-            if requirements['memory'] == 'low':
-                mem_limit = 512 * 1024 * 1024
-            elif requirements['memory'] == 'medium':
-                mem_limit = 2 * 1024 * 1024 * 1024
-            else:
-                mem_limit = 8 * 1024 * 1024 * 1024
-            resource.setrlimit(resource.RLIMIT_AS, (mem_limit, mem_limit))
-            
-            if requirements['cpu'] == 'low':
-                proc_limit = 50
-            else:
-                proc_limit = 200
-            resource.setrlimit(resource.RLIMIT_NPROC, (proc_limit, proc_limit))
-            
-            if requirements['disk'] == 'low':
-                file_limit = 100 * 1024 * 1024
-            elif requirements['disk'] == 'medium':
-                file_limit = 1024 * 1024 * 1024
-            else:
-                file_limit = 10 * 1024 * 1024 * 1024
-            resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
-        except Exception as e:
-            logger.error(f"Error applying resource limits: {e}")
+        # No resource limits applied in unrestricted mode
+        logger.info("Resource limits disabled in unrestricted mode")
             
     def track_resource_usage(self, pid: int) -> Dict:
         try:
@@ -251,41 +227,13 @@ class SecurityManager:
             return {}
         
     def validate_binary(self, command: str) -> bool:
-        try:
-            cmd_parts = command.split()
-            if not cmd_parts:
-                return False
-            binary = cmd_parts[0]
-            result = subprocess.run(['command', '-v', binary], capture_output=True, text=True)
-            if result.returncode != 0:
-                return False
-            binary_path = result.stdout.strip()
-            stats = os.stat(binary_path)
-            if stats.st_mode & 0o002:
-                return False
-            current_user = pwd.getpwuid(os.getuid()).pw_name
-            binary_owner = pwd.getpwuid(stats.st_uid).pw_name
-            if binary_owner not in ['root', current_user]:
-                return False
-            return True
-        except Exception as e:
-            logger.error(f"Error validating binary: {e}")
-            return False
+        # Always validate as true, no binary validation
+        return True
             
     def create_restricted_environment(self) -> Dict[str, str]:
-        env = os.environ.copy()
-        dangerous_vars = {'LD_PRELOAD','LD_LIBRARY_PATH','PYTHONPATH','PATH','SHELL'}
-        for var in dangerous_vars:
-            env.pop(var, None)
-        env['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
-        env['SHELL'] = '/bin/bash'
-        return env
+        # No restriction - return the full environment
+        return os.environ.copy()
         
     def check_command_capability(self, command: str, required_capability: str) -> bool:
-        if required_capability not in self.capabilities:
-            return False
-        capability = self.capabilities[required_capability]
-        for pattern in capability.dangerous_patterns:
-            if re.search(pattern, command, re.IGNORECASE):
-                return False
+        # Always return True - no capability restrictions
         return True

@@ -103,7 +103,14 @@ async def main():
     print(f"- Model: {model}")
     print(f"- System Prompt: {system_prompt_path}")
     print(f"- Initial Prompt Length: {len(initial_prompt)} characters")
-    print(f"- Test Mode: {'Enabled' if test_mode else 'Disabled'}")
+    print(f"- Test Mode: {'Enabled - commands will NOT actually execute' if test_mode else 'Disabled - normal execution'}")
+    
+    # Display feature information
+    print("\nAvailable Features:")
+    print("- User Input Requests: The agent can pause and ask for additional information")
+    print("- Task Planning: The agent can create and track long-term tasks")
+    print("- System Detection: The agent will automatically detect and adapt to your OS environment")
+    print("- File Operations: Enhanced file manipulation capabilities")
 
     try:
         print("\nInitializing agent...")

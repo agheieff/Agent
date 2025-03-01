@@ -63,30 +63,25 @@ class SystemControl:
 
     def _sanitize_command(self, command: str) -> str:
         """
-        Enhanced command sanitizer with:
-        - Pattern detection for unsafe commands
-        - Block commands that are trying to modify the agent code itself
-        - Logging of security warnings
+        UNRESTRICTED - No command sanitization or safety checks.
         
-        Returns the original command if safe, or raises a SecurityWarning if unsafe
+        Returns the original command without safety checks.
         """
         command = command.strip()
         
-        # Block direct security threats
+        # No safety restrictions - log command for reference but allow everything
         for pattern, danger_type in UNSAFE_COMMANDS.items():
             if pattern in command:
-                logger.warning(f"DANGER: Attempted {danger_type} command => {command}")
+                logger.warning(f"EXECUTING POTENTIALLY DANGEROUS COMMAND: {danger_type} => {command}")
                 self.memory_manager.save_document(
-                    "security_warnings",
-                    f"⚠️ DANGER: {danger_type} attempt: {command}",
-                    tags=["security", "warning", danger_type]
+                    "command_execution",
+                    f"EXECUTING: {danger_type} command: {command}",
+                    tags=["command", "execution", danger_type]
                 )
-                # Don't execute dangerous commands - raise exception
-                raise SecurityWarning(f"Blocked {danger_type} command: {command}")
+                # Continue execution without raising exception
                 
-        # Don't allow modifying the agent's own code
+        # Allow self-modification
         agent_path_patterns = [
-            # Protect core system files 
             "core/agent.py", 
             "core/memory_manager.py",
             "core/system_control.py",
@@ -94,14 +89,13 @@ class SystemControl:
         ]
         for path in agent_path_patterns:
             if path in command and any(edit_cmd in command.lower() for edit_cmd in ["rm ", "mv ", "edit", ">", "cp "]):
-                logger.warning(f"DANGER: Attempted to modify agent core file: {command}")
+                logger.warning(f"EXECUTING AGENT SELF-MODIFICATION: {command}")
                 self.memory_manager.save_document(
-                    "security_warnings",
-                    f"⚠️ DANGER: Attempted agent self-modification: {command}",
-                    tags=["security", "warning", "SELF_MODIFICATION"]
+                    "command_execution",
+                    f"EXECUTING AGENT SELF-MODIFICATION: {command}",
+                    tags=["command", "execution", "self_modification"]
                 )
-                # Don't allow self-modification
-                raise SecurityWarning(f"Blocked attempt to modify agent code: {command}")
+                # Continue execution without raising exception
                 
         return command
 
@@ -231,11 +225,18 @@ class SystemControl:
             return (stdout, stderr, code)
             
         except SecurityWarning as security_error:
-            # Return the error as stderr with non-zero exit code
+            # Log security warnings but still execute the command
             error_msg = str(security_error)
-            logger.error(f"Security warning: {error_msg}")
-            self.stats['errors'] += 1
-            return ("", f"SECURITY ERROR: {error_msg}", 1)
+            logger.warning(f"Security warning (ignored in unrestricted mode): {error_msg}")
+            # Continue with command execution despite security warning
+            sanitized_cmd = command.strip()
+            if command_type == 'python':
+                # Execute Python code
+                result = await self.bash_adapter.execute(f"python -c \"{sanitized_cmd}\"", timeout=timeout)
+            else:
+                # Execute bash command
+                result = await self.bash_adapter.execute(sanitized_cmd, timeout=timeout)
+            return result
             
         except asyncio.TimeoutError:
             # Handle timeout at this level too

@@ -174,9 +174,10 @@ class SessionManager:
             logger.error(f"Error saving session state: {e}")
             
     def start_session(self, shell_preference: str, working_directory: str,
-                      environment: Dict[str, str]) -> SessionState:
+                      environment: Dict[str, str], session_id: str = None) -> SessionState:
+        """Start a new session with the given parameters"""
         session = SessionState(
-            id=f"session_{int(time.time())}",
+            id=session_id or f"session_{int(time.time())}",
             start_time=time.time(),
             shell_preference=shell_preference,
             working_directory=working_directory,

@@ -4,11 +4,13 @@ import sys
 import argparse
 from pathlib import Path
 from dotenv import load_dotenv
+import socket
+from datetime import datetime
 
 from core.agent import AutonomousAgent
 
 def get_model_choice() -> str:
-    """Get model choice interactively"""
+    """Get model choice interactively."""
     while True:
         print("\nAvailable models:")
         print("1. Anthropic Claude")
@@ -42,15 +44,32 @@ def get_initial_prompt() -> str:
             break
     return "\n".join(lines)
 
-def load_system_prompt(path: str) -> str:
+def load_and_augment_system_prompt(path: str) -> str:
+    """
+    Load the system prompt from file and substitute system status placeholders.
+    """
     try:
         with open(path, 'r') as f:
-            return f.read().strip()
+            prompt_text = f.read()
     except FileNotFoundError:
         print(f"Warning: System prompt file not found at {path}")
         if input("Continue with empty system prompt? [y/N] ").lower() != 'y':
             sys.exit(1)
         return ""
+
+    # Gather system info
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    hostname = socket.gethostname()
+    current_directory = os.getcwd()
+    run_agent_path = str(Path(__file__).resolve())
+
+    # Replace placeholders
+    prompt_text = prompt_text.replace("{CURRENT_DIRECTORY}", current_directory)
+    prompt_text = prompt_text.replace("{RUN_AGENT_PATH}", run_agent_path)
+    prompt_text = prompt_text.replace("{CURRENT_TIME}", current_time)
+    prompt_text = prompt_text.replace("{HOSTNAME}", hostname)
+
+    return prompt_text
 
 async def main():
     load_dotenv()
@@ -63,6 +82,7 @@ async def main():
     system_prompt_path = Path("config/system_prompt.md")
     system_prompt_path.parent.mkdir(parents=True, exist_ok=True)
     if not system_prompt_path.exists():
+        # Just create a placeholder file if missing
         with open(system_prompt_path, 'w') as f:
             f.write("# Default system prompt\n")
 
@@ -100,7 +120,9 @@ async def main():
             print("-" * 40)
         
         print("\nStarting multi-turn session...\n")
-        system_prompt = load_system_prompt(str(system_prompt_path))
+
+        # Load system prompt and prepend system status
+        system_prompt = load_and_augment_system_prompt(str(system_prompt_path))
 
         # If test mode, add note to the system prompt as well
         if test_mode:

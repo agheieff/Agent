@@ -154,7 +154,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\nFatal error: {str(e)}")
         sys.exit(1)
-
-# Message tag validation check
-if '<message>' not in response:
-    raise ValueError('All responses must contain <message> tag')

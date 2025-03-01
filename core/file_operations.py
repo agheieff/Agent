@@ -269,6 +269,8 @@ class FileOperations:
     def __init__(self):
         self.current_dir = os.getcwd()
         self.notebook_reader = NotebookReader()
+        # Set to track files that have been read (for safety check)
+        self.viewed_files: Set[str] = set()
     
     def view(self, file_path: str, offset: int = 0, limit: int = 2000) -> str:
         """
@@ -294,10 +296,14 @@ class FileOperations:
                 
             # Handle image files
             if self._is_image_file(file_path):
+                # Add to viewed files even though it's an image
+                self.viewed_files.add(file_path)
                 return f"[Image file: {file_path}]"
                 
             # Handle binary files
             if self._is_binary_file(file_path):
+                # Add to viewed files even though it's binary
+                self.viewed_files.add(file_path)
                 return f"[Binary file: {file_path}]"
                 
             # Read file with offset and limit
@@ -325,6 +331,9 @@ class FileOperations:
                 # If we hit the limit, indicate there's more content
                 if len(lines) == limit and next(f, None) is not None:
                     content += "\n[...file content truncated, additional lines not shown...]\n"
+                
+                # Track this file as having been viewed
+                self.viewed_files.add(file_path)
                     
                 return content
                 
@@ -361,8 +370,18 @@ class FileOperations:
                 # Create new file with content
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(new_string)
-                    
+                
+                # Track as viewed since we're creating it
+                self.viewed_files.add(file_path)
                 return f"Created new file: {file_path}"
+            
+            # Safety check: Verify file has been read before
+            if file_path not in self.viewed_files:
+                warning = f"Warning: File {file_path} has not been read yet. "
+                warning += "Consider viewing it first with view() to avoid errors. "
+                warning += "This is a safety check, not a hard restriction."
+                logger.warning(warning)
+                # We don't block the edit, just warn about it
             
             # Read current file content
             with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
@@ -390,6 +409,9 @@ class FileOperations:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(new_content)
             
+            # Mark as viewed since we've now interacted with it
+            self.viewed_files.add(file_path)
+            
             return f"Successfully edited file: {file_path}"
             
         except Exception as e:
@@ -411,6 +433,14 @@ class FileOperations:
             # Convert to absolute path if it's not already
             file_path = self._ensure_absolute_path(file_path)
             
+            # Safety check if file exists but hasn't been read
+            if os.path.exists(file_path) and file_path not in self.viewed_files:
+                warning = f"Warning: File {file_path} has not been read yet before replacing. "
+                warning += "Consider viewing it first with view() to avoid errors. "
+                warning += "This is a safety check, not a hard restriction."
+                logger.warning(warning)
+                # We don't block the edit, just warn about it
+            
             # Create parent directory if needed
             parent_dir = os.path.dirname(file_path)
             if parent_dir and not os.path.exists(parent_dir):
@@ -419,6 +449,9 @@ class FileOperations:
             # Write the content
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
+            
+            # Mark as viewed since we've now interacted with it
+            self.viewed_files.add(file_path)
             
             action = "Created" if not os.path.exists(file_path) else "Updated"
             return f"{action} file: {file_path}"

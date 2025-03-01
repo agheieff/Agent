@@ -254,10 +254,14 @@ class AutonomousAgent:
         if not api_key:
             raise ValueError("API key required")
 
-        self.memory_path = Path("memory")
+        # Get memory location from memory_manager or create a new one
+        if memory_manager:
+            self.memory_manager = memory_manager
+        else:
+            self.memory_manager = MemoryManager()
+            
+        self.memory_path = self.memory_manager.base_path
         self._setup_storage()
-
-        self.memory_manager = memory_manager or MemoryManager()
         self.system_control = SystemControl(test_mode=test_mode)
         self.task_manager = TaskManager(self.memory_path)
         self.session_manager = session_manager or SessionManager(self.memory_path, self.memory_manager)
@@ -335,6 +339,10 @@ class AutonomousAgent:
         3. The agent responds with commands
         4. We execute them and return the output as the next user message
         5. Repeat until the agent triggers an exit command or completes the session
+        
+        Special commands:
+        - /compact: Compresses conversation history to save context space
+        - /help: Shows help information
         """
         try:
             # Update agent state
@@ -380,8 +388,30 @@ class AutonomousAgent:
             system_msg = {"role": "system", "content": enhanced_system_prompt}
             self.local_conversation_history.append(system_msg)
 
-            # Add initial user message (the "task" given)
-            user_msg = {"role": "user", "content": initial_prompt}
+            # Check for slash commands in initial prompt
+            if initial_prompt.strip().startswith('/') and len(initial_prompt.strip().split()) == 1:
+                cmd = initial_prompt.strip().lower()
+                if cmd == '/compact':
+                    # Special startup case, just give instructions
+                    print("\nThe /compact command is used during an ongoing conversation.")
+                    print("Starting a fresh conversation with an empty context...")
+                    # Use a modified prompt that explains this
+                    user_msg = {"role": "user", "content": "Please start a new conversation. I tried to use /compact but I need to have a conversation first before compacting it."}
+                elif cmd == '/help':
+                    # Special startup case, just give instructions and proceed
+                    print("\nAvailable slash commands:")
+                    print("  /help     - Show help information")
+                    print("  /compact  - Compact conversation history to save context space")
+                    print("\nStarting a new conversation...")
+                    # Use a modified prompt that explains this
+                    user_msg = {"role": "user", "content": "Please start a new conversation. I just checked the available commands with /help."}
+                else:
+                    # Unknown command, use as-is
+                    user_msg = {"role": "user", "content": initial_prompt}
+            else:
+                # Normal prompt
+                user_msg = {"role": "user", "content": initial_prompt}
+            
             self.local_conversation_history.append(user_msg)
 
             # Initialize failure tracking
@@ -518,6 +548,40 @@ class AutonomousAgent:
                         
                         # Skip the rest of this iteration and continue with the updated conversation
                         continue
+                        
+                    # Check for slash commands - this would be in next_user_msg
+                    if len(self.local_conversation_history) > 0 and self.local_conversation_history[-1].get('role') == 'user':
+                        user_content = self.local_conversation_history[-1].get('content', '')
+                        if user_content.strip().startswith('/'):
+                            cmd = user_content.strip().lower()
+                            if cmd == '/compact':
+                                # Force compression of context
+                                print("\nCompacting conversation context...")
+                                compressed_history = await self.compress_context(self.local_conversation_history, force=True)
+                                # Replace the history with the compressed version
+                                self.local_conversation_history = compressed_history
+                                # Add a note about the compression
+                                user_msg = {
+                                    "role": "user",
+                                    "content": "I've requested the conversation context to be compacted. Please continue with the previous task."
+                                }
+                                self.local_conversation_history.append(user_msg)
+                                continue
+                            elif cmd == '/help':
+                                # Show help and continue
+                                help_text = "\nAvailable Commands:\n"
+                                help_text += "  /help     - Show this help message\n"
+                                help_text += "  /compact  - Compact conversation history to save context space\n"
+                                
+                                print(help_text)
+                                
+                                # Add help text as user message
+                                user_msg = {
+                                    "role": "user", 
+                                    "content": f"I requested help information. Please continue with the previous task."
+                                }
+                                self.local_conversation_history.append(user_msg)
+                                continue
 
                     # Process reasoning blocks
                     await self._process_reasoning_blocks(response, session_id, turn_count)
@@ -543,10 +607,49 @@ class AutonomousAgent:
                     # Provide command outputs as the next user message
                     if all_outputs:
                         combined_message = "\n\n".join(all_outputs)
-                        next_user_msg = {
-                            "role": "user",
-                            "content": combined_message
-                        }
+                        
+                        # Check if any output contains a slash command
+                        slash_cmd = None
+                        for output in all_outputs:
+                            lines = output.strip().split('\n')
+                            for line in lines:
+                                if line.strip().startswith('/') and len(line.strip().split()) == 1:
+                                    slash_cmd = line.strip().lower()
+                                    break
+                            if slash_cmd:
+                                break
+                        
+                        # Handle slash commands in outputs
+                        if slash_cmd == '/compact':
+                            print("\nDetected /compact command in output. Compacting conversation context...")
+                            compressed_history = await self.compress_context(self.local_conversation_history, force=True)
+                            # Replace the history with the compressed version
+                            self.local_conversation_history = compressed_history
+                            # Add a modified message without the slash command
+                            filtered_message = combined_message.replace('/compact', '(Context compacted)')
+                            next_user_msg = {
+                                "role": "user",
+                                "content": filtered_message
+                            }
+                        elif slash_cmd == '/help':
+                            # Show help
+                            help_text = "\nAvailable Commands:\n"
+                            help_text += "  /help     - Show this help message\n"
+                            help_text += "  /compact  - Compact conversation history to save context space\n"
+                            print(help_text)
+                            # Replace the command with a note
+                            filtered_message = combined_message.replace('/help', '(Help displayed)')
+                            next_user_msg = {
+                                "role": "user",
+                                "content": filtered_message
+                            }
+                        else:
+                            # Normal message
+                            next_user_msg = {
+                                "role": "user",
+                                "content": combined_message
+                            }
+                        
                         self.local_conversation_history.append(next_user_msg)
                         
                         # Create periodic backups during the session
@@ -1202,7 +1305,7 @@ class AutonomousAgent:
             except:
                 pass
 
-    async def compress_context(self, messages: List[Dict], token_limit: int = 16000) -> List[Dict]:
+    async def compress_context(self, messages: List[Dict], token_limit: int = 16000, force: bool = False) -> List[Dict]:
         """
         Compress conversation context when it gets too large.
         Implements smart summarization of earlier exchanges while keeping recent messages intact.
@@ -1210,6 +1313,7 @@ class AutonomousAgent:
         Args:
             messages: List of conversation messages
             token_limit: Target token limit (approximate)
+            force: Whether to force compression even if under token limit
             
         Returns:
             Compressed message list that fits within the token limit
@@ -1217,7 +1321,7 @@ class AutonomousAgent:
         # Simple and conservative estimate - each char is roughly 0.25 tokens
         estimated_tokens = sum(len(str(msg.get('content', ''))) for msg in messages) // 4
         
-        if estimated_tokens <= token_limit:
+        if estimated_tokens <= token_limit and not force:
             return messages  # No compression needed
         
         try:
@@ -1394,7 +1498,13 @@ class AutonomousAgent:
             # Log compression stats
             post_size = sum(len(str(msg.get('content', ''))) for msg in kept_messages) // 4
             compression_time = time.time() - compression_start
-            logger.info(f"Context compressed from {pre_compression_size} to {post_size} tokens in {compression_time:.2f}s")
+            compression_percentage = 100 - (post_size / pre_compression_size * 100)
+            logger.info(f"Context compressed from {pre_compression_size} to {post_size} tokens ({compression_percentage:.1f}% reduction) in {compression_time:.2f}s")
+            
+            # Print compression stats if this was a forced compression (from /compact command)
+            if force:
+                print(f"✅ Context compressed: {pre_compression_size} → {post_size} tokens ({compression_percentage:.1f}% reduction)")
+                print(f"This will help the agent manage its memory more efficiently.")
             
             return kept_messages
             

@@ -345,8 +345,63 @@ class MemoryManager:
     """High-level memory manager that composes a MemoryGraph + MemoryHierarchy + TemporalContext + VectorIndex"""
     
     def __init__(self, base_path: Path = None):
-        self.base_path = base_path or Path("memory")
+        # If no path provided, use the configuration from memory.config file
+        if base_path is None:
+            base_path = self._get_configured_path()
+        
+        self.base_path = base_path
         self.base_path.mkdir(parents=True, exist_ok=True)
+        
+        # Save the configured path
+        self._save_configured_path(self.base_path)
+    
+    def _get_configured_path(self) -> Path:
+        """Read memory location from configuration file"""
+        # Look for memory.config in the current working directory and agent directory
+        config_paths = [
+            Path.cwd() / "memory.config",
+            Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "memory.config"
+        ]
+        
+        for config_path in config_paths:
+            if config_path.exists():
+                try:
+                    with open(config_path, 'r') as f:
+                        memory_path = f.read().strip()
+                        if memory_path:
+                            return Path(memory_path)
+                except:
+                    pass
+        
+        # If not found, check environment variable
+        memory_dir = os.environ.get("AGENT_MEMORY_DIR")
+        if memory_dir:
+            return Path(memory_dir)
+        
+        # If still not found, use default locations
+        agent_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        
+        # Try these locations in order:
+        # 1. ../AgentMemory (relative to agent code)
+        # 2. ./memory (in current directory)
+        # 3. ./AgentMemory (in current directory)
+        for path_option in [agent_dir.parent / "AgentMemory", Path.cwd() / "memory", Path.cwd() / "AgentMemory"]:
+            if path_option.exists() or path_option.parent.exists():
+                return path_option
+                
+        # Default to memory in the agent directory
+        return agent_dir / "memory"
+        
+    def _save_configured_path(self, path: Path):
+        """Save memory location to configuration file"""
+        try:
+            agent_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            config_path = agent_dir / "memory.config"
+            
+            with open(config_path, 'w') as f:
+                f.write(str(path))
+        except Exception as e:
+            logger.error(f"Error saving memory configuration: {e}")
         
         # Create all required directories
         for d in ['documents', 'conversations', 'vector_index', 'temporal', 'commands', 'backups',

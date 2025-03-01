@@ -62,12 +62,34 @@ def load_and_augment_system_prompt(path: str) -> str:
     hostname = socket.gethostname()
     current_directory = os.getcwd()
     run_agent_path = str(Path(__file__).resolve())
+    
+    # Get memory directory from config
+    memory_directory = ""
+    try:
+        memory_config = Path(__file__).resolve().parent / "memory.config"
+        if memory_config.exists():
+            with open(memory_config, 'r') as f:
+                memory_directory = f.read().strip()
+    except:
+        memory_directory = os.environ.get("AGENT_MEMORY_DIR", "")
+        
+    # Get projects directory from config
+    projects_directory = ""
+    try:
+        projects_config = Path(__file__).resolve().parent / "projects.config"
+        if projects_config.exists():
+            with open(projects_config, 'r') as f:
+                projects_directory = f.read().strip()
+    except:
+        projects_directory = os.environ.get("AGENT_PROJECTS_DIR", "")
 
     # Replace placeholders
     prompt_text = prompt_text.replace("{CURRENT_DIRECTORY}", current_directory)
     prompt_text = prompt_text.replace("{RUN_AGENT_PATH}", run_agent_path)
     prompt_text = prompt_text.replace("{CURRENT_TIME}", current_time)
     prompt_text = prompt_text.replace("{HOSTNAME}", hostname)
+    prompt_text = prompt_text.replace("{MEMORY_DIRECTORY}", memory_directory)
+    prompt_text = prompt_text.replace("{PROJECTS_DIRECTORY}", projects_directory)
 
     return prompt_text
 
@@ -77,8 +99,50 @@ async def main():
     parser = argparse.ArgumentParser(description="Run the Autonomous Agent.")
     parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands executed).")
     parser.add_argument('--model', choices=['anthropic', 'deepseek'], help="Specify model directly instead of prompting.")
+    parser.add_argument('--memory-dir', help="Path to memory directory (will be saved in memory.config)")
+    parser.add_argument('--projects-dir', help="Path to projects directory (will be saved in projects.config)")
     args = parser.parse_args()
     test_mode = args.test
+    
+    # Set up directories based on configuration files
+    current_dir = Path(__file__).resolve().parent
+    
+    # Handle memory directory setting
+    if args.memory_dir:
+        # Save provided memory path to config file
+        memory_path = Path(args.memory_dir).resolve()
+        with open(current_dir / "memory.config", 'w') as f:
+            f.write(str(memory_path))
+        os.environ["AGENT_MEMORY_DIR"] = str(memory_path)
+        
+    # Handle projects directory
+    if args.projects_dir:
+        # Save provided projects path to config file
+        projects_path = Path(args.projects_dir).resolve()
+        with open(current_dir / "projects.config", 'w') as f:
+            f.write(str(projects_path))
+        os.environ["AGENT_PROJECTS_DIR"] = str(projects_path)
+    else:
+        # Try to load from config or use default
+        try:
+            if (current_dir / "projects.config").exists():
+                with open(current_dir / "projects.config", 'r') as f:
+                    projects_path = f.read().strip()
+                    if projects_path:
+                        os.environ["AGENT_PROJECTS_DIR"] = projects_path
+            else:
+                # Use default ../Projects path
+                default_projects_dir = current_dir.parent / "Projects"
+                default_projects_dir.mkdir(exist_ok=True)
+                os.environ["AGENT_PROJECTS_DIR"] = str(default_projects_dir)
+                # Save it for future use
+                with open(current_dir / "projects.config", 'w') as f:
+                    f.write(str(default_projects_dir))
+        except:
+            # Use default projects path if config read fails
+            default_projects_dir = current_dir.parent / "Projects"
+            default_projects_dir.mkdir(exist_ok=True)
+            os.environ["AGENT_PROJECTS_DIR"] = str(default_projects_dir)
 
     system_prompt_path = Path("config/system_prompt.md")
     system_prompt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -98,6 +162,17 @@ async def main():
     
     try:
         initial_prompt = get_initial_prompt()
+        
+        # Handle special slash commands
+        if initial_prompt.strip().startswith('/'):
+            cmd = initial_prompt.strip().lower()
+            if cmd == '/help':
+                print("\nAvailable slash commands:")
+                print("  /help     - Show this help message")
+                print("  /compact  - Compact conversation history to save context space")
+                print("\nExample usage: Just type '/compact' as your input to compress the conversation.")
+                sys.exit(0)
+        
         if not initial_prompt.strip():
             print("Error: Empty prompt.")
             sys.exit(1)

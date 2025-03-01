@@ -36,21 +36,16 @@ ENV/
 # Project specific
 # Memory and conversation data - never commit these
 memory/
-memory/backups/
-memory/conversations/
-memory/documents/
-memory/sessions/
-memory/vector_index/
-memory/working_memory/
-memory/summaries/
-memory/state/
-memory/temp/
+/AgentMemory/
+../AgentMemory/
 
 # Temporary directories
 temp/
 tmp/
 
 # Project directories that may contain user data
+/Projects/
+../Projects/
 Projects/
 Project_*/
 

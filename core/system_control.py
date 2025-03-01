@@ -39,7 +39,9 @@ class SystemControl:
     """Enhanced system control with support for command execution, tracking, file operations, and self-monitoring"""
     
     def __init__(self, preferred_shell: str = 'bash', test_mode: bool = False):
+        # Create memory manager using configured location
         self.memory_manager = MemoryManager()
+        self.memory_path = self.memory_manager.base_path
         self.working_dir = Path.cwd()
         self.preferred_shell = preferred_shell
         self.test_mode = test_mode
@@ -139,7 +141,7 @@ class SystemControl:
             if command_type == 'python':
                 # For Python commands, create a temporary file and execute it
                 content = sanitized_cmd
-                tmp_dir = Path("memory/temp")
+                tmp_dir = self.memory_path / "temp"
                 tmp_dir.mkdir(exist_ok=True)
                 
                 # Create a unique filename
@@ -476,7 +478,7 @@ class SystemControl:
         """Clean up resources and save execution history"""
         try:
             # Save command history to memory
-            history_file = Path("memory/state/command_history.json")
+            history_file = self.memory_path / "state" / "command_history.json"
             history_file.parent.mkdir(exist_ok=True)
             
             # Only keep the last 1000 commands
@@ -497,10 +499,9 @@ class SystemControl:
         """Monitor system resources (memory, disk) in a background task"""
         try:
             # Check disk space in memory directory
-            memory_path = Path("memory")
-            if memory_path.exists():
+            if self.memory_path.exists():
                 # Get disk usage using df command
-                cmd = f"du -sh {memory_path}"
+                cmd = f"du -sh {self.memory_path}"
                 stdout, stderr, code = await self.bash_adapter.execute(cmd)
                 if code == 0:
                     disk_usage = stdout.strip()

@@ -13,6 +13,48 @@ Arcadia Agent is a sophisticated autonomous agent system that leverages LLMs (li
 
 The agent incorporates a hierarchical memory system with vector indexing for knowledge retrieval, session management for continuous operation, and a secure command execution framework.
 
+## Project Organization
+
+The system is structured into three main directories:
+
+1. **Agent** - Contains all code related to the agent functionality
+   - Core modules
+   - Configuration
+   - System prompts
+
+2. **AgentMemory** - Storage for all memory and persistent data
+   - Documents
+   - Conversations
+   - Working memory 
+   - Vector indices
+   - Session history
+
+3. **Projects** - Working directory for individual projects
+   - Each project should be contained in its own subdirectory
+   - Code you're working on stays separate from agent code
+
+### Directory Structure
+
+```
+/Arcadia/
+├── Agent/               # Agent code and functionality
+│   ├── core/            # Core agent modules
+│   ├── config/          # Configuration files 
+│   └── run_agent.py     # Agent entry point
+│
+├── AgentMemory/         # Persistent memory storage
+│   ├── documents/       # Stored documents
+│   ├── conversations/   # Stored conversations
+│   ├── vector_index/    # Vector embeddings for search
+│   ├── tasks/           # Task tracking
+│   └── ...              # Other memory components
+│
+└── Projects/            # Project working directories
+    ├── Project1/        # Individual project
+    ├── Project2/        # Another project
+    └── ...
+```
+
 ## Features
 
 - **Intelligent Task Execution**: Break down complex tasks into manageable steps and execute them
@@ -67,30 +109,76 @@ The agent incorporates a hierarchical memory system with vector indexing for kno
 
 ## Usage
 
+### Running the Agent
+
 Start the agent by running:
 
 ```bash
-python run_agent.py
+python run_agent.py [options]
 ```
 
 The agent will initialize its memory, load previous sessions (if available), and wait for your instructions.
+
+### Command Line Options
+
+```
+--model [anthropic|deepseek]     # Specify the LLM model to use
+--memory-dir PATH                # Path to memory directory (default: ../AgentMemory)
+--projects-dir PATH              # Path to projects directory (default: ../Projects)
+--test                           # Run in test mode (no commands executed)
+```
+
+### Memory & Projects Configuration
+
+The agent uses configuration files to manage its memory and projects locations:
+
+- `memory.config` - Contains the path to the memory directory
+- `projects.config` - Contains the path to the projects directory
+
+These configs are automatically managed by the agent. When you run the agent with specific paths:
+
+```bash
+python run_agent.py --memory-dir /path/to/memory --projects-dir /path/to/projects
+```
+
+The agent will update its configuration files accordingly.
+
+The agent can also use environment variables as fallback:
+- `AGENT_MEMORY_DIR` - Path to the memory directory
+- `AGENT_PROJECTS_DIR` - Path to the projects directory
+
+### Memory Persistence
+
+The memory system is designed to persist between agent restarts. You can safely:
+
+1. Stop the agent
+2. Update agent code
+3. Restart the agent
+
+Memory and project data will be preserved.
 
 ### Example Commands
 
 - **Start a new project**:
   ```
-  Create a new project called "Data Analysis" and plan the steps to analyze the iris dataset
+  Create a new project in the Projects directory called "Data Analysis" and plan the steps to analyze the iris dataset
   ```
 
 - **Analyze a file**:
   ```
-  Read the iris.parquet file and plot the relationship between sepal length and width
+  Read the iris.parquet file from the Projects/Data Analysis directory and plot the relationship between sepal length and width
   ```
 
 - **Execute system operations**:
   ```
-  List all Python files in the project and summarize their contents
+  List all Python files in the current project and summarize their contents
   ```
+
+### Best Practices
+
+1. **Keep projects in the Projects directory** - All project files should be created and managed there
+2. **Don't modify agent code** unless you're upgrading the agent itself
+3. **Back up the AgentMemory directory** periodically to prevent data loss
 
 ## Configuration
 

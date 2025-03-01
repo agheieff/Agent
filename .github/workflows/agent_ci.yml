@@ -1,0 +1,9 @@
+name: Agent CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test Agent
+        run: python -m pytest tests/

@@ -1,20 +1,77 @@
-*
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-!.gitignore
-!requirements.txt
-!run_agent.py
-
-!core/
-!core/**
-
-!config/
-!config/**
-
-**/__pycache__/
-**/*.py[cod]
-**/*.so
-
+# Virtual environments
 .env
-.venv/
+.venv
+env/
+venv/
+ENV/
+
+# IDE settings
 .idea/
 .vscode/
+*.swp
+*.swo
+
+# Project specific
+# Memory and conversation data - never commit these
+memory/
+memory/backups/
+memory/conversations/
+memory/documents/
+memory/sessions/
+memory/vector_index/
+memory/working_memory/
+memory/summaries/
+memory/state/
+memory/temp/
+
+# Temporary directories
+temp/
+tmp/
+
+# Project directories that may contain user data
+Projects/
+Project_*/
+
+# Logs and debug files
+*.log
+logs/
+data/
+cache/
+*.db
+*.sqlite
+*.sqlite3
+.history/
+.DS_Store
+config.local.ini
+env_audit.log
+agent_status.log
+debug_agent.py
+
+# API keys and sensitive configuration
+*.pem
+*.key
+.env*
+.secrets
+secrets/

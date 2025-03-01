@@ -1,3 +1,5 @@
+"""Main entry point for the autonomous agent."""
+
 import asyncio
 import os
 import sys
@@ -63,7 +65,7 @@ def load_and_augment_system_prompt(path: str) -> str:
     hostname = socket.gethostname()
     current_directory = os.getcwd()
     run_agent_path = str(Path(__file__).resolve())
-    
+
     # Get memory directory from config
     memory_directory = ""
     try:
@@ -73,7 +75,7 @@ def load_and_augment_system_prompt(path: str) -> str:
                 memory_directory = f.read().strip()
     except:
         memory_directory = os.environ.get("AGENT_MEMORY_DIR", "")
-        
+
     # Get projects directory from config
     projects_directory = ""
     try:
@@ -108,7 +110,7 @@ def handle_pause_signal(signum, frame):
 async def pause_for_context_input():
     """Pause the agent and collect additional context from the user"""
     global current_agent, paused_for_context
-    
+
     print("\n" + "="*60)
     print("AGENT PAUSED FOR ADDITIONAL CONTEXT")
     print("-"*60)
@@ -116,7 +118,7 @@ async def pause_for_context_input():
     print("This will be added to the agent's last response before continuing.")
     print("Press Enter on a blank line when finished.")
     print("-"*60)
-    
+
     # Collect multi-line input
     lines = []
     while True:
@@ -127,9 +129,9 @@ async def pause_for_context_input():
             lines.append(line)
         except EOFError:
             break
-            
+
     additional_context = "\n".join(lines)
-    
+
     if additional_context.strip():
         # Add the context to the conversation with special formatting
         await current_agent.add_human_context(additional_context)
@@ -138,7 +140,7 @@ async def pause_for_context_input():
         print("="*60 + "\n")
     else:
         print("No additional context provided. Continuing without changes.")
-    
+
     paused_for_context = False
 
 async def main():
@@ -151,15 +153,19 @@ async def main():
 
     parser = argparse.ArgumentParser(description="Run the Autonomous Agent.")
     parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands executed).")
+    
     parser.add_argument('--model', choices=['anthropic', 'deepseek'], help="Specify model directly instead of prompting.")
+    
     parser.add_argument('--memory-dir', help="Path to memory directory (will be saved in memory.config)")
+    
     parser.add_argument('--projects-dir', help="Path to projects directory (will be saved in projects.config)")
+    
     args = parser.parse_args()
     test_mode = args.test
-    
+
     # Set up directories based on configuration files
     current_dir = Path(__file__).resolve().parent
-    
+
     # Handle memory directory setting
     if args.memory_dir:
         # Save provided memory path to config file
@@ -167,7 +173,7 @@ async def main():
         with open(current_dir / "memory.config", 'w') as f:
             f.write(str(memory_path))
         os.environ["AGENT_MEMORY_DIR"] = str(memory_path)
-        
+
     # Handle projects directory
     if args.projects_dir:
         # Save provided projects path to config file
@@ -206,16 +212,16 @@ async def main():
 
     # Get model choice from argument or interactive prompt
     model = args.model if args.model else get_model_choice()
-    
+
     api_key = os.getenv(f"{model.upper()}_API_KEY")
     if not api_key:
         print(f"Error: {model.upper()}_API_KEY not found in environment.")
         print("Please set it in your .env file or environment variables.")
         sys.exit(1)
-    
+
     try:
         initial_prompt = get_initial_prompt()
-        
+
         # Handle special slash commands
         if initial_prompt.strip().startswith('/'):
             cmd = initial_prompt.strip().lower()
@@ -225,8 +231,9 @@ async def main():
                 print("  /compact  - Compact conversation history to save context space")
                 print("  /pause    - Pause to add additional context to the conversation")
                 print("\nExample usage: Just type '/compact' as your input to compress the conversation.")
+    
                 sys.exit(0)
-        
+
         if not initial_prompt.strip():
             print("Error: Empty prompt.")
             sys.exit(1)
@@ -240,12 +247,14 @@ async def main():
     print(f"- Initial Prompt Length: {len(initial_prompt)} characters")
     print(f"- Test Mode: {'Enabled - commands will NOT actually execute' if test_mode else 'Disabled - normal execution'}")
     
+
     # Display feature information
     print("\nAvailable Features:")
     print("- User Input Requests: The agent can pause and ask for additional information")
     print("- Human Context Pause: Press Ctrl+Z to pause and add context to the conversation")
     print("- Task Planning: The agent can create and track long-term tasks")
     print("- System Detection: The agent will automatically detect and adapt to your OS environment")
+    
     print("- File Operations: Enhanced file manipulation capabilities")
     print("- API Cost Tracking: Monitors and reports token usage and costs")
 
@@ -257,16 +266,16 @@ async def main():
             model=model,
             test_mode=test_mode
         )
-        
+
         # Store reference to agent for signal handler
         current_agent = agent
-        
+
         if agent.last_session_summary:
             print("\nLast Session Summary:")
             print("-" * 40)
             print(agent.last_session_summary)
             print("-" * 40)
-        
+
         print("\nStarting multi-turn session...\n")
 
         # Load system prompt and prepend system status
@@ -282,7 +291,7 @@ async def main():
             system_prompt = "## TEST MODE: Commands are NOT executed.\n\n" + system_prompt
 
         await agent.run(initial_prompt, system_prompt)
-        
+
     except KeyboardInterrupt:
         print("\nShutting down agent (Ctrl+C pressed)...")
     except Exception as e:
@@ -298,6 +307,7 @@ async def main():
     finally:
         # Display API usage summary if available
         if agent and hasattr(agent, 'llm') and hasattr(agent.llm, 'usage_history') and agent.llm.usage_history:
+    
             print("\n=== API USAGE SUMMARY ===")
             print(f"Total API Calls: {len(agent.llm.usage_history)}")
             print(f"Total Tokens: {agent.llm.total_tokens:,}")
@@ -305,7 +315,7 @@ async def main():
             print(f"  - Output Tokens: {agent.llm.total_completion_tokens:,}")
             print(f"Total Cost: ${agent.llm.total_cost:.6f}")
             print("=========================")
-        
+
         print("\nAgent session ended")
 
 if __name__ == "__main__":

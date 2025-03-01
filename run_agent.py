@@ -152,14 +152,14 @@ async def main():
         signal.signal(signal.SIGTSTP, handle_pause_signal)
 
     parser = argparse.ArgumentParser(description="Run the Autonomous Agent.")
-    parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands executed).")
-    
-    parser.add_argument('--model', choices=['anthropic', 'deepseek'], help="Specify model directly instead of prompting.")
-    
-    parser.add_argument('--memory-dir', help="Path to memory directory (will be saved in memory.config)")
-    
-    parser.add_argument('--projects-dir', help="Path to projects directory (will be saved in projects.config)")
-    
+    parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands ex...  # truncated for line length
+
+    parser.add_argument('--model', choices=['anthropic', 'deepseek'], help="Specify model directly...  # truncated for line length
+
+    parser.add_argument('--memory-dir', help="Path to memory directory (will be saved in memory.co...  # truncated for line length
+
+    parser.add_argument('--projects-dir', help="Path to projects directory (will be saved in proje...  # truncated for line length
+
     args = parser.parse_args()
     test_mode = args.test
 
@@ -230,8 +230,8 @@ async def main():
                 print("  /help     - Show this help message")
                 print("  /compact  - Compact conversation history to save context space")
                 print("  /pause    - Pause to add additional context to the conversation")
-                print("\nExample usage: Just type '/compact' as your input to compress the conversation.")
-    
+                print("\nExample usage: Just type '/compact' as your input to compress the convers...  # truncated for line length
+
                 sys.exit(0)
 
         if not initial_prompt.strip():
@@ -245,8 +245,8 @@ async def main():
     print(f"- Model: {model}")
     print(f"- System Prompt: {system_prompt_path}")
     print(f"- Initial Prompt Length: {len(initial_prompt)} characters")
-    print(f"- Test Mode: {'Enabled - commands will NOT actually execute' if test_mode else 'Disabled - normal execution'}")
-    
+    print(f"- Test Mode: {'Enabled - commands will NOT actually execute' if test_mode else 'Disabl...  # truncated for line length
+
 
     # Display feature information
     print("\nAvailable Features:")
@@ -254,7 +254,7 @@ async def main():
     print("- Human Context Pause: Press Ctrl+Z to pause and add context to the conversation")
     print("- Task Planning: The agent can create and track long-term tasks")
     print("- System Detection: The agent will automatically detect and adapt to your OS environment")
-    
+
     print("- File Operations: Enhanced file manipulation capabilities")
     print("- API Cost Tracking: Monitors and reports token usage and costs")
 
@@ -306,8 +306,8 @@ async def main():
         raise
     finally:
         # Display API usage summary if available
-        if agent and hasattr(agent, 'llm') and hasattr(agent.llm, 'usage_history') and agent.llm.usage_history:
-    
+        if agent and hasattr(agent, 'llm') and hasattr(agent.llm, 'usage_history') and agent.llm.u...  # truncated for line length
+
             print("\n=== API USAGE SUMMARY ===")
             print(f"Total API Calls: {len(agent.llm.usage_history)}")
             print(f"Total Tokens: {agent.llm.total_tokens:,}")

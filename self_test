@@ -1,8 +1,0 @@
-#!/bin/sh  
-# Protocol v2.1 System Validation Script  
-echo "=== SYSTEM VALIDATION START ==="  
-[ -f "/home/agheieff/Agent/run_agent.py" ] && echo "Core agent: PRESENT" || echo "Core agent: MISSING"  
-pgrep -f "python3 /home/agheieff/Agent/run_agent.py" >/dev/null && echo "Process status: ACTIVE" || echo "Process status: OFFLINE"  
-grep -q "<message>" /home/agheieff/Agent/run_agent.py && echo "Message protocol: ENFORCED" || echo "Message protocol: COMPROMISED"  
-echo "=== SYSTEM VALIDATION END ==="  
-exit 0

@@ -96,9 +96,6 @@ The system is structured into three main directories:
    source .venv/bin/activate  # For Bash
    ```
    or
-   ```bash
-   source activate.nu  # For Nushell
-   ```
 
 4. Create a `.env` file with your API keys:
    ```

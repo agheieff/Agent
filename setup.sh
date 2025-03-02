@@ -349,13 +349,86 @@ setup_agent() {
     detect_gpu
     local gpu_type=$?
     
-    # Ask if we should reuse the existing venv
+    # Ask if we should reuse the existing venv and check if it has all required packages
     local skip_venv=false
     if [ -d ".venv" ]; then
         echo -e "${YELLOW}Existing virtual environment detected.${NC}"
-        read -p "Would you like to reuse it? (y/n): " reuse_venv
-        if [[ $reuse_venv =~ ^[Yy]$ ]]; then
-            skip_venv=true
+        
+        # Check if the virtual environment is activated properly
+        local venv_activation_failed=false
+        if [[ -z "$VIRTUAL_ENV" ]]; then
+            source .venv/bin/activate 2>/dev/null || {
+                echo -e "${RED}Failed to activate existing virtual environment. Creating a new one.${NC}"
+                skip_venv=false
+                venv_activation_failed=true
+            }
+        fi
+        
+        # Skip the rest of the checks if activation failed
+        if [ "$venv_activation_failed" = true ]; then
+            # We can't use continue here as we're not in a loop
+            # Just set flags to create a new environment and skip the remaining checks
+            skip_venv=false
+        else
+            echo -e "${YELLOW}Checking if virtual environment has all required packages...${NC}"
+            
+            # Get a list of required packages by name (without version)
+            local required_packages=$(grep -v "^#" Requirements/requirements.txt | cut -d'=' -f1 | grep -v "^$")
+            local missing_packages=()
+            
+            # Check each required package
+            for package in $required_packages; do
+                if ! python -c "import $package" &>/dev/null && ! python -c "import $(echo $package | tr '-' '_')" &>/dev/null; then
+                    missing_packages+=("$package")
+                fi
+            done
+            
+            # Special case for packages that can't be imported directly
+            if ! python -c "import sklearn" &>/dev/null; then
+                missing_packages+=("scikit-learn")
+            fi
+            
+            if [ ${#missing_packages[@]} -gt 0 ]; then
+                echo -e "${YELLOW}The existing virtual environment is missing some required packages:${NC}"
+                for pkg in "${missing_packages[@]}"; do
+                    echo -e "  - ${CYAN}$pkg${NC}"
+                done
+                
+                read -p "Would you like to reuse and update the existing environment? (y/n): " reuse_venv
+                if [[ $reuse_venv =~ ^[Yy]$ ]]; then
+                    skip_venv=true
+                    echo -e "${YELLOW}Will update the existing virtual environment.${NC}"
+                    
+                    # Pre-install lxml if it's in the missing packages
+                    if [[ " ${missing_packages[*]} " =~ " lxml " ]]; then
+                        echo -e "${YELLOW}Pre-installing missing lxml with explicit build options...${NC}"
+                        pip install --no-binary :all: lxml || {
+                            echo -e "${RED}Failed to build lxml. Trying with pre-built binary...${NC}"
+                            pip install lxml || {
+                                echo -e "${RED}Both methods to install lxml failed. Will attempt to continue.${NC}"
+                            }
+                        }
+                    fi
+                    
+                    # Install missing packages
+                    echo -e "${YELLOW}Installing missing packages...${NC}"
+                    for pkg in "${missing_packages[@]}"; do
+                        if [ "$pkg" != "lxml" ]; then  # Skip lxml as we tried to install it earlier
+                            echo -e "${CYAN}Installing $pkg...${NC}"
+                            pip install "$pkg" || echo -e "${RED}Failed to install $pkg${NC}"
+                        fi
+                    done
+                else
+                    echo -e "${YELLOW}Will create a new virtual environment.${NC}"
+                    skip_venv=false
+                fi
+            else
+                echo -e "${GREEN}Virtual environment has all required packages.${NC}"
+                read -p "Would you like to reuse it? (y/n): " reuse_venv
+                if [[ $reuse_venv =~ ^[Yy]$ ]]; then
+                    skip_venv=true
+                fi
+            fi
         fi
     fi
     

@@ -106,19 +106,46 @@ setup_environment() {
         source .venv/bin/activate
         pip install --upgrade pip
         
+        # Pre-install lxml separately with specific options
+        echo -e "${YELLOW}Pre-installing lxml with explicit build options...${NC}"
+        pip install --no-binary :all: lxml || {
+            echo -e "${RED}Failed to build lxml. Trying with pre-built binary...${NC}"
+            pip install lxml || {
+                echo -e "${RED}Both methods to install lxml failed. The script will continue, but you may need to install lxml manually.${NC}"
+            }
+        }
+        
         # Install dependencies based on hardware
         case $gpu_type in
             0) # CPU
                 echo -e "${YELLOW}Installing CPU dependencies...${NC}"
-                pip install -r Requirements/requirements.cpu.txt
+                pip install -r Requirements/requirements.cpu.txt || {
+                    echo -e "${RED}Error during installation of dependencies.${NC}"
+                    echo -e "${YELLOW}Trying to install without lxml (already installed separately)...${NC}"
+                    grep -v "lxml" Requirements/requirements.cpu.txt > Requirements/temp_requirements.txt
+                    pip install -r Requirements/temp_requirements.txt
+                    rm Requirements/temp_requirements.txt
+                }
                 ;;
             1) # NVIDIA
                 echo -e "${YELLOW}Installing NVIDIA GPU dependencies...${NC}"
-                pip install -r Requirements/requirements.nvidia.txt
+                pip install -r Requirements/requirements.nvidia.txt || {
+                    echo -e "${RED}Error during installation of dependencies.${NC}"
+                    echo -e "${YELLOW}Trying to install without lxml (already installed separately)...${NC}"
+                    grep -v "lxml" Requirements/requirements.nvidia.txt > Requirements/temp_requirements.txt
+                    pip install -r Requirements/temp_requirements.txt
+                    rm Requirements/temp_requirements.txt
+                }
                 ;;
             2) # AMD
                 echo -e "${YELLOW}Installing AMD GPU dependencies...${NC}"
-                pip install -r Requirements/requirements.amd.txt
+                pip install -r Requirements/requirements.amd.txt || {
+                    echo -e "${RED}Error during installation of dependencies.${NC}"
+                    echo -e "${YELLOW}Trying to install without lxml (already installed separately)...${NC}"
+                    grep -v "lxml" Requirements/requirements.amd.txt > Requirements/temp_requirements.txt
+                    pip install -r Requirements/temp_requirements.txt
+                    rm Requirements/temp_requirements.txt
+                }
                 ;;
         esac
     elif [ -d ".venv" ]; then
@@ -132,19 +159,46 @@ setup_environment() {
         source .venv/bin/activate
         pip install --upgrade pip
         
+        # Pre-install lxml separately with specific options
+        echo -e "${YELLOW}Pre-installing lxml with explicit build options...${NC}"
+        pip install --no-binary :all: lxml || {
+            echo -e "${RED}Failed to build lxml. Trying with pre-built binary...${NC}"
+            pip install lxml || {
+                echo -e "${RED}Both methods to install lxml failed. The script will continue, but you may need to install lxml manually.${NC}"
+            }
+        }
+        
         # Install dependencies based on hardware
         case $gpu_type in
             0) # CPU
                 echo -e "${YELLOW}Installing CPU dependencies...${NC}"
-                pip install -r Requirements/requirements.cpu.txt
+                pip install -r Requirements/requirements.cpu.txt || {
+                    echo -e "${RED}Error during installation of dependencies.${NC}"
+                    echo -e "${YELLOW}Trying to install without lxml (already installed separately)...${NC}"
+                    grep -v "lxml" Requirements/requirements.cpu.txt > Requirements/temp_requirements.txt
+                    pip install -r Requirements/temp_requirements.txt
+                    rm Requirements/temp_requirements.txt
+                }
                 ;;
             1) # NVIDIA
                 echo -e "${YELLOW}Installing NVIDIA GPU dependencies...${NC}"
-                pip install -r Requirements/requirements.nvidia.txt
+                pip install -r Requirements/requirements.nvidia.txt || {
+                    echo -e "${RED}Error during installation of dependencies.${NC}"
+                    echo -e "${YELLOW}Trying to install without lxml (already installed separately)...${NC}"
+                    grep -v "lxml" Requirements/requirements.nvidia.txt > Requirements/temp_requirements.txt
+                    pip install -r Requirements/temp_requirements.txt
+                    rm Requirements/temp_requirements.txt
+                }
                 ;;
             2) # AMD
                 echo -e "${YELLOW}Installing AMD GPU dependencies...${NC}"
-                pip install -r Requirements/requirements.amd.txt
+                pip install -r Requirements/requirements.amd.txt || {
+                    echo -e "${RED}Error during installation of dependencies.${NC}"
+                    echo -e "${YELLOW}Trying to install without lxml (already installed separately)...${NC}"
+                    grep -v "lxml" Requirements/requirements.amd.txt > Requirements/temp_requirements.txt
+                    pip install -r Requirements/temp_requirements.txt
+                    rm Requirements/temp_requirements.txt
+                }
                 ;;
         esac
     fi
@@ -171,46 +225,68 @@ check_system_dependencies() {
     # Check for libxml2 and libxslt development packages
     if command -v apt-get &> /dev/null; then
         # Debian/Ubuntu
-        if ! dpkg -l libxml2-dev libxslt-dev 2>/dev/null | grep -q "^ii"; then
+        if ! dpkg -l libxml2-dev libxslt-dev python3-dev gcc &>/dev/null | grep -q "^ii"; then
             echo -e "${YELLOW}Missing required system dependencies for lxml.${NC}"
-            echo -e "${YELLOW}The following packages are required: libxml2-dev libxslt-dev${NC}"
+            echo -e "${YELLOW}The following packages are required: libxml2-dev libxslt-dev python3-dev gcc${NC}"
             read -p "Would you like to install them now? (y/n): " install_deps
             if [[ $install_deps =~ ^[Yy]$ ]]; then
                 echo -e "${YELLOW}Installing dependencies...${NC}"
-                sudo apt-get update && sudo apt-get install -y libxml2-dev libxslt-dev
+                sudo apt-get update && sudo apt-get install -y libxml2-dev libxslt-dev python3-dev gcc
             else
                 echo -e "${RED}Warning: lxml installation may fail without these dependencies.${NC}"
-                echo -e "${YELLOW}You can install them manually with: sudo apt-get install libxml2-dev libxslt-dev${NC}"
+                echo -e "${YELLOW}You can install them manually with: sudo apt-get install libxml2-dev libxslt-dev python3-dev gcc${NC}"
             fi
         fi
     elif command -v yum &> /dev/null; then
         # RedHat/CentOS/Fedora
-        if ! rpm -q libxml2-devel libxslt-devel &>/dev/null; then
+        if ! rpm -q libxml2-devel libxslt-devel python3-devel gcc &>/dev/null; then
             echo -e "${YELLOW}Missing required system dependencies for lxml.${NC}"
-            echo -e "${YELLOW}The following packages are required: libxml2-devel libxslt-devel${NC}"
+            echo -e "${YELLOW}The following packages are required: libxml2-devel libxslt-devel python3-devel gcc${NC}"
             read -p "Would you like to install them now? (y/n): " install_deps
             if [[ $install_deps =~ ^[Yy]$ ]]; then
                 echo -e "${YELLOW}Installing dependencies...${NC}"
-                sudo yum install -y libxml2-devel libxslt-devel
+                sudo yum install -y libxml2-devel libxslt-devel python3-devel gcc
             else
                 echo -e "${RED}Warning: lxml installation may fail without these dependencies.${NC}"
-                echo -e "${YELLOW}You can install them manually with: sudo yum install libxml2-devel libxslt-devel${NC}"
+                echo -e "${YELLOW}You can install them manually with: sudo yum install libxml2-devel libxslt-devel python3-devel gcc${NC}"
             fi
         fi
     elif command -v pacman &> /dev/null; then
         # Arch Linux
-        if ! pacman -Q libxml2 libxslt &>/dev/null; then
+        if ! pacman -Q libxml2 libxslt python gcc python-setuptools &>/dev/null || ! pacman -Q libxml2-devel libxslt-devel &>/dev/null 2>/dev/null; then
             echo -e "${YELLOW}Missing required system dependencies for lxml.${NC}"
-            echo -e "${YELLOW}The following packages are required: libxml2 libxslt${NC}"
-            read -p "Would you like to install them now? (y/n): " install_deps
+            echo -e "${YELLOW}The following packages are required for Arch Linux:${NC}"
+            echo -e "${YELLOW}- libxml2${NC}"
+            echo -e "${YELLOW}- libxslt${NC}" 
+            echo -e "${YELLOW}- python${NC}"
+            echo -e "${YELLOW}- gcc${NC}"
+            echo -e "${YELLOW}- python-setuptools${NC}"
+            echo -e "${YELLOW}You may also need additional dev packages if available in your repositories:${NC}"
+            echo -e "${YELLOW}- libxml2-devel${NC}"
+            echo -e "${YELLOW}- libxslt-devel${NC}"
+            
+            read -p "Would you like to install the main dependencies now? (y/n): " install_deps
             if [[ $install_deps =~ ^[Yy]$ ]]; then
                 echo -e "${YELLOW}Installing dependencies...${NC}"
-                sudo pacman -S --noconfirm libxml2 libxslt
+                sudo pacman -S --noconfirm libxml2 libxslt python gcc python-setuptools
+                
+                # Try to install dev packages if they exist in the repository
+                sudo pacman -S --noconfirm libxml2-devel libxslt-devel 2>/dev/null || true
             else
                 echo -e "${RED}Warning: lxml installation may fail without these dependencies.${NC}"
-                echo -e "${YELLOW}You can install them manually with: sudo pacman -S libxml2 libxslt${NC}"
+                echo -e "${YELLOW}You can install them manually with: sudo pacman -S libxml2 libxslt python gcc python-setuptools${NC}"
             fi
         fi
+        
+        # Set CFLAGS for Arch Linux to help with compiling lxml
+        export CFLAGS="-I/usr/include/libxml2 $CFLAGS"
+        export LDFLAGS="-L/usr/lib $LDFLAGS"
+        
+        # On Arch, the dev packages are sometimes named differently
+        if [ -d "/usr/include/libxml2" ]; then
+            export CFLAGS="-I/usr/include/libxml2 $CFLAGS"
+        fi
+        
     elif command -v brew &> /dev/null; then
         # macOS with Homebrew
         if ! brew list libxml2 libxslt &>/dev/null; then
@@ -220,16 +296,34 @@ check_system_dependencies() {
             if [[ $install_deps =~ ^[Yy]$ ]]; then
                 echo -e "${YELLOW}Installing dependencies...${NC}"
                 brew install libxml2 libxslt
-                # Export PKG_CONFIG_PATH on macOS to help find the libraries
-                export PKG_CONFIG_PATH="$(brew --prefix libxml2)/lib/pkgconfig:$(brew --prefix libxslt)/lib/pkgconfig:$PKG_CONFIG_PATH"
             else
                 echo -e "${RED}Warning: lxml installation may fail without these dependencies.${NC}"
                 echo -e "${YELLOW}You can install them manually with: brew install libxml2 libxslt${NC}"
             fi
         fi
+        
+        # Export PKG_CONFIG_PATH on macOS to help find the libraries
+        export PKG_CONFIG_PATH="$(brew --prefix libxml2)/lib/pkgconfig:$(brew --prefix libxslt)/lib/pkgconfig:$PKG_CONFIG_PATH"
+        # Set CFLAGS for macOS
+        export CFLAGS="-I$(brew --prefix libxml2)/include/libxml2 -I$(brew --prefix libxslt)/include $CFLAGS"
+        export LDFLAGS="-L$(brew --prefix libxml2)/lib -L$(brew --prefix libxslt)/lib $LDFLAGS"
     else
         echo -e "${YELLOW}Unable to detect package manager. Please ensure libxml2 and libxslt development packages are installed manually.${NC}"
         echo -e "${YELLOW}These are required for the lxml package to build successfully.${NC}"
+    fi
+    
+    # Print environment information 
+    echo -e "${YELLOW}Environment information for diagnosing lxml installation issues:${NC}"
+    echo -e "${CYAN}Python version:${NC} $(python --version 2>&1)"
+    echo -e "${CYAN}System:${NC} $(uname -a)"
+    if [ -n "$CFLAGS" ]; then
+        echo -e "${CYAN}CFLAGS:${NC} $CFLAGS"
+    fi
+    if [ -n "$LDFLAGS" ]; then
+        echo -e "${CYAN}LDFLAGS:${NC} $LDFLAGS"
+    fi
+    if [ -n "$PKG_CONFIG_PATH" ]; then
+        echo -e "${CYAN}PKG_CONFIG_PATH:${NC} $PKG_CONFIG_PATH"
     fi
 }
 

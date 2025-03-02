@@ -401,3 +401,437 @@ class AutonomousAgent:
         except Exception as e:
             logger.error(f"Error loading last session summary: {e}")
             return ""
+            
+    async def run(self, initial_prompt: str, system_prompt: str = ""):
+        """Run the agent with the given initial prompt and system prompt"""
+        try:
+            self.agent_state['status'] = 'running'
+            self.current_conversation_id = f"session_{int(time.time())}"
+            
+            logger.info(f"Starting agent run with conversation ID: {self.current_conversation_id}")
+            
+            # Initialize conversation
+            self.local_conversation_history = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": initial_prompt}
+            ]
+            
+            # Process the initial prompt
+            response = await self._generate_response(system_prompt, initial_prompt)
+            should_continue = True
+            
+            # Main conversation loop
+            while should_continue and not self.should_exit:
+                self.memory_manager.update_conversation_metrics(increment_turns=True)
+                
+                # Extract commands and plan steps from the response
+                should_continue = await self._process_response(response)
+                
+                if should_continue and not self.should_exit:
+                    # Get user input for the next turn
+                    user_input = await self._get_user_input()
+                    
+                    if user_input.strip().lower() in ["exit", "quit", "bye"]:
+                        should_continue = False
+                        break
+                    
+                    # Process special commands
+                    if user_input.strip().startswith('/'):
+                        cmd = user_input.strip().lower()
+                        if cmd == '/compact':
+                            await self._compact_conversation()
+                            user_input = "Continue where you left off. The conversation has been compacted to save context space."
+                        elif cmd == '/help':
+                            print("\nAvailable slash commands:")
+                            print("  /help     - Show this help message")
+                            print("  /compact  - Compact conversation history to save context space")
+                            print("  /pause    - Same as pressing Ctrl+Z, pause to add context")
+                            user_input = "The user requested help with slash commands. I showed them the available commands. Please continue."
+                    
+                    # Generate the next response
+                    response = await self._generate_response(None, user_input)
+            
+            # Save session summary
+            await self._save_session_summary()
+            
+            # Perform cleanup
+            self.agent_state['status'] = 'completed'
+            logger.info(f"Agent run completed for conversation ID: {self.current_conversation_id}")
+            
+            # Create a backup of the memory
+            self.memory_manager.create_backup(force=True)
+            
+        except Exception as e:
+            logger.error(f"Error in agent run: {e}")
+            self.agent_state['status'] = 'error'
+            self.agent_state['last_error'] = str(e)
+            raise
+            
+    async def _generate_response(self, system_prompt: Optional[str], user_input: str) -> str:
+        """Generate a response from the LLM"""
+        try:
+            # Update conversation history 
+            if system_prompt is not None:
+                # Only add system prompt on first turn
+                self.local_conversation_history = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_input}
+                ]
+            else:
+                # Add user input to history
+                self.local_conversation_history.append({
+                    "role": "user", 
+                    "content": user_input
+                })
+            
+            # Generate response from LLM
+            response = await self.llm.generate_response(self.local_conversation_history)
+            
+            # Save response to history
+            self.local_conversation_history.append({
+                "role": "assistant",
+                "content": response
+            })
+            
+            # Display the response
+            print(f"\n{response}\n")
+            
+            # Save the last response for reference 
+            self.last_assistant_response = response
+            
+            # Update last active time
+            self.agent_state['last_active'] = datetime.now().isoformat()
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error generating response: {e}")
+            error_message = f"I encountered an error while generating a response: {str(e)}"
+            self.local_conversation_history.append({
+                "role": "assistant",
+                "content": error_message
+            })
+            return error_message
+            
+    async def _process_response(self, response: str) -> bool:
+        """Process commands and handle user input requests in the response"""
+        try:
+            # Extract commands
+            commands = self.command_extractor.extract_commands(response)
+            
+            # Extract user input requests
+            input_requests = self.command_extractor.extract_user_input_requests(response)
+            
+            # Process user input requests first
+            if input_requests:
+                print("\n" + "=" * 60)
+                print("AGENT REQUESTING INPUT")
+                print("-" * 60)
+                print(input_requests[0])  # Take the first input request
+                print("=" * 60 + "\n")
+                
+                # Get user input
+                user_input = await self._get_user_input()
+                
+                # Add the input to the conversation
+                self.local_conversation_history.append({
+                    "role": "user",
+                    "content": user_input
+                })
+                
+                # Generate new response with the input
+                new_response = await self._generate_response(None, user_input)
+                
+                # Process the new response
+                return await self._process_response(new_response)
+            
+            # Process commands
+            for cmd_type, command in commands:
+                if self.command_extractor.is_exit_command(cmd_type, command):
+                    self.should_exit = True
+                    return False
+                
+                # Process file operations
+                if cmd_type in self.command_extractor.FILE_OP_TAGS:
+                    await self._process_file_operation(cmd_type, command)
+                    continue
+                
+                # Process bash or python commands
+                if cmd_type in ["bash", "python"]:
+                    stdout, stderr, code = await self.system_control.execute_command(cmd_type, command)
+                    self.agent_state['commands_executed'] += 1
+                    self.agent_state['last_active'] = datetime.now().isoformat()
+                    
+                    # Record command in history
+                    self.command_history.append({
+                        "command": command,
+                        "type": cmd_type,
+                        "timestamp": time.time(),
+                        "success": code == 0
+                    })
+                    
+                    # Add the result to memory
+                    if self.memory_manager:
+                        self.memory_manager.add_command_to_history(command, cmd_type, code == 0)
+            
+            # Extract other structured elements like thinking, plan, etc.
+            thinking = self.command_extractor.extract_thinking(response)
+            if thinking:
+                for thought in thinking:
+                    logger.debug(f"Agent thinking: {thought}")
+            
+            planning = self.command_extractor.extract_plan(response)
+            if planning:
+                for plan in planning:
+                    self.planned_steps.append(plan.strip())
+                    logger.info(f"Agent planned: {plan.strip()}")
+            
+            # Update conversation state in memory
+            if self.memory_manager and self.current_conversation_id:
+                self.memory_manager.save_conversation(
+                    self.current_conversation_id,
+                    self.local_conversation_history,
+                    metadata={
+                        "commands_executed": self.agent_state['commands_executed'],
+                        "status": self.agent_state['status'],
+                        "timestamp": time.time()
+                    }
+                )
+                self.memory_manager.memory_operations += 1
+            
+            return True
+        
+        except Exception as e:
+            logger.error(f"Error processing response: {e}")
+            return True  # Continue despite error
+            
+    async def _process_file_operation(self, op_type: str, command: str) -> None:
+        """Process file operations extracted from the response"""
+        try:
+            # Parse command parameters
+            params = {}
+            for line in command.strip().split("\n"):
+                line = line.strip()
+                if ":" in line:
+                    key, value = line.split(":", 1)
+                    params[key.strip()] = value.strip()
+            
+            # Execute the appropriate file operation
+            if op_type == "view":
+                file_path = params.get("file_path")
+                offset = int(params.get("offset", "0"))
+                limit = int(params.get("limit", "2000"))
+                
+                if file_path:
+                    result = await self.system_control.view_file(file_path, offset, limit)
+                    print(f"\nContents of {file_path}:\n")
+                    print(result)
+                    
+            elif op_type == "edit":
+                file_path = params.get("file_path")
+                old_string = params.get("old_string", "")
+                new_string = params.get("new_string", "")
+                
+                if file_path:
+                    result = await self.system_control.edit_file(file_path, old_string, new_string)
+                    print(f"\nEdit result for {file_path}:\n")
+                    print(result)
+                    
+            elif op_type == "replace":
+                file_path = params.get("file_path")
+                content = params.get("content", "")
+                
+                if file_path:
+                    result = await self.system_control.replace_file(file_path, content)
+                    print(f"\nReplace result for {file_path}:\n")
+                    print(result)
+                    
+            elif op_type == "glob":
+                pattern = params.get("pattern")
+                path = params.get("path")
+                
+                if pattern:
+                    results = await self.system_control.glob_search(pattern, path)
+                    print(f"\nGlob search results for pattern '{pattern}':\n")
+                    for result in results:
+                        print(result)
+                        
+            elif op_type == "grep":
+                pattern = params.get("pattern")
+                include = params.get("include")
+                path = params.get("path")
+                
+                if pattern:
+                    results = await self.system_control.grep_search(pattern, include, path)
+                    print(f"\nGrep search results for pattern '{pattern}':\n")
+                    for result in results:
+                        print(f"{result['file']}:{result['line_number']}: {result['line']}")
+                        
+            elif op_type == "ls":
+                path = params.get("path")
+                
+                if path:
+                    result = await self.system_control.list_directory(path)
+                    print(f"\nDirectory listing for {path}:\n")
+                    for item in result["entries"]:
+                        item_type = "d" if item["is_dir"] else "f"
+                        print(f"{item_type} {item['name']}")
+                        
+        except Exception as e:
+            logger.error(f"Error processing file operation {op_type}: {e}")
+            print(f"\nError processing file operation: {str(e)}")
+            
+    async def _get_user_input(self) -> str:
+        """Get input from the user"""
+        self.agent_state['status'] = 'waiting_for_input'
+        prompt = " > "
+        print(prompt, end="", flush=True)
+        
+        # Get input with asyncio to allow for other tasks
+        loop = asyncio.get_event_loop()
+        user_input = await loop.run_in_executor(None, input)
+        
+        self.agent_state['status'] = 'running'
+        return user_input
+    
+    async def _compact_conversation(self) -> None:
+        """Compact the conversation to save context space"""
+        if len(self.local_conversation_history) <= 2:
+            print("\nConversation is already compact.")
+            return
+            
+        # Keep system prompt and last few exchanges
+        system_prompt = self.local_conversation_history[0]["content"]
+        last_entries = self.local_conversation_history[-4:] if len(self.local_conversation_history) >= 4 else self.local_conversation_history
+        
+        # Create a summary of what was discussed
+        summary = "Previous conversation summary:\n\n"
+        
+        # Add a summary of commands executed
+        commands_executed = [msg for msg in self.local_conversation_history if msg["role"] == "assistant"]
+        command_summary = []
+        for msg in commands_executed:
+            commands = self.command_extractor.extract_commands(msg["content"])
+            if commands:
+                for cmd_type, cmd in commands:
+                    cmd_preview = cmd.split('\n')[0][:40] + ('...' if len(cmd) > 40 else '')
+                    command_summary.append(f"- {cmd_type}: {cmd_preview}")
+        
+        if command_summary:
+            summary += "Commands executed:\n" + "\n".join(command_summary[:10])
+            if len(command_summary) > 10:
+                summary += f"\n...and {len(command_summary) - 10} more commands."
+            summary += "\n\n"
+        
+        # Create new compact history
+        self.local_conversation_history = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": summary}
+        ]
+        
+        # Add the last few exchanges
+        for entry in last_entries:
+            if entry["role"] != "system":  # Skip system prompt as we already added it
+                self.local_conversation_history.append(entry)
+                
+        print("\nConversation compacted to save context space.")
+        
+    async def _save_session_summary(self) -> None:
+        """Save a summary of the current session"""
+        try:
+            summary_path = self.memory_path / "summaries"
+            summary_path.mkdir(exist_ok=True, parents=True)
+            
+            # Extract summary from conversation
+            user_queries = [msg["content"] for msg in self.local_conversation_history if msg["role"] == "user"]
+            assistant_responses = [msg["content"] for msg in self.local_conversation_history if msg["role"] == "assistant"]
+            
+            # Create a summary
+            summary = f"Session Summary ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n"
+            summary += "=" * 50 + "\n\n"
+            
+            if user_queries:
+                summary += "Main queries:\n"
+                for i, query in enumerate(user_queries[:3], 1):
+                    preview = query[:100] + ('...' if len(query) > 100 else '')
+                    summary += f"{i}. {preview}\n"
+                
+                if len(user_queries) > 3:
+                    summary += f"...and {len(user_queries) - 3} more queries.\n"
+                summary += "\n"
+            
+            # Add command summary
+            commands = []
+            for response in assistant_responses:
+                extracted = self.command_extractor.extract_commands(response)
+                commands.extend(extracted)
+            
+            if commands:
+                summary += f"Commands executed: {len(commands)}\n"
+                for i, (cmd_type, cmd) in enumerate(commands[:5], 1):
+                    preview = cmd.split('\n')[0][:40] + ('...' if len(cmd) > 40 else '')
+                    summary += f"{i}. {cmd_type}: {preview}\n"
+                
+                if len(commands) > 5:
+                    summary += f"...and {len(commands) - 5} more commands.\n"
+                summary += "\n"
+                
+            # Add thinking/planning summary if available
+            thinking = []
+            for response in assistant_responses:
+                extracted = self.command_extractor.extract_thinking(response)
+                thinking.extend(extracted)
+            
+            if thinking:
+                summary += "Key insights:\n"
+                for i, thought in enumerate(thinking[:3], 1):
+                    preview = thought[:100] + ('...' if len(thought) > 100 else '')
+                    summary += f"{i}. {preview}\n"
+                summary += "\n"
+            
+            # Save the summary
+            timestamp = int(time.time())
+            with open(summary_path / f"{timestamp}_summary.txt", "w") as f:
+                f.write(summary)
+                
+            # Also save as last_session.txt
+            with open(summary_path / "last_session.txt", "w") as f:
+                f.write(summary)
+                
+            # Save session conversation to memory
+            if self.memory_manager and self.current_conversation_id:
+                self.memory_manager.save_conversation(
+                    self.current_conversation_id,
+                    self.local_conversation_history,
+                    metadata={
+                        "commands_executed": self.agent_state['commands_executed'],
+                        "status": "completed",
+                        "timestamp": timestamp
+                    }
+                )
+            
+            logger.info(f"Session summary saved to {summary_path}/last_session.txt")
+            
+        except Exception as e:
+            logger.error(f"Error saving session summary: {e}")
+            
+    async def add_human_context(self, context_text: str) -> None:
+        """Add human-provided context to the conversation"""
+        if self.last_assistant_response:
+            # Add a marker in the conversation history
+            context_marker = f"\n\n[HUMAN_ADDED_CONTEXT]\n{context_text}\n[/HUMAN_ADDED_CONTEXT]\n\n"
+            
+            # Update the last assistant response
+            last_msg_index = None
+            for i, msg in enumerate(self.local_conversation_history):
+                if msg["role"] == "assistant":
+                    last_msg_index = i
+                    
+            if last_msg_index is not None:
+                original_content = self.local_conversation_history[last_msg_index]["content"]
+                modified_content = original_content + context_marker
+                self.local_conversation_history[last_msg_index]["content"] = modified_content
+                
+                # Update the saved last response
+                self.last_assistant_response = modified_content
+                self.paused_for_human_context = True

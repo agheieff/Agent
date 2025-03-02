@@ -152,13 +152,13 @@ async def main():
         signal.signal(signal.SIGTSTP, handle_pause_signal)
 
     parser = argparse.ArgumentParser(description="Run the Autonomous Agent.")
-    parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands ex)
+    parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands execution)"
 
-    parser.add_argument('--model', choices=['anthropic', 'deepseek'], help="Specify model directly)
+    parser.add_argument('--model', choices=['anthropic', 'deepseek'], help="Specify model directly)"
 
-    parser.add_argument('--memory-dir', help="Path to memory directory (will be saved in memory.co)
+    parser.add_argument('--memory-dir', help="Path to memory directory (will be saved in memory.config)"
 
-    parser.add_argument('--projects-dir', help="Path to projects directory (will be saved in proje)
+    parser.add_argument('--projects-dir', help="Path to projects directory"
 
     args = parser.parse_args()
     test_mode = args.test

@@ -230,7 +230,7 @@ async def main():
                 print("  /help     - Show this help message")
                 print("  /compact  - Compact conversation history to save context space")
                 print("  /pause    - Pause to add additional context to the conversation")
-                print("\nExample usage: Just type '/compact' as your input to compress the convers)
+                print("\nExample usage: Just type '/compact' as your input to compress the conversation")
 
                 sys.exit(0)
 

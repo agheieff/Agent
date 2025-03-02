@@ -111,13 +111,13 @@ async def pause_for_context_input():
     """Pause the agent and collect additional context from the user"""
     global current_agent, paused_for_context
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("AGENT PAUSED FOR ADDITIONAL CONTEXT")
-    print("-"*60)
+    print("-" * 60)
     print("Enter additional context to add to the conversation.")
     print("This will be added to the agent's last response before continuing.")
     print("Press Enter on a blank line when finished.")
-    print("-"*60)
+    print("-" * 60)
 
     # Collect multi-line input
     lines = []
@@ -135,9 +135,9 @@ async def pause_for_context_input():
     if additional_context.strip():
         # Add the context to the conversation with special formatting
         await current_agent.add_human_context(additional_context)
-        print("="*60)
+        print("=" * 60)
         print("Context added. Conversation will continue.")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
     else:
         print("No additional context provided. Continuing without changes.")
 
@@ -152,13 +152,10 @@ async def main():
         signal.signal(signal.SIGTSTP, handle_pause_signal)
 
     parser = argparse.ArgumentParser(description="Run the Autonomous Agent.")
-    parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands execution)"
-
-    parser.add_argument('--model', choices=['anthropic', 'deepseek'], help="Specify model directly)"
-
-    parser.add_argument('--memory-dir', help="Path to memory directory (will be saved in memory.config)"
-
-    parser.add_argument('--projects-dir', help="Path to projects directory"
+    parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands execution)")
+    parser.add_argument('--model', choices=['anthropic', 'deepseek'], help="Specify model directly")
+    parser.add_argument('--memory-dir', help="Path to memory directory (will be saved in memory.config)")
+    parser.add_argument('--projects-dir', help="Path to projects directory")
 
     args = parser.parse_args()
     test_mode = args.test
@@ -231,7 +228,6 @@ async def main():
                 print("  /compact  - Compact conversation history to save context space")
                 print("  /pause    - Pause to add additional context to the conversation")
                 print("\nExample usage: Just type '/compact' as your input to compress the conversation")
-
                 sys.exit(0)
 
         if not initial_prompt.strip():
@@ -245,16 +241,14 @@ async def main():
     print(f"- Model: {model}")
     print(f"- System Prompt: {system_prompt_path}")
     print(f"- Initial Prompt Length: {len(initial_prompt)} characters")
-    print(f"- Test Mode: {'Enabled - commands will NOT actually execute' if test_mode else 'Disabl)
-
+    print(f"- Test Mode: {'Enabled - commands will NOT actually execute' if test_mode else 'Disabled'}")
 
     # Display feature information
     print("\nAvailable Features:")
     print("- User Input Requests: The agent can pause and ask for additional information")
     print("- Human Context Pause: Press Ctrl+Z to pause and add context to the conversation")
     print("- Task Planning: The agent can create and track long-term tasks")
-    print("- System Detection: The agent will automatically detect and adapt to your OS environmen)
-
+    print("- System Detection: The agent will automatically detect and adapt to your OS environment")
     print("- File Operations: Enhanced file manipulation capabilities")
     print("- API Cost Tracking: Monitors and reports token usage and costs")
 
@@ -306,8 +300,7 @@ async def main():
         raise
     finally:
         # Display API usage summary if available
-        if agent and hasattr(agent, 'llm') and hasattr(agent.llm, 'usage_history') and agent.llm.u)
-
+        if agent and hasattr(agent, 'llm') and hasattr(agent.llm, 'usage_history') and agent.llm.usage_history:
             print("\n=== API USAGE SUMMARY ===")
             print(f"Total API Calls: {len(agent.llm.usage_history)}")
             print(f"Total Tokens: {agent.llm.total_tokens:,}")
@@ -327,4 +320,3 @@ if __name__ == "__main__":
     except (RuntimeError, IOError) as e:
         print(f"\nFatal error: {str(e)}")
         sys.exit(1)
-

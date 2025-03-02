@@ -66,24 +66,6 @@ cleanup() {
     # Remove temporary files
     find . -name "*.tmp" -type f -delete
     
-    # Clean up old directories (with confirmation)
-    if [ -d "memory" ] || [ -d "config" ] || [ -d "scheduler" ] || [ -f "memory.config" ] || [ -f "projects.config" ]; then
-        echo -e "${YELLOW}Legacy directories and files detected.${NC}"
-        read -p "Would you like to remove old lowercase directories (memory, config, scheduler) and config files? (y/n): " clean_legacy
-        if [[ $clean_legacy =~ ^[Yy]$ ]]; then
-            echo -e "${YELLOW}Removing legacy directories and files...${NC}"
-            [ -d "memory" ] && rm -rf memory
-            [ -d "config" ] && rm -rf config
-            [ -d "scheduler" ] && rm -rf scheduler
-            [ -f "memory.config" ] && rm -f memory.config
-            [ -f "projects.config" ] && rm -f projects.config
-            echo -e "${GREEN}Legacy directories and files removed.${NC}"
-        fi
-    fi
-    
-    # Ensure uppercase directory structure
-    mkdir -p Config Core Memory Tools Output Clients Docs Scheduler Requirements
-    
     echo -e "${GREEN}Cleanup complete.${NC}"
 }
 
@@ -110,15 +92,15 @@ setup_environment() {
         case $gpu_type in
             0) # CPU
                 echo -e "${YELLOW}Installing CPU dependencies...${NC}"
-                pip install -r Requirements/requirements.cpu.txt
+                pip install -r requirements.cpu.txt
                 ;;
             1) # NVIDIA
                 echo -e "${YELLOW}Installing NVIDIA GPU dependencies...${NC}"
-                pip install -r Requirements/requirements.nvidia.txt
+                pip install -r requirements.nvidia.txt
                 ;;
             2) # AMD
                 echo -e "${YELLOW}Installing AMD GPU dependencies...${NC}"
-                pip install -r Requirements/requirements.amd.txt
+                pip install -r requirements.amd.txt
                 ;;
         esac
     elif [ -d ".venv" ]; then
@@ -136,15 +118,15 @@ setup_environment() {
         case $gpu_type in
             0) # CPU
                 echo -e "${YELLOW}Installing CPU dependencies...${NC}"
-                pip install -r Requirements/requirements.cpu.txt
+                pip install -r requirements.cpu.txt
                 ;;
             1) # NVIDIA
                 echo -e "${YELLOW}Installing NVIDIA GPU dependencies...${NC}"
-                pip install -r Requirements/requirements.nvidia.txt
+                pip install -r requirements.nvidia.txt
                 ;;
             2) # AMD
                 echo -e "${YELLOW}Installing AMD GPU dependencies...${NC}"
-                pip install -r Requirements/requirements.amd.txt
+                pip install -r requirements.amd.txt
                 ;;
         esac
     fi
@@ -166,15 +148,10 @@ EOF
 
 # Function to setup the agent
 setup_agent() {
-    echo -e "${CYAN}${BOLD}Setting up Agent${NC}"
+    echo -e "${CYAN}${BOLD}Setting up Arcadia Agent${NC}"
     
     # Clean up first
     cleanup
-    
-    # Create standard directory structure
-    echo -e "${YELLOW}Creating standard directory structure...${NC}"
-    mkdir -p Config/SystemPrompts Config/defaults
-    mkdir -p Core Memory Tools Output Clients Docs Scheduler Requirements
     
     # Create requirements files for different hardware
     create_requirement_files
@@ -196,117 +173,6 @@ setup_agent() {
     # Setup environment based on detected hardware
     setup_environment $gpu_type $skip_venv
     
-    # Ensure config files exist
-    if [ ! -f "Config/config.yaml" ]; then
-        echo -e "${YELLOW}Creating default configuration...${NC}"
-        mkdir -p Config/defaults
-        
-        # Create default config file
-        cat > Config/defaults/default_config.yaml << 'EOF'
-# Default Agent Configuration
-
-# Base paths for agent operation
-paths:
-  # Memory storage location - where all agent memory will be stored
-  memory_dir: memory
-  
-  # Projects directory - where code projects will be managed
-  projects_dir: projects
-  
-  # Temporary file storage
-  temp_dir: ${paths.memory_dir}/temp
-  
-  # Backup directory for agent memory
-  backup_dir: ${paths.memory_dir}/backups
-
-# Memory system configuration
-memory:
-  # Maximum size for indexed documents in bytes (1MB)
-  max_document_size: 1048576
-  
-  # Maximum number of entries in vector index
-  max_indexed_entries: 10000
-  
-  # Maximum number of backups to keep
-  max_backups: 5
-  
-  # Backup interval in seconds (1 hour)
-  backup_interval: 3600
-  
-  # Context keys to track
-  context_keys:
-    - system_config
-    - tool_usage
-    - error_history
-    - active_projects
-    - agent_notes
-    - status_updates
-    - command_skills
-    - knowledge_base
-    - important
-    - task
-    - mind_map
-    - code
-    - project
-
-# LLM model configuration
-llm:
-  # Default model to use
-  default_model: deepseek
-  
-  # Available models
-  models:
-    - anthropic
-    - deepseek
-  
-  # Model-specific settings
-  anthropic:
-    temperature: 0.7
-    max_tokens: 4000
-  
-  deepseek:
-    temperature: 0.7
-    max_tokens: 4000
-
-# Agent behavior configuration
-agent:
-  # Whether to run in headless mode (no interactive prompts)
-  headless: false
-  
-  # Whether to run in test mode (no actual commands executed)
-  test_mode: false
-  
-  # Maximum inactivity time in seconds before agent auto-terminates (1 hour)
-  max_inactivity: 3600
-  
-  # Whether to allow internet access
-  allow_internet: true
-
-# Security settings
-security:
-  # Maximum file size the agent can create/modify (100MB)
-  max_file_size: 104857600
-
-# Logging configuration
-logging:
-  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-  level: INFO
-  
-  # Whether to log to file
-  log_to_file: true
-  
-  # Log file path
-  log_file: ${paths.memory_dir}/logs/agent.log
-  
-  # Whether to log command executions
-  log_commands: true
-EOF
-
-        # Copy default config to main config
-        cp Config/defaults/default_config.yaml Config/config.yaml
-        echo -e "${GREEN}Default configuration created.${NC}"
-    fi
-    
     # Create required directories
     echo -e "${YELLOW}Creating required directories...${NC}"
     mkdir -p memory/conversations memory/logs memory/summaries memory/config memory/scripts
@@ -321,7 +187,7 @@ EOF
 
 # Function to restore the agent to a clean state
 restore_agent() {
-    echo -e "${CYAN}${BOLD}Restoring Agent to clean state${NC}"
+    echo -e "${CYAN}${BOLD}Restoring Arcadia Agent to clean state${NC}"
     echo -e "${RED}WARNING: This will delete all local changes, reset to the remote repository state, and reinitialize the agent.${NC}"
     echo -e "${RED}Only your .venv directory and .env file will be preserved.${NC}"
     read -p "Are you sure you want to continue? (y/n): " confirm
@@ -335,21 +201,10 @@ restore_agent() {
     local backup_dir="agent_backup_$backup_time"
     mkdir -p "$backup_dir"
     
-    # Save current config if it exists
-    if [ -f "Config/config.yaml" ]; then
-        mkdir -p "$backup_dir/Config"
-        cp -r Config "$backup_dir/"
-        echo -e "${GREEN}Configuration backed up at $backup_dir/Config${NC}"
-    fi
-    
-    # Backup memory directory if it exists (both lowercase and uppercase)
-    if [ -d "Memory" ]; then
-        cp -r Memory "$backup_dir/"
-        echo -e "${GREEN}Memory backup created at $backup_dir/Memory${NC}"
-    fi
+    # Backup memory directory if it exists
     if [ -d "memory" ]; then
-        cp -r memory "$backup_dir/memory_old"
-        echo -e "${GREEN}Old memory backup created at $backup_dir/memory_old${NC}"
+        cp -r memory "$backup_dir/"
+        echo -e "${GREEN}Memory backup created at $backup_dir/memory${NC}"
     fi
     
     # Backup .env file if it exists
@@ -372,42 +227,31 @@ restore_agent() {
     echo -e "${YELLOW}Fetching latest updates from remote...${NC}"
     git fetch origin
     
-    # Stash .env and Config if they exist (to prevent them from being removed)
+    # Stash .env if it exists (to prevent it from being removed)
     if [ -f ".env" ]; then
         cp .env .env.tmp
-    fi
-    if [ -d "Config" ]; then
-        mkdir -p Config.tmp
-        cp -r Config/* Config.tmp/ 2>/dev/null || true
     fi
     
     # Clean all untracked files and directories
     echo -e "${YELLOW}Removing all untracked files and directories...${NC}"
-    git clean -xdf --exclude=.venv --exclude=.env.tmp --exclude=Config.tmp
+    git clean -xdf --exclude=.venv --exclude=.env.tmp
     
     # Reset all changes to tracked files
     echo -e "${YELLOW}Resetting all local changes...${NC}"
     git reset --hard origin/$current_branch
     
-    # Restore .env file and Config directory
+    # Restore .env file
     if [ -f ".env.tmp" ]; then
         mv .env.tmp .env
         echo -e "${GREEN}.env file restored${NC}"
     fi
-    if [ -d "Config.tmp" ] && [ -n "$(ls -A Config.tmp 2>/dev/null)" ]; then
-        mkdir -p Config
-        cp -r Config.tmp/* Config/ 2>/dev/null || true
-        rm -rf Config.tmp
-        echo -e "${GREEN}Configuration restored${NC}"
-    fi
+    
+    # Recreate minimal directory structure
+    echo -e "${YELLOW}Creating minimal directory structure...${NC}"
+    mkdir -p memory
     
     # Run setup process automatically
     echo -e "${YELLOW}Running setup process...${NC}"
-    
-    # Create standard directory structure
-    echo -e "${YELLOW}Creating standard directory structure...${NC}"
-    mkdir -p Config/SystemPrompts Config/defaults
-    mkdir -p Core Memory Tools Output Clients Docs Scheduler Requirements
     
     # Clean up first
     cleanup
@@ -426,21 +270,12 @@ restore_agent() {
         setup_environment $gpu_type false
     fi
     
-    # Get memory directory from config if it exists
-    MEMORY_DIR="memory"
-    if [ -f "Config/config.yaml" ]; then
-        CONFIG_MEMORY_DIR=$(grep "memory_dir:" Config/config.yaml 2>/dev/null | cut -d':' -f2 | tr -d ' ' || echo "memory")
-        if [ -n "$CONFIG_MEMORY_DIR" ]; then
-            MEMORY_DIR="$CONFIG_MEMORY_DIR"
-        fi
-    fi
-    
-    # Create required memory structure
-    echo -e "${YELLOW}Creating memory directories at $MEMORY_DIR...${NC}"
-    mkdir -p "$MEMORY_DIR/conversations" "$MEMORY_DIR/logs" "$MEMORY_DIR/summaries" "$MEMORY_DIR/config" "$MEMORY_DIR/scripts"
-    mkdir -p "$MEMORY_DIR/data" "$MEMORY_DIR/temp" "$MEMORY_DIR/state" "$MEMORY_DIR/sessions" "$MEMORY_DIR/reflections"
-    mkdir -p "$MEMORY_DIR/working_memory" "$MEMORY_DIR/tasks" "$MEMORY_DIR/plans" "$MEMORY_DIR/archive" "$MEMORY_DIR/notes"
-    mkdir -p "$MEMORY_DIR/vector_index" "$MEMORY_DIR/knowledge/docs" "$MEMORY_DIR/documents"
+    # Create required directories
+    echo -e "${YELLOW}Creating required directories...${NC}"
+    mkdir -p memory/conversations memory/logs memory/summaries memory/config memory/scripts
+    mkdir -p memory/data memory/temp memory/state memory/sessions memory/reflections
+    mkdir -p memory/working_memory memory/tasks memory/plans memory/archive memory/notes
+    mkdir -p memory/vector_index memory/knowledge/docs memory/documents
     
     echo -e "${GREEN}Complete restoration and setup finished!${NC}"
     echo -e "${GREEN}The Agent has been reset to the remote repository state and reinitialized.${NC}"
@@ -449,7 +284,7 @@ restore_agent() {
 
 # Function to update the agent from git
 update_agent() {
-    echo -e "${CYAN}${BOLD}Updating Agent from Git${NC}"
+    echo -e "${CYAN}${BOLD}Updating Arcadia Agent from Git${NC}"
     
     # Check if this is a git repository
     if [ ! -d ".git" ]; then
@@ -503,7 +338,7 @@ update_agent() {
         
         # Check if requirements have changed
         echo -e "${YELLOW}Checking for dependency changes...${NC}"
-        if git diff HEAD@{1} HEAD -- Requirements/requirements.txt | grep -q "^[+-]"; then
+        if git diff HEAD@{1} HEAD -- requirements.txt | grep -q "^[+-]"; then
             echo -e "${YELLOW}Dependencies have changed. Updating virtual environment...${NC}"
             
             # Detect hardware

@@ -9,23 +9,40 @@ from dotenv import load_dotenv
 import socket
 import signal
 from datetime import datetime
+import yaml
 
-from core.agent import AutonomousAgent
+from Config import get_config, ConfigManager
+from Core.agent import AutonomousAgent
 
 def get_model_choice() -> str:
-    """Get model choice interactively."""
+    """Get model choice interactively from the available models in config."""
+    config = get_config()
+    available_models = config.get_value("llm.models", ["anthropic", "deepseek"])
+    default_model = config.get_value("llm.default_model", "deepseek")
+    
+    # If headless mode is enabled or only one model is available, use the default
+    if config.is_headless() or len(available_models) == 1:
+        print(f"\nUsing default model: {default_model}")
+        return default_model
+    
     while True:
         print("\nAvailable models:")
-        print("1. Anthropic Claude")
-        print("2. DeepSeek-Reasoner")
+        for i, model in enumerate(available_models, 1):
+            print(f"{i}. {model.title()}")
+            
         try:
-            choice = input("\nChoose a model (1-2): ").strip()
-            if choice == "1":
-                return "anthropic"
-            elif choice == "2":
-                return "deepseek"
-            else:
-                print("Invalid choice. Please enter 1 or 2.")
+            choice = input(f"\nChoose a model (1-{len(available_models)}), or press Enter for default [{default_model}]: ").strip()
+            if not choice:
+                return default_model
+                
+            try:
+                index = int(choice) - 1
+                if 0 <= index < len(available_models):
+                    return available_models[index]
+                else:
+                    print(f"Invalid choice. Please enter a number between 1 and {len(available_models)}.")
+            except ValueError:
+                print("Invalid input. Please enter a number.")
         except EOFError:
             sys.exit(0)
 
@@ -50,6 +67,7 @@ def get_initial_prompt() -> str:
 def load_and_augment_system_prompt(path: str) -> str:
     """
     Load the system prompt from file and substitute system status placeholders.
+    Also add configuration information to the system prompt.
     """
     try:
         with open(path, 'r') as f:
@@ -60,32 +78,19 @@ def load_and_augment_system_prompt(path: str) -> str:
             sys.exit(1)
         return ""
 
+    # Get configuration
+    config = get_config()
+    
     # Gather system info
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     hostname = socket.gethostname()
     current_directory = os.getcwd()
     run_agent_path = str(Path(__file__).resolve())
-
-    # Get memory directory from config
-    memory_directory = ""
-    try:
-        memory_config = Path(__file__).resolve().parent / "memory.config"
-        if memory_config.exists():
-            with open(memory_config, 'r') as f:
-                memory_directory = f.read().strip()
-    except SystemExit:
-        memory_directory = os.environ.get("AGENT_MEMORY_DIR", "")
-
-    # Get projects directory from config
-    projects_directory = ""
-    try:
-        projects_config = Path(__file__).resolve().parent / "projects.config"
-        if projects_config.exists():
-            with open(projects_config, 'r') as f:
-                projects_directory = f.read().strip()
-    except SystemExit:
-        projects_directory = os.environ.get("AGENT_PROJECTS_DIR", "")
-
+    
+    # Get paths from config
+    memory_directory = str(config.get_memory_path())
+    projects_directory = str(config.get_projects_path())
+    
     # Replace placeholders
     prompt_text = prompt_text.replace("{CURRENT_DIRECTORY}", current_directory)
     prompt_text = prompt_text.replace("{RUN_AGENT_PATH}", run_agent_path)
@@ -93,7 +98,21 @@ def load_and_augment_system_prompt(path: str) -> str:
     prompt_text = prompt_text.replace("{HOSTNAME}", hostname)
     prompt_text = prompt_text.replace("{MEMORY_DIRECTORY}", memory_directory)
     prompt_text = prompt_text.replace("{PROJECTS_DIRECTORY}", projects_directory)
-
+    
+    # Add configuration summary to the system prompt
+    config_summary = config.get_config_summary()
+    prompt_text += f"\n\n## Agent Configuration\n{config_summary}\n"
+    
+    # Add information about allowed/disallowed operations based on config
+    security_settings = ""
+    security_settings += f"\n### Security Restrictions\n"
+    security_settings += f"- Restricted directories: {', '.join(config.get_value('security.restricted_dirs', []))}\n"
+    security_settings += f"- Blocked commands: {', '.join(config.get_value('security.blocked_commands', []))}\n"
+    security_settings += f"- Maximum allowed file size: {config.get_value('security.max_file_size', 0) // (1024 * 1024)} MB\n"
+    security_settings += f"- Internet access: {'Allowed' if config.get_value('agent.allow_internet', False) else 'Disabled'}\n"
+    
+    prompt_text += security_settings
+    
     return prompt_text
 
 # Global variable to store the agent instance for signal handling
@@ -154,62 +173,82 @@ async def main():
     parser = argparse.ArgumentParser(description="Run the Autonomous Agent.")
     parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands execution)")
     parser.add_argument('--model', choices=['anthropic', 'deepseek'], help="Specify model directly")
-    parser.add_argument('--memory-dir', help="Path to memory directory (will be saved in memory.config)")
+    parser.add_argument('--memory-dir', help="Path to memory directory")
     parser.add_argument('--projects-dir', help="Path to projects directory")
+    parser.add_argument('--config', help="Path to the configuration file")
+    parser.add_argument('--headless', action='store_true', help="Run in headless mode (no interactive prompts)")
+    parser.add_argument('--no-internet', action='store_true', help="Disable internet access")
 
     args = parser.parse_args()
-    test_mode = args.test
-
-    # Set up directories based on configuration files
-    current_dir = Path(__file__).resolve().parent
-
-    # Handle memory directory setting
+    
+    # Initialize configuration
+    config = get_config()
+    
+    # Update configuration from command line arguments
+    if args.config:
+        # Load custom configuration file
+        config_path = Path(args.config).resolve()
+        if config_path.exists():
+            config = ConfigManager(config_path)
+        else:
+            print(f"Warning: Configuration file not found at {config_path}")
+    
+    # Override settings from command line arguments
+    if args.test:
+        config.set_value("agent.test_mode", True)
+    
+    if args.headless:
+        config.set_value("agent.headless", True)
+        
+    if args.no_internet:
+        config.set_value("agent.allow_internet", False)
+    
     if args.memory_dir:
-        # Save provided memory path to config file
         memory_path = Path(args.memory_dir).resolve()
-        with open(current_dir / "memory.config", 'w') as f:
-            f.write(str(memory_path))
+        memory_path.mkdir(parents=True, exist_ok=True)
+        config.set_value("paths.memory_dir", str(memory_path))
+        # For backward compatibility
         os.environ["AGENT_MEMORY_DIR"] = str(memory_path)
 
-    # Handle projects directory
     if args.projects_dir:
-        # Save provided projects path to config file
         projects_path = Path(args.projects_dir).resolve()
-        with open(current_dir / "projects.config", 'w') as f:
-            f.write(str(projects_path))
+        projects_path.mkdir(parents=True, exist_ok=True)
+        config.set_value("paths.projects_dir", str(projects_path))
+        # For backward compatibility
         os.environ["AGENT_PROJECTS_DIR"] = str(projects_path)
-    else:
-        # Try to load from config or use default
-        try:
-            if (current_dir / "projects.config").exists():
-                with open(current_dir / "projects.config", 'r') as f:
-                    projects_path = f.read().strip()
-                    if projects_path:
-                        os.environ["AGENT_PROJECTS_DIR"] = projects_path
-            else:
-                # Use default ../Projects path
-                default_projects_dir = current_dir.parent / "Projects"
-                default_projects_dir.mkdir(exist_ok=True)
-                os.environ["AGENT_PROJECTS_DIR"] = str(default_projects_dir)
-                # Save it for future use
-                with open(current_dir / "projects.config", 'w') as f:
-                    f.write(str(default_projects_dir))
-        except SystemExit:
-            # Use default projects path if config read fails
-            default_projects_dir = current_dir.parent / "Projects"
-            default_projects_dir.mkdir(exist_ok=True)
-            os.environ["AGENT_PROJECTS_DIR"] = str(default_projects_dir)
+    
+    # Save updated configuration
+    config.save_config()
+    
+    # Get test mode from config
+    test_mode = config.is_test_mode()
 
-    system_prompt_path = Path("config/system_prompt.md")
+    # Use the Config/SystemPrompts directory
+    system_prompt_path = Path("Config/SystemPrompts/system_prompt.md")
     system_prompt_path.parent.mkdir(parents=True, exist_ok=True)
     if not system_prompt_path.exists():
-        # Just create a placeholder file if missing
+        # Create a placeholder file if missing
         with open(system_prompt_path, 'w') as f:
-            f.write("# Default system prompt\n")
+            f.write("# Default System Prompt\n\n")
+            f.write("## System Status\n")
+            f.write("**Current directory**: **{CURRENT_DIRECTORY}**\n")
+            f.write("**Agent script location**: **{RUN_AGENT_PATH}**\n")
+            f.write("**Current time**: **{CURRENT_TIME}**\n")
+            f.write("**Hostname**: **{HOSTNAME}**\n")
+            f.write("**Memory directory**: **{MEMORY_DIRECTORY}**\n")
+            f.write("**Projects directory**: **{PROJECTS_DIRECTORY}**\n\n")
+            f.write("This is a default system prompt. Please customize it as needed.\n")
 
-    # Get model choice from argument or interactive prompt
-    model = args.model if args.model else get_model_choice()
+    # Get model choice from argument, config, or interactive prompt
+    if args.model:
+        model = args.model
+        # Update config with selected model
+        config.set_value("llm.default_model", model)
+        config.save_config()
+    else:
+        model = get_model_choice()
 
+    # Get API key from environment
     api_key = os.getenv(f"{model.upper()}_API_KEY")
     if not api_key:
         print(f"Error: {model.upper()}_API_KEY not found in environment.")
@@ -258,7 +297,7 @@ async def main():
         agent = AutonomousAgent(
             api_key=api_key,
             model=model,
-            test_mode=test_mode
+            test_mode=config.is_test_mode()
         )
 
         # Store reference to agent for signal handler

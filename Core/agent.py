@@ -332,8 +332,16 @@ class AutonomousAgent:
         self.memory_path = self.memory_manager.base_path
         self._setup_storage()
         self.system_control = SystemControl(test_mode=test_mode)
-        self.task_manager = TaskManager(self.memory_path)
-        self.session_manager = session_manager or SessionManager(self.memory_path, self.memory_manager)
+        
+    def _setup_storage(self):
+        """Set up storage directories for the agent"""
+        try:
+            # Ensure necessary directories exist
+            for directory in ["tasks", "reflections", "notes", "working_memory", "temporal"]:
+                dir_path = self.memory_path / directory
+                dir_path.mkdir(exist_ok=True, parents=True)
+        except Exception as e:
+            logger.error(f"Error setting up storage directories: {e}")
         self.agent_id = str(uuid.uuid4())[:8]
         self.agent_state = {
             'started_at': datetime.now().isoformat(),

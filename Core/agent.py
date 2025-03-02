@@ -15,8 +15,8 @@ from Tools.System.shell_adapter import ShellAdapter
 from Tools.File.file_operations import FileOperations
 from Tools.Search.search_tools import SearchTools
 from Tools.Package.package_manager import PackageManager
-from core.task_manager import TaskManager
-from core.session_manager import SessionManager
+from Core.task_manager import TaskManager
+from Core.session_manager import SessionManager
 from Output.display_manager import DisplayManager
 
 logger = logging.getLogger(__name__)

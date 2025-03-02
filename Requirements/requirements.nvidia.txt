@@ -74,3 +74,5 @@ tzdata==2025.1
 tzlocal==5.3
 urllib3==2.3.0
 yarl==1.18.3
+beautifulsoup4==4.12.2
+lxml==5.1.0

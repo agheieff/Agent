@@ -9,17 +9,25 @@ logger = logging.getLogger(__name__)
 # DeepSeek API pricing (as of March 2025) - subject to changes
 DEEPSEEK_PRICING = {
     "deepseek-reasoner": {
-        "input": 0.20 / 1_000_000,     # $0.20 per million input tokens
-        "output": 0.80 / 1_000_000,    # $0.80 per million output tokens
+        "input": 0.14 / 1_000_000,     # $0.14 per million input tokens
+        "input_cache_hit": 0.05 / 1_000_000,  # $0.05 per million tokens for cache hits
+        "input_cache_miss": 0.14 / 1_000_000,  # $0.14 per million tokens for cache misses
+        "output": 2.19 / 1_000_000,    # $2.19 per million output tokens
+        "discount_hours": (16, 30, 0, 30),  # 75% discount between 16:30 and 00:30 UTC
+        "discount_rate": 0.75,  # 75% discount during specified hours
     },
     "deepseek-reasoner-tools": {
-        "input": 0.20 / 1_000_000,     # $0.20 per million input tokens
-        "output": 0.80 / 1_000_000,    # $0.80 per million output tokens
+        "input": 0.14 / 1_000_000,     # $0.14 per million input tokens 
+        "input_cache_hit": 0.05 / 1_000_000,  # $0.05 per million tokens for cache hits
+        "input_cache_miss": 0.14 / 1_000_000,  # $0.14 per million tokens for cache misses
+        "output": 2.19 / 1_000_000,    # $2.19 per million output tokens
+        "discount_hours": (16, 30, 0, 30),  # 75% discount between 16:30 and 00:30 UTC
+        "discount_rate": 0.75,  # 75% discount during specified hours
     },
     # Default pricing for unknown models
     "default": {
-        "input": 0.20 / 1_000_000,     # $0.20 per million input tokens
-        "output": 0.80 / 1_000_000,    # $0.80 per million output tokens
+        "input": 0.14 / 1_000_000,     # $0.14 per million input tokens
+        "output": 2.19 / 1_000_000,    # $2.19 per million output tokens
     }
 }
 
@@ -45,6 +53,43 @@ class DeepSeekClient(BaseLLMClient):
             raise ValueError(f"Failed to initialize DeepSeek client: {str(e)}")
             
         self.default_model = "deepseek-reasoner"
+        
+    async def generate_response(self, conversation_history: List[Dict[str, str]]) -> str:
+        """
+        Generate a response from the DeepSeek model using the provided conversation history.
+        
+        Args:
+            conversation_history: List of conversation messages with role and content.
+                                  Example: [{"role": "system", "content": "..."}, ...]
+                                  
+        Returns:
+            The generated response text
+        """
+        # Extract system prompt if present
+        system_prompt = None
+        if conversation_history and conversation_history[0]["role"] == "system":
+            system_prompt = conversation_history[0]["content"]
+        
+        # Get the user's last message as prompt
+        prompt = None
+        for msg in reversed(conversation_history):
+            if msg["role"] == "user":
+                prompt = msg["content"]
+                break
+        
+        # Get the response using the conversation history
+        response = await self.get_response(
+            prompt=None,  # We're using conversation_history instead
+            system=None,  # We're using conversation_history instead
+            conversation_history=conversation_history,
+            temperature=0.6,
+            max_tokens=4000
+        )
+        
+        if response is None:
+            return "I apologize, but I'm having trouble generating a response right now. Please try again."
+            
+        return response
         
     async def get_response(
         self,
@@ -106,8 +151,14 @@ class DeepSeekClient(BaseLLMClient):
                     "total_tokens": response.usage.total_tokens
                 }
                 
-                # Calculate costs
-                costs = self.calculate_token_cost(usage_data, model_name)
+                # Check if this was a cache hit (if the API provides this info)
+                cache_hit = False
+                if hasattr(response, "cached") and response.cached:
+                    cache_hit = True
+                    logger.debug(f"Cache hit detected for request to {model_name}")
+                
+                # Calculate costs with cache awareness
+                costs = self.calculate_token_cost(usage_data, model_name, cache_hit=cache_hit)
                 
                 # Create and record token usage
                 token_usage = TokenUsage(
@@ -117,8 +168,13 @@ class DeepSeekClient(BaseLLMClient):
                     prompt_cost=costs["prompt_cost"],
                     completion_cost=costs["completion_cost"],
                     total_cost=costs["total_cost"],
-                    model=model_name
+                    model=model_name,
+                    cache_hit=cache_hit
                 )
+                
+                # Log if discount was applied
+                if "discount_applied" in costs and costs["discount_applied"]:
+                    logger.info(f"Applied time-based discount to {model_name} request")
                 
                 self.add_usage(token_usage)
             
@@ -142,19 +198,74 @@ class DeepSeekClient(BaseLLMClient):
             logger.error(f"DeepSeek-Reasoner API call failed: {str(e)}", exc_info=True)
             return None
     
-    def calculate_token_cost(self, usage: Dict[str, int], model: str) -> Dict[str, float]:
-        """Calculate cost based on token usage and model"""
+    def calculate_token_cost(self, usage: Dict[str, int], model: str, cache_hit: bool = False) -> Dict[str, float]:
+        """
+        Calculate cost based on token usage, model, and time of day.
+        
+        Args:
+            usage: Dictionary with prompt_tokens, completion_tokens, and total_tokens
+            model: The model name used for the request
+            cache_hit: Whether there was a cache hit for this request
+        
+        Returns:
+            Dictionary with prompt_cost, completion_cost, and total_cost
+        """
+        import datetime
+        import time
+        
         # Get pricing for this model or use default if not found
         pricing = DEEPSEEK_PRICING.get(model, DEEPSEEK_PRICING["default"])
         
-        prompt_cost = usage["prompt_tokens"] * pricing["input"]
-        completion_cost = usage["completion_tokens"] * pricing["output"]
+        # Determine if we're in discount hours
+        discount_applied = False
+        discount_multiplier = 1.0
+        
+        if "discount_hours" in pricing and "discount_rate" in pricing:
+            # Get current UTC time
+            current_time = datetime.datetime.now(datetime.timezone.utc)
+            current_hour = current_time.hour
+            current_minute = current_time.minute
+            
+            # Unpack the discount hours tuple (start_hour, start_minute, end_hour, end_minute)
+            start_hour, start_minute, end_hour, end_minute = pricing["discount_hours"]
+            
+            # Convert to minutes for easier comparison
+            current_time_mins = current_hour * 60 + current_minute
+            start_time_mins = start_hour * 60 + start_minute
+            end_time_mins = end_hour * 60 + end_minute
+            
+            # Handle the case where discount period crosses midnight
+            if end_time_mins < start_time_mins:
+                # If current time is after start OR before end, we're in the discount period
+                if current_time_mins >= start_time_mins or current_time_mins <= end_time_mins:
+                    discount_applied = True
+                    discount_multiplier = 1.0 - pricing["discount_rate"]
+            else:
+                # Normal case: if current time is between start and end
+                if start_time_mins <= current_time_mins <= end_time_mins:
+                    discount_applied = True
+                    discount_multiplier = 1.0 - pricing["discount_rate"]
+        
+        # Calculate costs with appropriate pricing
+        if cache_hit and "input_cache_hit" in pricing:
+            prompt_cost = usage["prompt_tokens"] * pricing["input_cache_hit"] * discount_multiplier
+        elif not cache_hit and "input_cache_miss" in pricing:
+            prompt_cost = usage["prompt_tokens"] * pricing["input_cache_miss"] * discount_multiplier
+        else:
+            prompt_cost = usage["prompt_tokens"] * pricing["input"] * discount_multiplier
+            
+        completion_cost = usage["completion_tokens"] * pricing["output"] * discount_multiplier
         total_cost = prompt_cost + completion_cost
+        
+        # Add logging for cost calculation
+        if discount_applied:
+            logger.debug(f"Applied {pricing['discount_rate']*100}% discount to {model} pricing (discount hours active)")
         
         return {
             "prompt_cost": prompt_cost,
             "completion_cost": completion_cost,
-            "total_cost": total_cost
+            "total_cost": total_cost,
+            "discount_applied": discount_applied
         }
             
     async def check_for_user_input_request(self, response: str) -> Tuple[bool, Optional[str]]:

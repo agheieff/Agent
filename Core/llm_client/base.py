@@ -6,7 +6,7 @@ class TokenUsage:
     """Class to track token usage and cost"""
     def __init__(self, prompt_tokens=0, completion_tokens=0, total_tokens=0, 
                  prompt_cost=0.0, completion_cost=0.0, total_cost=0.0,
-                 model="", timestamp=None):
+                 model="", timestamp=None, cache_hit=False):
         self.prompt_tokens = prompt_tokens
         self.completion_tokens = completion_tokens
         self.total_tokens = total_tokens
@@ -15,6 +15,7 @@ class TokenUsage:
         self.total_cost = total_cost
         self.model = model
         self.timestamp = timestamp or datetime.now()
+        self.cache_hit = cache_hit
         
     def to_dict(self) -> Dict[str, Any]:
         """Convert usage data to dictionary"""
@@ -26,12 +27,14 @@ class TokenUsage:
             "completion_cost": self.completion_cost,
             "total_cost": self.total_cost,
             "model": self.model,
-            "timestamp": self.timestamp.isoformat()
+            "timestamp": self.timestamp.isoformat(),
+            "cache_hit": self.cache_hit
         }
         
     def __str__(self) -> str:
         """Human-readable representation"""
-        return (f"Model: {self.model}\n"
+        cache_status = " (cache hit)" if self.cache_hit else ""
+        return (f"Model: {self.model}{cache_status}\n"
                 f"Tokens: {self.prompt_tokens} in + {self.completion_tokens} out = {self.total_tokens} total\n"
                 f"Cost: ${self.total_cost:.6f} (${self.prompt_cost:.6f} in + ${self.completion_cost:.6f} out)")
 
@@ -101,15 +104,16 @@ class BaseLLMClient(ABC):
         pass
         
     @abstractmethod
-    def calculate_token_cost(self, usage: Dict[str, int], model: str) -> Dict[str, float]:
+    def calculate_token_cost(self, usage: Dict[str, int], model: str, cache_hit: bool = False) -> Dict[str, float]:
         """
-        Calculate the cost based on token usage and model
+        Calculate the cost based on token usage, model, and cache status
         
         Args:
             usage: Dictionary with 'prompt_tokens' and 'completion_tokens' 
             model: Model name used for the request
+            cache_hit: Whether there was a cache hit for this request
             
         Returns:
-            Dictionary with 'prompt_cost', 'completion_cost', and 'total_cost'
+            Dictionary with 'prompt_cost', 'completion_cost', 'total_cost', and optionally 'discount_applied'
         """
         pass

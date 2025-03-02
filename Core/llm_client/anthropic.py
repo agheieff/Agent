@@ -8,26 +8,16 @@ logger = logging.getLogger(__name__)
 
 # Claude API pricing (as of March 2025) - subject to changes
 CLAUDE_PRICING = {
-    "claude-3-opus-20240229": {
-        "input": 15.0 / 1_000_000,    # $15 per million input tokens
-        "output": 75.0 / 1_000_000,   # $75 per million output tokens
-    },
-    "claude-3-sonnet-20240229": {
-        "input": 3.0 / 1_000_000,     # $3 per million input tokens
-        "output": 15.0 / 1_000_000,   # $15 per million output tokens
-    },
-    "claude-3-haiku-20240307": {
-        "input": 0.25 / 1_000_000,    # $0.25 per million input tokens
-        "output": 1.25 / 1_000_000,   # $1.25 per million output tokens
-    },
-    "claude-3-5-sonnet-20241022": {
-        "input": 5.0 / 1_000_000,     # $5 per million input tokens
-        "output": 25.0 / 1_000_000,   # $25 per million output tokens
+    "claude-3-7-sonnet-20250219": {
+        "input": 3.0 / 1_000_000,                # $3.00 per million input tokens
+        "input_cache_write": 3.75 / 1_000_000,   # $3.75 per million tokens for prompt caching write
+        "input_cache_read": 0.30 / 1_000_000,    # $0.30 per million tokens for prompt caching read
+        "output": 15.0 / 1_000_000,              # $15.00 per million output tokens
     },
     # Default pricing for unknown models
     "default": {
-        "input": 5.0 / 1_000_000,     # $5 per million input tokens
-        "output": 25.0 / 1_000_000,   # $25 per million output tokens
+        "input": 3.0 / 1_000_000,                # $3.00 per million input tokens
+        "output": 15.0 / 1_000_000,              # $15.00 per million output tokens
     }
 }
 
@@ -50,7 +40,7 @@ class AnthropicClient(BaseLLMClient):
         except Exception as e:
             raise ValueError(f"Failed to initialize Anthropic client: {str(e)}")
             
-        self.default_model = "claude-3-5-sonnet-20241022"
+        self.default_model = "claude-3-7-sonnet-20250219"
         
     async def get_response(
         self,
@@ -99,8 +89,26 @@ class AnthropicClient(BaseLLMClient):
                     "total_tokens": message.usage.input_tokens + message.usage.output_tokens
                 }
                 
-                # Calculate costs
-                costs = self.calculate_token_cost(usage_data, model_name)
+                # Check for cache information
+                cache_hit = False
+                cache_write = False
+                
+                if hasattr(message, "cache") and message.cache:
+                    if hasattr(message.cache, "status"):
+                        if message.cache.status == "hit":
+                            cache_hit = True
+                            logger.info(f"Cache hit detected for {model_name}")
+                        elif message.cache.status == "write":
+                            cache_write = True
+                            logger.info(f"Cache write detected for {model_name}")
+                
+                # Calculate costs with cache awareness
+                costs = self.calculate_token_cost(
+                    usage_data, 
+                    model_name, 
+                    cache_hit=cache_hit,
+                    cache_write=cache_write
+                )
                 
                 # Create and record token usage
                 token_usage = TokenUsage(
@@ -110,7 +118,8 @@ class AnthropicClient(BaseLLMClient):
                     prompt_cost=costs["prompt_cost"],
                     completion_cost=costs["completion_cost"],
                     total_cost=costs["total_cost"],
-                    model=model_name
+                    model=model_name,
+                    cache_hit=cache_hit
                 )
                 
                 self.add_usage(token_usage)
@@ -129,19 +138,44 @@ class AnthropicClient(BaseLLMClient):
             logger.error(f"API call failed: {str(e)}", exc_info=True)
             return None
     
-    def calculate_token_cost(self, usage: Dict[str, int], model: str) -> Dict[str, float]:
-        """Calculate cost based on token usage and model"""
+    def calculate_token_cost(self, usage: Dict[str, int], model: str, cache_hit: bool = False, cache_write: bool = False) -> Dict[str, float]:
+        """
+        Calculate cost based on token usage, model, and cache status
+        
+        Args:
+            usage: Dictionary with prompt_tokens and completion_tokens
+            model: The model name used for the request
+            cache_hit: Whether there was a cache hit for this request
+            cache_write: Whether this is a cache write operation
+            
+        Returns:
+            Dictionary with prompt_cost, completion_cost, and total_cost
+        """
         # Get pricing for this model or use default if not found
         pricing = CLAUDE_PRICING.get(model, CLAUDE_PRICING["default"])
         
-        prompt_cost = usage["prompt_tokens"] * pricing["input"]
+        # Calculate prompt cost based on cache status
+        if cache_hit and "input_cache_read" in pricing:
+            # Cache hit - use read pricing
+            prompt_cost = usage["prompt_tokens"] * pricing["input_cache_read"]
+            logger.debug(f"Using cache read pricing for {model}: ${pricing['input_cache_read'] * 1_000_000:.4f}/M tokens")
+        elif cache_write and "input_cache_write" in pricing:
+            # Cache write - use write pricing
+            prompt_cost = usage["prompt_tokens"] * pricing["input_cache_write"] 
+            logger.debug(f"Using cache write pricing for {model}: ${pricing['input_cache_write'] * 1_000_000:.4f}/M tokens")
+        else:
+            # Normal input pricing
+            prompt_cost = usage["prompt_tokens"] * pricing["input"]
+            
         completion_cost = usage["completion_tokens"] * pricing["output"]
         total_cost = prompt_cost + completion_cost
         
         return {
             "prompt_cost": prompt_cost,
             "completion_cost": completion_cost,
-            "total_cost": total_cost
+            "total_cost": total_cost,
+            "cache_hit": cache_hit,
+            "cache_write": cache_write
         }
             
     async def check_for_user_input_request(self, response: str) -> Tuple[bool, Optional[str]]:

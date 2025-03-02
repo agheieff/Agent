@@ -1,4 +1,3 @@
-
 import json
 import os
 import re
@@ -18,6 +17,7 @@ import faiss
 
 from .memory_hierarchy import MemoryHierarchy
 from .command_manager import CommandManager  # <-- now actually used
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -419,7 +419,7 @@ class MemoryManager:
         self.temporal = TemporalContext(self.graph)
         self.vector_index = VectorIndex(self.base_path)
         
-        # Initialize the new CommandManager
+        # Initialize the CommandManager
         self.command_manager = CommandManager(self.base_path / "commands")
         
         self.command_history: List[Dict] = []
@@ -471,7 +471,6 @@ class MemoryManager:
         memory_dir = os.environ.get("AGENT_MEMORY_DIR")
         if memory_dir:
             return Path(memory_dir)
-        
         agent_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         for path_option in [agent_dir.parent / "AgentMemory", Path.cwd() / "memory", Path.cwd() / "AgentMemory"]:
             if path_option.exists() or path_option.parent.exists():
@@ -704,7 +703,7 @@ class MemoryManager:
                         logger.error(f"Error creating recovery note: {e}")
         except Exception as e:
             logger.error(f"Error during recovery check: {e}")
-
+            
     def create_backup(self, force: bool = False):
         try:
             current_time = time.time()
@@ -899,16 +898,16 @@ class MemoryManager:
                 if node_id in self.graph.graph:
                     self.graph.graph.nodes[node_id]['last_accessed'] = time.time()
                     metadata = self.graph.graph.nodes[node_id].get('metadata', {})
-                    search_hits = metadata.get('search_hits', 0)+1
+                    search_hits = metadata.get('search_hits', 0) + 1
                     metadata['search_hits'] = search_hits
                     metadata['last_matched_query'] = query
                     self.graph.update_node(node_id, metadata=metadata)
-                    self.memory_stats['retrieval_counts'][node_id] = self.memory_stats['retrieval_counts'].get(node_id, 0)+1
+                    self.memory_stats['retrieval_counts'][node_id] = self.memory_stats['retrieval_counts'].get(node_id, 0) + 1
                     item_tags = result.get('tags', [])
                     for tag in item_tags:
                         if tag in self.context_keys:
-                            self.memory_stats['access_patterns'][tag] = self.memory_stats['access_patterns'].get(tag, 0)+1
-            search_time = time.time()-search_start_time
+                            self.memory_stats['access_patterns'][tag] = self.memory_stats['access_patterns'].get(tag, 0) + 1
+            search_time = time.time() - search_start_time
             logger.debug(f"Memory search: '{query}' got {len(final_results)} results in {search_time:.3f}s")
             return final_results[:limit]
         except Exception as e:
@@ -999,36 +998,34 @@ class MemoryManager:
         if importance == "high":
             note_tags.append("important")
         title = f"{note_type.title()} Note - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        permanent = (importance == "high")
         node_id = self.save_document(
             title=title,
             content=note,
             tags=note_tags,
-            permanent=permanent,
             metadata={
                 "note_type": note_type,
                 "importance": importance,
                 "conversation_turn": self.conversation_turn_count
-            }
+            },
+            permanent=(importance=="high")
         )
         logger.info(f"Added agent note: {note[:50]}{'...' if len(note) > 50 else ''}")
         return node_id
         
-    def update_conversation_metrics(self, increment_turns: bool = True):
+    def update_conversation_metrics(self, increment_turns: bool = True) -> Dict[str, Any]:
         if increment_turns:
             self.conversation_turn_count += 1
         current_time = time.time()
-        duration_minutes = (current_time - self.conversation_start_time)/60
-        if (self.conversation_turn_count % 10 == 0
-            or (duration_minutes>30 and self.conversation_turn_count%5==0)):
+        duration_minutes = (current_time - self.conversation_start_time) / 60
+        if self.conversation_turn_count % 10 == 0 or (duration_minutes > 30 and self.conversation_turn_count % 5 == 0):
             risk_level = "low"
-            if self.conversation_turn_count>50 or duration_minutes>60:
+            if self.conversation_turn_count > 50 or duration_minutes > 60:
                 risk_level = "high"
-            elif self.conversation_turn_count>30 or duration_minutes>45:
+            elif self.conversation_turn_count > 30 or duration_minutes > 45:
                 risk_level = "medium"
-            if risk_level!="low":
+            if risk_level != "low":
                 self.add_agent_note(
-                    f"Conversation length: {self.conversation_turn_count} turns over {duration_minutes:.1f} minutes. Risk: {risk_level}",
+                    f"Conversation length: {self.conversation_turn_count} turns over {duration_minutes:.1f} minutes. Risk: {risk_level}. Consider using /compact soon.",
                     note_type="status_update",
                     importance="high" if risk_level=="high" else "normal",
                     tags=["conversation_length", "status_updates", risk_level]
@@ -1042,8 +1039,13 @@ class MemoryManager:
         status_note = f"Task: {task_title}\nStatus: {status}"
         if details:
             status_note += f"\nDetails: {details}"
-        importance = "high" if status in ["completed","error"] else "normal"
-        self.add_agent_note(status_note, note_type="status_updates", importance=importance, tags=["task_status", status])
+        importance = "high" if status in ["completed", "error"] else "normal"
+        self.add_agent_note(
+            status_note,
+            note_type="status_updates",
+            importance=importance,
+            tags=["task_status", status]
+        )
         
     def _load_mind_maps(self):
         try:
@@ -1087,12 +1089,15 @@ class MemoryManager:
             }
         }
         root_node_id = self._add_mind_map_node(
-            map_id, title, description, node_type="root",
-            position={"x":0,"y":0}
+            map_id, 
+            title,
+            description, 
+            node_type="root",
+            position={"x": 0, "y": 0}
         )
         self.mind_maps[map_id]["root_node_id"] = root_node_id
         self._save_mind_map(map_id)
-        self.memory_stats['mind_maps_created']+=1
+        self.memory_stats['mind_maps_created'] += 1
         self.add_agent_note(
             f"Created new mind map: {title}",
             note_type="mind_map_created",
@@ -1101,14 +1106,14 @@ class MemoryManager:
         )
         return map_id
         
-    def _add_mind_map_node(self, map_id: str, title: str, content: str,
-                           node_type: str="concept", position: Dict=None,
-                           metadata: Dict=None) -> str:
+    def _add_mind_map_node(self, map_id: str, title: str, content: str, 
+                           node_type: str = "concept", position: Dict = None,
+                           metadata: Dict = None) -> str:
         if map_id not in self.mind_maps:
             raise ValueError(f"Mind map {map_id} does not exist")
         node_id = f"node_{int(time.time())}_{hash(title)%10000}"
         if position is None:
-            position = {"x":0,"y":0}
+            position = {"x": 0, "y": 0}
         self.mind_maps[map_id]["nodes"][node_id] = {
             "id": node_id,
             "title": title,
@@ -1119,26 +1124,32 @@ class MemoryManager:
             "last_accessed": time.time(),
             "metadata": metadata or {}
         }
-        self.mind_maps[map_id]["metadata"]["node_count"]+=1
+        self.mind_maps[map_id]["metadata"]["node_count"] += 1
         self.mind_maps[map_id]["last_modified"] = time.time()
         return node_id
         
-    def add_mind_map_concept(self, map_id: str, title: str, content: str,
-                             related_to: str=None, link_type: str="related",
-                             position: Dict=None):
-        node_id = self._add_mind_map_node(map_id,title,content,node_type="concept",position=position)
+    def add_mind_map_concept(self, map_id: str, title: str, content: str, 
+                            related_to: str = None, link_type: str = "related",
+                            position: Dict = None) -> str:
+        node_id = self._add_mind_map_node(
+            map_id,
+            title,
+            content,
+            node_type="concept",
+            position=position
+        )
         if related_to and related_to in self.mind_maps[map_id]["nodes"]:
             self._add_mind_map_link(map_id, related_to, node_id, link_type)
         self._save_mind_map(map_id)
         return node_id
         
-    def _add_mind_map_link(self, map_id: str, source_id: str, target_id: str,
-                           link_type: str="related", strength: float=1.0):
+    def _add_mind_map_link(self, map_id: str, source_id: str, target_id: str, 
+                         link_type: str = "related", strength: float = 1.0):
         if map_id not in self.mind_maps:
             raise ValueError(f"Mind map {map_id} does not exist")
         link_id = f"link_{source_id}_{target_id}"
         for link in self.mind_maps[map_id]["links"]:
-            if link["source"]==source_id and link["target"]==target_id:
+            if link["source"] == source_id and link["target"] == target_id:
                 link["type"] = link_type
                 link["strength"] = strength
                 link["last_modified"] = time.time()
@@ -1152,7 +1163,7 @@ class MemoryManager:
             "created_at": time.time(),
             "last_modified": time.time()
         })
-        self.mind_maps[map_id]["metadata"]["link_count"]+=1
+        self.mind_maps[map_id]["metadata"]["link_count"] += 1
         self.mind_maps[map_id]["last_modified"] = time.time()
         return link_id
         
@@ -1163,34 +1174,34 @@ class MemoryManager:
             self.mind_maps[map_id]["nodes"][node_id]["last_accessed"] = time.time()
         return self.mind_maps[map_id]
         
-    def search_mind_maps(self, query: str, limit: int=3) -> List[Dict]:
+    def search_mind_maps(self, query: str, limit: int = 3) -> List[Dict]:
         results = []
         query_lower = query.lower()
         for map_id, mm in self.mind_maps.items():
             score = 0
             if query_lower in mm["title"].lower():
-                score+=10
-            if query_lower in mm.get("description","").lower():
-                score+=5
-            content_matches=0
+                score += 10
+            if query_lower in mm.get("description", "").lower():
+                score += 5
+            content_matches = 0
             for node_id, node in mm["nodes"].items():
                 if query_lower in node["title"].lower():
-                    score+=3
-                    content_matches+=1
+                    score += 3
+                    content_matches += 1
                 if query_lower in node["content"].lower():
-                    score+=2
-                    content_matches+=1
-            score += min(content_matches,5)
-            if score>0:
+                    score += 2
+                    content_matches += 1
+            score += min(content_matches, 5)
+            if score > 0:
                 results.append({
                     "id": map_id,
                     "title": mm["title"],
-                    "description": mm.get("description",""),
+                    "description": mm.get("description", ""),
                     "node_count": mm["metadata"]["node_count"],
                     "score": score,
                     "created_at": mm["created_at"]
                 })
-        results.sort(key=lambda x: x["score"],reverse=True)
+        results.sort(key=lambda x: x["score"], reverse=True)
         return results[:limit]
     
     def extract_mind_map_summary(self, map_id: str) -> str:
@@ -1199,33 +1210,32 @@ class MemoryManager:
         mm = self.mind_maps[map_id]
         summary_parts = [
             f"# Mind Map: {mm['title']}",
-            mm.get("description","")
+            mm.get("description", "")
         ]
         summary_parts.append("\n## Key Concepts")
         nodes = list(mm["nodes"].values())
-        nodes.sort(key=lambda x: (x["type"]!="root", x["created_at"]))
-        for i,node in enumerate(nodes):
-            if i<10:
+        nodes.sort(key=lambda x: (x["type"] != "root", x["created_at"]))
+        for i, node in enumerate(nodes):
+            if i < 10:
                 snippet = node["content"][:100]
-                if len(node["content"])>100:
-                    snippet+="..."
+                if len(node["content"]) > 100:
+                    snippet += "..."
                 summary_parts.append(f"- {node['title']}: {snippet}")
-        if len(nodes)>10:
-            summary_parts.append(f"...and {len(nodes)-10} more concepts")
+        if len(nodes) > 10:
+            summary_parts.append(f"...and {len(nodes) - 10} more concepts")
         if mm["links"]:
             summary_parts.append("\n## Relationships")
-            link_count = min(len(mm["links"]),7)
+            link_count = min(len(mm["links"]), 7)
             for i in range(link_count):
                 link = mm["links"][i]
-                source = mm["nodes"].get(link["source"],{})
-                target = mm["nodes"].get(link["target"],{})
+                source = mm["nodes"].get(link["source"], {})
+                target = mm["nodes"].get(link["target"], {})
                 if source and target:
-                    summary_parts.append(
-                        f"- {source.get('title','?')} → {link['type']} → {target.get('title','?')}")
-            if len(mm["links"])>link_count:
-                summary_parts.append(f"...and {len(mm['links'])-link_count} more relationships")
+                    summary_parts.append(f"- {source.get('title', '?')} → {link['type']} → {target.get('title', '?')}")
+            if len(mm["links"]) > link_count:
+                summary_parts.append(f"...and {len(mm['links']) - link_count} more relationships")
         return "\n".join(summary_parts)
-    
+        
     def get_session_persistent_memory(self) -> Dict[str, Any]:
         persistent_data = {
             "agent_notes": [],
@@ -1235,23 +1245,23 @@ class MemoryManager:
             "knowledge_base": []
         }
         try:
-            agent_notes = self.search_memory("important", tags=["agent_notes","important"], limit=10, recency_boost=True)
+            agent_notes = self.search_memory("important", tags=["agent_notes", "important"], limit=10, recency_boost=True)
             for note in agent_notes:
                 persistent_data["agent_notes"].append({
-                    "content": note.get("content",""),
-                    "type": note.get("metadata",{}).get("note_type","general"),
-                    "timestamp": note.get("metadata",{}).get("timestamp",0),
-                    "importance": note.get("metadata",{}).get("importance","normal")
+                    "content": note.get("content", ""),
+                    "type": note.get("metadata", {}).get("note_type", "general"),
+                    "timestamp": note.get("metadata", {}).get("timestamp", 0),
+                    "importance": note.get("metadata", {}).get("importance", "normal")
                 })
         except Exception as e:
             logger.error(f"Error loading agent notes for persistent memory: {e}")
         
         try:
-            task_statuses = self.search_memory("task status", tags=["task_status","status_updates"],limit=7, recency_boost=True)
-            for st in task_statuses:
+            task_statuses = self.search_memory("task status", tags=["task_status", "status_updates"], limit=7, recency_boost=True)
+            for status in task_statuses:
                 persistent_data["task_statuses"].append({
-                    "content": st.get("content",""),
-                    "timestamp": st.get("created_at",0)
+                    "content": status.get("content", ""),
+                    "timestamp": status.get("created_at", 0)
                 })
         except Exception as e:
             logger.error(f"Error loading task statuses for persistent memory: {e}")
@@ -1260,32 +1270,29 @@ class MemoryManager:
             if self.mind_maps:
                 recent_maps = sorted(
                     self.mind_maps.values(),
-                    key=lambda m: m.get("last_modified",0),
+                    key=lambda m: m.get("last_modified", 0),
                     reverse=True
                 )[:2]
                 for mm in recent_maps:
                     persistent_data["mind_maps"].append({
                         "id": mm.get("id"),
                         "title": mm.get("title"),
-                        "description": mm.get("description",""),
-                        "nodes_count": mm.get("metadata",{}).get("node_count",0),
-                        "links_count": mm.get("metadata",{}).get("link_count",0)
+                        "description": mm.get("description", ""),
+                        "nodes_count": mm.get("metadata", {}).get("node_count", 0),
+                        "links_count": mm.get("metadata", {}).get("link_count", 0)
                     })
         except Exception as e:
             logger.error(f"Error loading mind maps for persistent memory: {e}")
         
         try:
-            knowledge_items = self.search_memory(
-                "important knowledge", tags=["knowledge_base","permanent"],
-                limit=5, recency_boost=False
-            )
-            for ki in knowledge_items:
-                snippet = ki.get("content","")[:250]
-                if len(ki.get("content",""))>250:
-                    snippet+="..."
+            knowledge_items = self.search_memory("important knowledge", tags=["knowledge_base", "permanent"], limit=5, recency_boost=False)
+            for item in knowledge_items:
+                content = item.get("content", "").strip()
+                if len(content) > 250:
+                    content = content[:247] + "..."
                 persistent_data["knowledge_base"].append({
-                    "title": ki.get("title",""),
-                    "content": snippet
+                    "title": item.get("title", ""),
+                    "content": content
                 })
         except Exception as e:
             logger.error(f"Error loading knowledge items for persistent memory: {e}")
@@ -1293,7 +1300,7 @@ class MemoryManager:
         return persistent_data
         
     def add_to_knowledge_base(self, title: str, content: str, tags: List[str] = None) -> str:
-        kb_tags = ["knowledge_base","permanent"]
+        kb_tags = ["knowledge_base", "permanent"]
         if tags:
             kb_tags.extend(tags)
         node_id = self.save_document(
@@ -1301,7 +1308,11 @@ class MemoryManager:
             content=content,
             tags=kb_tags,
             permanent=True,
-            metadata={"type":"knowledge_base","added_at":time.time(),"importance":"high"}
+            metadata={
+                "type": "knowledge_base",
+                "added_at": time.time(),
+                "importance": "high"
+            }
         )
         logger.info(f"Added knowledge base item: {title}")
         self.add_agent_note(
@@ -1312,35 +1323,35 @@ class MemoryManager:
         )
         return node_id
         
-    def prioritize_memory_items(self, query: str, items: List[Dict], top_k: int=5) -> List[Dict]:
+    def prioritize_memory_items(self, query: str, items: List[Dict], top_k: int = 5) -> List[Dict]:
         if not items:
             return []
         scored_items = []
         query_terms = query.lower().split()
         for item in items:
             score = 0
-            importance = item.get("metadata",{}).get("importance","normal")
-            if importance=="high":
-                score+=10
-            elif importance=="normal":
-                score+=5
-            content = item.get("content","").lower()
-            title = item.get("title","").lower()
+            importance = item.get("metadata", {}).get("importance", "normal")
+            if importance == "high":
+                score += 10
+            elif importance == "normal":
+                score += 5
+            content = item.get("content", "").lower()
+            title = item.get("title", "").lower()
             if query.lower() in content or query.lower() in title:
-                score+=15
-            term_matches = sum(1 for t in query_terms if t in content or t in title)
-            score += term_matches*2
-            timestamp = item.get("metadata",{}).get("timestamp",0)
-            if timestamp>0:
-                time_diff = time.time()-timestamp
-                days_old = time_diff/(24*3600)
-                recency_score = max(0,5-min(5,math.log(1+days_old)))
-                score+=recency_score
-            tags = item.get("tags",[])
+                score += 15
+            term_matches = sum(1 for term in query_terms if term in content or term in title)
+            score += term_matches * 2
+            timestamp = item.get("metadata", {}).get("timestamp", 0)
+            if timestamp > 0:
+                time_diff = time.time() - timestamp
+                days_old = time_diff / (24 * 3600)
+                recency_score = max(0, 5 - min(5, math.log1p(days_old)))
+                score += recency_score
+            tags = item.get("tags", [])
             if "important" in tags:
-                score+=5
+                score += 5
             if "permanent" in tags:
-                score+=3
-            scored_items.append((item,score))
-        scored_items.sort(key=lambda x:x[1],reverse=True)
-        return [it for it,_ in scored_items[:top_k]]
+                score += 3
+            scored_items.append((item, score))
+        scored_items.sort(key=lambda x: x[1], reverse=True)
+        return [item for item, _ in scored_items[:top_k]]

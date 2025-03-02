@@ -6,7 +6,7 @@ paths:
   memory_dir: /home/agheieff/AgentMemory
   
   # Projects directory - where code projects will be managed
-  projects_dir: /home/agheieff/Arcadia/Projects
+  projects_dir: /home/agheieff/Projects
   
   # Temporary file storage
   temp_dir: ${memory_dir}/temp

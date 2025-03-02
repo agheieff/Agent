@@ -326,12 +326,17 @@ class AutonomousAgent:
     ):
         if not api_key:
             raise ValueError("API key required")
+        self.api_key = api_key
+        self.model_name = model
+        self.test_mode = test_mode
         self.last_assistant_response = None
         self.paused_for_human_context = False
         self.memory_manager = memory_manager or MemoryManager()
         self.memory_path = self.memory_manager.base_path
         self._setup_storage()
         self.system_control = SystemControl(test_mode=test_mode)
+        self.session_manager = session_manager or SessionManager(self.memory_path, self.memory_manager)
+        self.task_manager = TaskManager(self.memory_path)
         
     def _setup_storage(self):
         """Set up storage directories for the agent"""
@@ -365,7 +370,7 @@ class AutonomousAgent:
                     )
                     self.memory_manager.save_document(
                         "agent_identity",
-                        f"Agent ID: {self.agent_id}\nInitialized: {self.agent_state['started_at']}\nModel: {model}",
+                        f"Agent ID: {self.agent_id}\nInitialized: {self.agent_state['started_at']}\nModel: {self.model_name}",
                         tags=["system", "identity", "permanent"],
                         permanent=True
                     )
@@ -374,8 +379,7 @@ class AutonomousAgent:
         self.reflections = []
         self.planned_steps = []
         self.executive_summary = ""
-        self.llm = get_llm_client(model, api_key)
-        self.model_name = model
+        self.llm = get_llm_client(self.model_name, self.api_key)
         self.current_conversation_id = None
         self.last_session_summary = self._load_last_session()
         self.command_extractor = CommandExtractor()
@@ -383,10 +387,17 @@ class AutonomousAgent:
         self.command_history = []
         self.heartbeat_task = None
         self.resource_monitor_task = None
-        self.test_mode = test_mode
         self.local_conversation_history: List[Dict[str, str]] = []
         self.working_memory: Dict[str, Any] = {}
         self.agent_state['status'] = 'ready'
 
-    # ... [rest of the AutonomousAgent class remains unchanged]
-    # Since we're not changing the core behavior, just importing from new locations
+    def _load_last_session(self) -> str:
+        """Load the summary of the last session from memory"""
+        try:
+            summary_path = self.memory_path / "summaries" / "last_session.txt"
+            if summary_path.exists():
+                return summary_path.read_text()
+            return ""
+        except Exception as e:
+            logger.error(f"Error loading last session summary: {e}")
+            return ""

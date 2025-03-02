@@ -164,6 +164,75 @@ EOF
     echo -e "${GREEN}Environment setup complete.${NC}"
 }
 
+# Function to check for system dependencies
+check_system_dependencies() {
+    echo -e "${YELLOW}Checking system dependencies...${NC}"
+    
+    # Check for libxml2 and libxslt development packages
+    if command -v apt-get &> /dev/null; then
+        # Debian/Ubuntu
+        if ! dpkg -l libxml2-dev libxslt-dev 2>/dev/null | grep -q "^ii"; then
+            echo -e "${YELLOW}Missing required system dependencies for lxml.${NC}"
+            echo -e "${YELLOW}The following packages are required: libxml2-dev libxslt-dev${NC}"
+            read -p "Would you like to install them now? (y/n): " install_deps
+            if [[ $install_deps =~ ^[Yy]$ ]]; then
+                echo -e "${YELLOW}Installing dependencies...${NC}"
+                sudo apt-get update && sudo apt-get install -y libxml2-dev libxslt-dev
+            else
+                echo -e "${RED}Warning: lxml installation may fail without these dependencies.${NC}"
+                echo -e "${YELLOW}You can install them manually with: sudo apt-get install libxml2-dev libxslt-dev${NC}"
+            fi
+        fi
+    elif command -v yum &> /dev/null; then
+        # RedHat/CentOS/Fedora
+        if ! rpm -q libxml2-devel libxslt-devel &>/dev/null; then
+            echo -e "${YELLOW}Missing required system dependencies for lxml.${NC}"
+            echo -e "${YELLOW}The following packages are required: libxml2-devel libxslt-devel${NC}"
+            read -p "Would you like to install them now? (y/n): " install_deps
+            if [[ $install_deps =~ ^[Yy]$ ]]; then
+                echo -e "${YELLOW}Installing dependencies...${NC}"
+                sudo yum install -y libxml2-devel libxslt-devel
+            else
+                echo -e "${RED}Warning: lxml installation may fail without these dependencies.${NC}"
+                echo -e "${YELLOW}You can install them manually with: sudo yum install libxml2-devel libxslt-devel${NC}"
+            fi
+        fi
+    elif command -v pacman &> /dev/null; then
+        # Arch Linux
+        if ! pacman -Q libxml2 libxslt &>/dev/null; then
+            echo -e "${YELLOW}Missing required system dependencies for lxml.${NC}"
+            echo -e "${YELLOW}The following packages are required: libxml2 libxslt${NC}"
+            read -p "Would you like to install them now? (y/n): " install_deps
+            if [[ $install_deps =~ ^[Yy]$ ]]; then
+                echo -e "${YELLOW}Installing dependencies...${NC}"
+                sudo pacman -S --noconfirm libxml2 libxslt
+            else
+                echo -e "${RED}Warning: lxml installation may fail without these dependencies.${NC}"
+                echo -e "${YELLOW}You can install them manually with: sudo pacman -S libxml2 libxslt${NC}"
+            fi
+        fi
+    elif command -v brew &> /dev/null; then
+        # macOS with Homebrew
+        if ! brew list libxml2 libxslt &>/dev/null; then
+            echo -e "${YELLOW}Missing required system dependencies for lxml.${NC}"
+            echo -e "${YELLOW}The following packages are required: libxml2 libxslt${NC}"
+            read -p "Would you like to install them now? (y/n): " install_deps
+            if [[ $install_deps =~ ^[Yy]$ ]]; then
+                echo -e "${YELLOW}Installing dependencies...${NC}"
+                brew install libxml2 libxslt
+                # Export PKG_CONFIG_PATH on macOS to help find the libraries
+                export PKG_CONFIG_PATH="$(brew --prefix libxml2)/lib/pkgconfig:$(brew --prefix libxslt)/lib/pkgconfig:$PKG_CONFIG_PATH"
+            else
+                echo -e "${RED}Warning: lxml installation may fail without these dependencies.${NC}"
+                echo -e "${YELLOW}You can install them manually with: brew install libxml2 libxslt${NC}"
+            fi
+        fi
+    else
+        echo -e "${YELLOW}Unable to detect package manager. Please ensure libxml2 and libxslt development packages are installed manually.${NC}"
+        echo -e "${YELLOW}These are required for the lxml package to build successfully.${NC}"
+    fi
+}
+
 # Function to setup the agent
 setup_agent() {
     echo -e "${CYAN}${BOLD}Setting up Agent${NC}"
@@ -178,6 +247,9 @@ setup_agent() {
     
     # Create requirements files for different hardware
     create_requirement_files
+    
+    # Check for system dependencies
+    check_system_dependencies
     
     # Detect hardware
     detect_gpu
@@ -309,10 +381,7 @@ EOF
     
     # Create required directories
     echo -e "${YELLOW}Creating required directories...${NC}"
-    mkdir -p memory/conversations memory/logs memory/summaries memory/config memory/scripts
-    mkdir -p memory/data memory/temp memory/state memory/sessions memory/reflections
-    mkdir -p memory/working_memory memory/tasks memory/plans memory/archive memory/notes
-    mkdir -p memory/vector_index memory/knowledge/docs memory/documents
+    mkdir -p Memory/Data Memory/Graph Memory/Hierarchy Memory/Manager Memory/Temporal Memory/Text Memory/Vector
     
     echo -e "${GREEN}Setup complete!${NC}"
     echo -e "${YELLOW}For bash, use: ${NC}source .venv/bin/activate"
@@ -426,21 +495,9 @@ restore_agent() {
         setup_environment $gpu_type false
     fi
     
-    # Get memory directory from config if it exists
-    MEMORY_DIR="memory"
-    if [ -f "Config/config.yaml" ]; then
-        CONFIG_MEMORY_DIR=$(grep "memory_dir:" Config/config.yaml 2>/dev/null | cut -d':' -f2 | tr -d ' ' || echo "memory")
-        if [ -n "$CONFIG_MEMORY_DIR" ]; then
-            MEMORY_DIR="$CONFIG_MEMORY_DIR"
-        fi
-    fi
-    
     # Create required memory structure
-    echo -e "${YELLOW}Creating memory directories at $MEMORY_DIR...${NC}"
-    mkdir -p "$MEMORY_DIR/conversations" "$MEMORY_DIR/logs" "$MEMORY_DIR/summaries" "$MEMORY_DIR/config" "$MEMORY_DIR/scripts"
-    mkdir -p "$MEMORY_DIR/data" "$MEMORY_DIR/temp" "$MEMORY_DIR/state" "$MEMORY_DIR/sessions" "$MEMORY_DIR/reflections"
-    mkdir -p "$MEMORY_DIR/working_memory" "$MEMORY_DIR/tasks" "$MEMORY_DIR/plans" "$MEMORY_DIR/archive" "$MEMORY_DIR/notes"
-    mkdir -p "$MEMORY_DIR/vector_index" "$MEMORY_DIR/knowledge/docs" "$MEMORY_DIR/documents"
+    echo -e "${YELLOW}Creating memory directories...${NC}"
+    mkdir -p Memory/Data Memory/Graph Memory/Hierarchy Memory/Manager Memory/Temporal Memory/Text Memory/Vector
     
     echo -e "${GREEN}Complete restoration and setup finished!${NC}"
     echo -e "${GREEN}The Agent has been reset to the remote repository state and reinitialized.${NC}"
@@ -506,6 +563,9 @@ update_agent() {
         if git diff HEAD@{1} HEAD -- Requirements/requirements.txt | grep -q "^[+-]"; then
             echo -e "${YELLOW}Dependencies have changed. Updating virtual environment...${NC}"
             
+            # Check for system dependencies first
+            check_system_dependencies
+            
             # Detect hardware
             detect_gpu
             local gpu_type=$?
@@ -521,10 +581,7 @@ update_agent() {
         echo -e "${YELLOW}Running post-update steps...${NC}"
         # Example: migrations or data structure updates would go here
         # For now, we just make sure all directories exist
-        mkdir -p memory/conversations memory/logs memory/summaries memory/config memory/scripts
-        mkdir -p memory/data memory/temp memory/state memory/sessions memory/reflections
-        mkdir -p memory/working_memory memory/tasks memory/plans memory/archive memory/notes
-        mkdir -p memory/vector_index memory/knowledge/docs memory/documents
+        mkdir -p Memory/Data Memory/Graph Memory/Hierarchy Memory/Manager Memory/Temporal Memory/Text Memory/Vector
     else
         echo -e "${RED}Update failed. Please check the error messages above.${NC}"
     fi

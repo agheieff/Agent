@@ -429,7 +429,7 @@ async def main():
         print(f"  (Note: For DeepSeek models, system prompt is combined with the user prompt)")
     print(f"- Initial Prompt Length: {len(initial_prompt)} characters")
     print(f"- Test Mode: {'Enabled - commands will NOT actually execute' if test_mode else 'Disabled'}")
-    print(f"- Atom of Thoughts: {'Enabled' if config.get_value('aot.enabled', False) else 'Disabled'}")
+    print(f"- Atom of Thoughts: {'Enabled' if config.get_value('aot.enabled', False) or config.get_value('agent.enable_aot', False) else 'Disabled'}")
 
     # Display feature information
     print("\nAvailable Features:")
@@ -448,7 +448,7 @@ async def main():
             model=model,
             provider=provider,
             test_mode=config.is_test_mode(),
-            config=config.get_all()
+            config=config.to_dict()
         )
 
         # Store reference to agent for signal handler

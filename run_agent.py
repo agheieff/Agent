@@ -133,7 +133,27 @@ def get_initial_prompt() -> str:
     """
     Get initial prompt by reading until the user enters
     a blank line (press Enter on an empty line to finish).
+    Uses readline for command history support if available.
     """
+    # Try to import readline for command history
+    try:
+        import readline
+        # Enable history file for persistence across sessions
+        history_file = os.path.expanduser('~/.agent_history')
+        try:
+            readline.read_history_file(history_file)
+            # Set history file size
+            readline.set_history_length(1000)
+        except FileNotFoundError:
+            pass
+        
+        # Make sure history is saved on exit
+        import atexit
+        atexit.register(readline.write_history_file, history_file)
+    except (ImportError, ModuleNotFoundError):
+        # Readline not available, continue without it
+        pass
+        
     print("\nEnter your prompt (press Enter on a blank line to finish):")
     lines = []
     while True:
@@ -210,7 +230,10 @@ def handle_pause_signal(signum, frame):
         asyncio.create_task(pause_for_context_input())
 
 async def pause_for_context_input():
-    """Pause the agent and collect additional context from the user"""
+    """
+    Pause the agent and collect additional context from the user.
+    Uses readline for command history if available.
+    """
     global current_agent, paused_for_context
 
     print("\n" + "=" * 60)
@@ -221,11 +244,31 @@ async def pause_for_context_input():
     print("Press Enter on a blank line when finished.")
     print("-" * 60)
 
-    # Collect multi-line input
+    # Try to import readline for command history
+    try:
+        import readline
+        # Use the same history file as other inputs
+        history_file = os.path.expanduser('~/.agent_history')
+        try:
+            readline.read_history_file(history_file)
+            readline.set_history_length(1000)
+        except FileNotFoundError:
+            pass
+        
+        # Save history on exit (if not already registered)
+        import atexit
+        if not hasattr(pause_for_context_input, "_readline_initialized"):
+            atexit.register(readline.write_history_file, history_file)
+            pause_for_context_input._readline_initialized = True
+    except (ImportError, ModuleNotFoundError):
+        # Readline not available, continue without it
+        pass
+
+    # Collect multi-line input with a clearer prompt
     lines = []
     while True:
         try:
-            line = input()
+            line = input("[Context] > ")  # Add a clear prompt
             if not line.strip():
                 break
             lines.append(line)

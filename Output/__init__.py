@@ -36,9 +36,9 @@ class OutputFormatter:
         success = result.get('success', result.get('code', 1) == 0)
         code = result.get('code', 1)
         
-        # Get symbols from config
-        success_symbol = self.config.get("command_success_symbol", "✓")
-        fail_symbol = self.config.get("command_fail_symbol", "✗")
+        # Get symbols from config, use ASCII-only versions
+        success_symbol = self.config.get("command_success_symbol", "[OK]")
+        fail_symbol = self.config.get("command_fail_symbol", "[FAIL]")
         
         status = success_symbol if success else f"{fail_symbol} [code: {code}]"
         

@@ -75,28 +75,47 @@ class CommandExtractor:
     @staticmethod
     def _extract_tag_commands(response: str, tags: List[str], commands: List[Tuple[str, str]]) -> None:
         for tag in tags:
+            # First attempt: Try to extract using standard XML-style tag pattern
             pattern = f"<{tag}>(.*?)</{tag}>"
             matches = list(re.finditer(pattern, response, re.DOTALL))
             if matches:
                 for match in matches:
                     command = match.group(1)
                     if command:
-                        # Removed full strip to preserve indentation. Only strip trailing newlines.
-                        command = command.rstrip('\r\n')
+                        # Preserve indentation, only strip trailing newlines
+                        command = command.rstrip('\r\n') 
                         commands.append((tag, command))
             else:
-                open_tag_pattern = f"<{tag}>"
-                close_tag_pattern = f"</{tag}>"
-                starts = [m.end() for m in re.finditer(open_tag_pattern, response)]
-                ends = [m.start() for m in re.finditer(close_tag_pattern, response)]
-                for start in starts:
-                    valid_ends = [e for e in ends if e > start]
+                # Second attempt: Handle potential malformed tags with newlines or spaces
+                # This is especially important for file operation tags that may be split across lines
+                
+                # Match open and close tags, accounting for potential newlines/spaces
+                open_tag_pattern = f"<{tag}[ \\t\\r\\n]*>"
+                close_tag_pattern = f"</{tag}[ \\t\\r\\n]*>"
+                
+                # Find all occurrences
+                starts = [(m.start(), m.end()) for m in re.finditer(open_tag_pattern, response, re.DOTALL)]
+                ends = [(m.start(), m.end()) for m in re.finditer(close_tag_pattern, response, re.DOTALL)]
+                
+                # For each start tag, find the nearest matching end tag
+                for start_pos, start_end in starts:
+                    valid_ends = [(end_pos, end_end) for end_pos, end_end in ends if end_pos > start_end]
                     if valid_ends:
-                        end = min(valid_ends)
-                        command = response[start:end]
+                        # Get the nearest end tag
+                        end_pos, end_end = min(valid_ends, key=lambda x: x[0])
+                        
+                        # Extract the command between tags
+                        command = response[start_end:end_pos]
                         if command:
+                            # Clean up the command but preserve indentation
                             command = command.rstrip('\r\n')
                             commands.append((tag, command))
+                
+                # Log any unpaired tags for debugging
+                if starts and not ends:
+                    logger.warning(f"Found opening <{tag}> tags but no closing tags")
+                elif ends and not starts:
+                    logger.warning(f"Found closing </{tag}> tags but no opening tags")
 
     @staticmethod
     def extract_thinking(response: str) -> List[str]:
@@ -624,7 +643,7 @@ class AutonomousAgent:
             # Process user input requests first
             if input_requests:
                 print("\n" + "=" * 60)
-                print("AGENT REQUESTING INPUT")
+                print("| AGENT REQUESTING INPUT |")
                 print("-" * 60)
                 print(input_requests[0])  # Take the first input request
                 print("=" * 60 + "\n")
@@ -677,6 +696,23 @@ class AutonomousAgent:
                 
                 # Process bash or python commands
                 if cmd_type in ["bash", "python"]:
+                    # Add nicer command display
+                    if cmd_type == "bash":
+                        print(f"\n> Running bash command:\n")
+                    else:
+                        print(f"\n> Running python command:\n")
+                        
+                    # Show command with slight formatting improvement
+                    command_lines = command.splitlines()
+                    if len(command_lines) > 1:
+                        print(command_lines[0])
+                        for line in command_lines[1:]:
+                            print(f"  {line}")
+                    else:
+                        print(command)
+                    print("\n" + "-" * 40)  # Separator line
+                    
+                    # Execute the command
                     stdout, stderr, code = await self.system_control.execute_command(cmd_type, command)
                     self.agent_state['commands_executed'] += 1
                     self.agent_state['last_active'] = datetime.now().isoformat()
@@ -704,6 +740,18 @@ class AutonomousAgent:
                 for plan in planning:
                     self.planned_steps.append(plan.strip())
                     logger.info(f"Agent planned: {plan.strip()}")
+                    
+                    # Display plan to user
+                    if len(planning) == 1:  # Only show if there's a single plan
+                        print(f"\n--- PLAN ---\n{plan.strip()}\n")
+            
+            # Extract and display summary if present
+            summaries = self.command_extractor.extract_summary(response)
+            if summaries:
+                print("\n--- SUMMARY ---")
+                for summary in summaries:
+                    print(f"{summary.strip()}")
+                print()
             
             # Update conversation state in memory
             if self.memory_manager and self.current_conversation_id:
@@ -742,85 +790,166 @@ class AutonomousAgent:
     async def _process_file_operation(self, op_type: str, command: str) -> None:
         """Process file operations extracted from the response"""
         try:
-            # Parse command parameters
-            params = {}
-            for line in command.strip().split("\n"):
-                line = line.strip()
-                if ":" in line:
-                    key, value = line.split(":", 1)
-                    params[key.strip()] = value.strip()
+            # More robust parsing for command parameters that handles multi-line values
+            # First, normalize line endings
+            command = command.replace('\r\n', '\n').strip()
             
-            # Execute the appropriate file operation
+            # Parse command parameters, supporting multi-line values
+            params = {}
+            current_key = None
+            current_value = []
+            
+            # Split by lines and process
+            lines = command.split('\n')
+            for i, line in enumerate(lines):
+                line = line.rstrip()
+                
+                # Check if this line starts a new parameter
+                if ":" in line and (current_key is None or i == 0 or line.split(":", 1)[0].strip() not in line[:10]):
+                    # If we were building a previous parameter, save it
+                    if current_key is not None:
+                        params[current_key] = '\n'.join(current_value).strip()
+                        current_value = []
+                        
+                    # Start a new parameter
+                    key, value = line.split(":", 1)
+                    current_key = key.strip()
+                    current_value.append(value)
+                elif current_key is not None:
+                    # Continue previous parameter
+                    current_value.append(line)
+            
+            # Save the last parameter being processed
+            if current_key is not None and current_value:
+                params[current_key] = '\n'.join(current_value).strip()
+            
+            # Log the parsed parameters for debugging
+            logger.debug(f"Parsed file operation parameters: {params}")
+            
+            # Execute the appropriate file operation with better error handling
             if op_type == "view":
                 file_path = params.get("file_path")
-                offset = int(params.get("offset", "0"))
-                limit = int(params.get("limit", "2000"))
-                
-                if file_path:
-                    result = await self.system_control.view_file(file_path, offset, limit)
-                    print(f"\nContents of {file_path}:\n")
-                    print(result)
+                if not file_path:
+                    print("\nError: Missing required parameter 'file_path' for view operation")
+                    return
                     
+                offset = 0
+                limit = 2000
+                try:
+                    if "offset" in params:
+                        offset = int(params["offset"])
+                    if "limit" in params:
+                        limit = int(params["limit"])
+                except ValueError as e:
+                    print(f"\nError: Invalid offset or limit value: {e}")
+                    return
+                
+                result = await self.system_control.view_file(file_path, offset, limit)
+                print(f"\n--- Contents of {file_path} ---\n")
+                print(result)
+                
             elif op_type == "edit":
                 file_path = params.get("file_path")
+                if not file_path:
+                    print("\nError: Missing required parameter 'file_path' for edit operation")
+                    return
+                    
                 old_string = params.get("old_string", "")
                 new_string = params.get("new_string", "")
                 
-                if file_path:
-                    result = await self.system_control.edit_file(file_path, old_string, new_string)
-                    print(f"\nEdit result for {file_path}:\n")
-                    print(result)
-                    
+                result = await self.system_control.edit_file(file_path, old_string, new_string)
+                print(f"\n--- Edit result for {file_path} ---\n")
+                print(result)
+                
             elif op_type == "replace":
                 file_path = params.get("file_path")
+                if not file_path:
+                    print("\nError: Missing required parameter 'file_path' for replace operation")
+                    return
+                    
                 content = params.get("content", "")
                 
-                if file_path:
-                    result = await self.system_control.replace_file(file_path, content)
-                    print(f"\nReplace result for {file_path}:\n")
-                    print(result)
-                    
+                result = await self.system_control.replace_file(file_path, content)
+                print(f"\n--- Replace result for {file_path} ---\n")
+                print(result)
+                
             elif op_type == "glob":
                 pattern = params.get("pattern")
+                if not pattern:
+                    print("\nError: Missing required parameter 'pattern' for glob operation")
+                    return
+                    
                 path = params.get("path")
                 
-                if pattern:
-                    results = await self.system_control.glob_search(pattern, path)
-                    print(f"\nGlob search results for pattern '{pattern}':\n")
-                    for result in results:
-                        print(result)
-                        
+                results = await self.system_control.glob_search(pattern, path)
+                print(f"\n--- Glob search results for pattern '{pattern}' ---\n")
+                for result in results:
+                    print(result)
+                    
             elif op_type == "grep":
                 pattern = params.get("pattern")
+                if not pattern:
+                    print("\nError: Missing required parameter 'pattern' for grep operation")
+                    return
+                    
                 include = params.get("include")
                 path = params.get("path")
                 
-                if pattern:
-                    results = await self.system_control.grep_search(pattern, include, path)
-                    print(f"\nGrep search results for pattern '{pattern}':\n")
-                    for result in results:
-                        print(f"{result['file']}:{result['line_number']}: {result['line']}")
-                        
+                results = await self.system_control.grep_search(pattern, include, path)
+                print(f"\n--- Grep search results for pattern '{pattern}' ---\n")
+                for result in results:
+                    print(f"{result['file']}:{result['line_number']}: {result['line']}")
+                    
             elif op_type == "ls":
                 path = params.get("path")
-                
-                if path:
-                    result = await self.system_control.list_directory(path)
-                    print(f"\nDirectory listing for {path}:\n")
-                    for item in result["entries"]:
-                        item_type = "d" if item["is_dir"] else "f"
-                        print(f"{item_type} {item['name']}")
-                        
+                if not path:
+                    print("\nError: Missing required parameter 'path' for ls operation")
+                    return
+                    
+                result = await self.system_control.list_directory(path)
+                print(f"\n--- Directory listing for {path} ---\n")
+                for item in result["entries"]:
+                    item_type = "d" if item["is_dir"] else "f"
+                    print(f"{item_type} {item['name']}")
+                    
         except Exception as e:
             logger.error(f"Error processing file operation {op_type}: {e}")
-            print(f"\nError processing file operation: {str(e)}")
+            print(f"\n[ERROR] Error processing file operation: {str(e)}")
             
     async def _get_user_input(self) -> str:
-        """Get input from the user"""
+        """
+        Get input from the user with command history support.
+        Uses readline for history if available.
+        """
         self.agent_state['status'] = 'waiting_for_input'
-        prompt = " > "
+        prompt = "\n[User Input] > "  # Clearer prompt with newline
         print(prompt, end="", flush=True)
         
+        # Configure readline for history if it's available
+        try:
+            import readline
+            import os
+            
+            # Check if readline is already configured (avoid duplicate setup)
+            if not hasattr(self, '_readline_initialized'):
+                # Setup readline with history file
+                history_file = os.path.expanduser('~/.agent_history')
+                try:
+                    readline.read_history_file(history_file)
+                    readline.set_history_length(1000)
+                except FileNotFoundError:
+                    pass
+                
+                # Save history on exit
+                import atexit
+                atexit.register(readline.write_history_file, history_file)
+                
+                # Mark as initialized to avoid redoing setup
+                self._readline_initialized = True
+        except (ImportError, ModuleNotFoundError):
+            # Readline not available, continue without it
+            pass
+            
         # Get input with asyncio to allow for other tasks
         loop = asyncio.get_event_loop()
         user_input = await loop.run_in_executor(None, input)

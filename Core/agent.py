@@ -632,17 +632,37 @@ class AutonomousAgent:
                 # Get user input
                 user_input = await self._get_user_input()
                 
-                # Add the input to the conversation
-                self.local_conversation_history.append({
-                    "role": "user",
-                    "content": user_input
-                })
-                
-                # Generate new response with the input
-                new_response = await self._generate_response(None, user_input)
-                
-                # Process the new response
-                return await self._process_response(new_response)
+                # Modify the last assistant message to include the user input request
+                # instead of adding a new message, to maintain user-assistant alternation
+                if self.local_conversation_history and self.local_conversation_history[-1]["role"] == "assistant":
+                    last_response = self.local_conversation_history[-1]["content"]
+                    modified_response = last_response + f"\n\n[User input received: {user_input}]"
+                    self.local_conversation_history[-1]["content"] = modified_response
+                    
+                    # Now add the user input as a new message
+                    self.local_conversation_history.append({
+                        "role": "user",
+                        "content": user_input
+                    })
+                    
+                    # Generate new response with the input
+                    new_response = await self._generate_response(None, user_input)
+                    
+                    # Process the new response
+                    return await self._process_response(new_response)
+                else:
+                    # This shouldn't happen, but handle it just in case
+                    print("Warning: Conversation history is in an unexpected state")
+                    self.local_conversation_history.append({
+                        "role": "user",
+                        "content": user_input
+                    })
+                    
+                    # Generate new response with the input
+                    new_response = await self._generate_response(None, user_input)
+                    
+                    # Process the new response
+                    return await self._process_response(new_response)
             
             # Process commands
             for cmd_type, command in commands:

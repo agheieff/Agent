@@ -1,5 +1,4 @@
-
-from core.memory_manager import MemoryManager
+from Memory.Manager.memory_manager import MemoryManager
 
 class MemoryPreloader:
     """

@@ -9,15 +9,27 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
+# Standardize on Clients/LLM implementation
 from Clients.LLM import get_llm_client
+# Use Memory directory implementations with robust handling for both interfaces
 from Memory.Manager.memory_manager import MemoryManager
+from Memory.Cache.memory_cache import MemoryCache
+from Memory.Hierarchy.memory_hierarchy import MemoryHierarchy
+from Memory.Preloader.memory_preloader import MemoryPreloader
+# Standardize on Tools directory implementations
 from Tools.System.shell_adapter import ShellAdapter
 from Tools.File.file_operations import FileOperations
 from Tools.Search.search_tools import SearchTools
 from Tools.Package.package_manager import PackageManager
+# Local components that don't have duplicates
 from Core.task_manager import TaskManager
 from Core.session_manager import SessionManager
 from Output.display_manager import DisplayManager
+# Atom of Thoughts components
+from Core.aot.atom_decomposer import AtomDecomposer
+from Core.aot.dag_manager import DAGManager
+from Core.aot.atom_executor import AtomExecutor
+from Core.aot.atom_contractor import AtomContractor
 
 logger = logging.getLogger(__name__)
 
@@ -321,14 +333,18 @@ class AutonomousAgent:
         memory_manager: MemoryManager = None,
         session_manager: SessionManager = None,
         api_key: str = "",
-        model: str = "deepseek",
-        test_mode: bool = False
+        model: str = "deepseek-reasoner",
+        provider: str = "deepseek",
+        test_mode: bool = False,
+        config: Dict[str, Any] = None
     ):
         if not api_key:
             raise ValueError("API key required")
         self.api_key = api_key
         self.model_name = model
+        self.provider = provider.lower()
         self.test_mode = test_mode
+        self.config = config or {}
         self.last_assistant_response = None
         self.paused_for_human_context = False
         self.memory_manager = memory_manager or MemoryManager()
@@ -337,6 +353,20 @@ class AutonomousAgent:
         self.system_control = SystemControl(test_mode=test_mode)
         self.session_manager = session_manager or SessionManager(self.memory_path, self.memory_manager)
         self.task_manager = TaskManager(self.memory_path)
+        
+        # Initialize Atom of Thoughts (AoT) components if enabled
+        self.aot_enabled = self.config.get('aot', {}).get('enabled', False) or self.config.get('agent', {}).get('enable_aot', False)
+        self.aot_decomposer = None
+        self.aot_dag_manager = None
+        self.aot_executor = None
+        self.aot_contractor = None
+        
+        if self.aot_enabled:
+            logger.info("Initializing Atom of Thoughts (AoT) components")
+            self.aot_decomposer = AtomDecomposer(self.llm, self.config.get('aot', {}))
+            self.aot_dag_manager = DAGManager(self.config.get('aot', {}))
+            self.aot_executor = AtomExecutor(self.llm, self.config.get('aot', {}))
+            self.aot_contractor = AtomContractor(self.llm, self.config.get('aot', {}))
         
     def _setup_storage(self):
         """Set up storage directories for the agent"""
@@ -360,7 +390,8 @@ class AutonomousAgent:
         }
         if not (self.memory_path / "vector_index").exists():
             try:
-                system_prompt_path = Path("config/system_prompt.md")
+                # Use proper path to system prompt in Config/SystemPrompts
+                system_prompt_path = Path(__file__).parent.parent / "Config" / "SystemPrompts" / "system_prompt.md"
                 if system_prompt_path.exists():
                     self.memory_manager.save_document(
                         "system_guide",
@@ -379,7 +410,7 @@ class AutonomousAgent:
         self.reflections = []
         self.planned_steps = []
         self.executive_summary = ""
-        self.llm = get_llm_client(self.model_name, self.api_key)
+        self.llm = get_llm_client(self.provider, self.api_key)
         self.current_conversation_id = None
         self.last_session_summary = self._load_last_session()
         self.command_extractor = CommandExtractor()
@@ -410,14 +441,24 @@ class AutonomousAgent:
             
             logger.info(f"Starting agent run with conversation ID: {self.current_conversation_id}")
             
-            # Initialize conversation
-            self.local_conversation_history = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": initial_prompt}
-            ]
-            
-            # Process the initial prompt
-            response = await self._generate_response(system_prompt, initial_prompt)
+            # Special handling for DeepSeek models
+            if self.provider == "deepseek":
+                # For DeepSeek models, we combine system prompt and initial prompt
+                # and send it as the first user message with an empty system prompt
+                logger.info("Using DeepSeek-specific prompt handling (combining system+user prompts)")
+                combined_prompt = f"{system_prompt}\n\n{initial_prompt}" if system_prompt else initial_prompt
+                self.local_conversation_history = [
+                    {"role": "system", "content": ""},
+                    {"role": "user", "content": combined_prompt}
+                ]
+                response = await self._generate_response("", combined_prompt)
+            else:
+                # For other models like Anthropic, use normal system prompt handling
+                self.local_conversation_history = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": initial_prompt}
+                ]
+                response = await self._generate_response(system_prompt, initial_prompt)
             should_continue = True
             
             # Main conversation loop
@@ -468,7 +509,7 @@ class AutonomousAgent:
             raise
             
     async def _generate_response(self, system_prompt: Optional[str], user_input: str) -> str:
-        """Generate a response from the LLM"""
+        """Generate a response from the LLM using Atom of Thoughts if enabled"""
         try:
             # Update conversation history 
             if system_prompt is not None:
@@ -484,8 +525,22 @@ class AutonomousAgent:
                     "content": user_input
                 })
             
-            # Generate response from LLM
-            response = await self.llm.generate_response(self.local_conversation_history)
+            # Use Atom of Thoughts if enabled and this isn't the first turn with system prompt
+            # Also check if the user has explicitly requested direct response (no AoT)
+            should_use_aot = (
+                self.aot_enabled and 
+                self.aot_decomposer is not None and 
+                system_prompt is None and
+                not any(marker in user_input.lower() for marker in ['direct:', 'no_aot:'])
+            )
+            
+            if should_use_aot:
+                # Generate response using Atom of Thoughts
+                logger.info("Using Atom of Thoughts for response generation")
+                response = await self._generate_with_aot(user_input)
+            else:
+                # Generate standard response
+                response = await self.llm.generate_response(self.local_conversation_history)
             
             # Save response to history
             self.local_conversation_history.append({
@@ -512,6 +567,50 @@ class AutonomousAgent:
                 "content": error_message
             })
             return error_message
+            
+    async def _generate_with_aot(self, user_input: str) -> str:
+        """
+        Generate a response using the Atom of Thoughts (AoT) approach.
+        
+        This implements the AoT process:
+        1. Decompose the problem into atomic components
+        2. Create a DAG representing dependencies
+        3. Execute atoms according to the DAG
+        4. Contract results into a final response
+        """
+        start_time = time.time()
+        logger.info("Starting AoT response generation")
+        
+        try:
+            # 1. Decompose the problem into atoms
+            conversation_history = self.local_conversation_history[:-1]  # Exclude current user input
+            atoms = await self.aot_decomposer.decompose(user_input, conversation_history)
+            logger.info(f"Problem decomposed into {len(atoms)} atoms")
+            
+            # 2. Create the DAG structure
+            dag = self.aot_dag_manager.create_dag(atoms)
+            logger.info(f"Created DAG with {len(dag.execution_levels)} execution levels")
+            
+            # 3. Execute the atoms according to the DAG dependencies
+            atom_results = await self.aot_executor.execute_atoms(dag, conversation_history)
+            completed_atoms = sum(1 for r in atom_results.values() if r.status == AtomStatus.COMPLETED)
+            logger.info(f"Executed {len(atom_results)} atoms, {completed_atoms} completed successfully")
+            
+            # 4. Contract the atom results into a coherent response
+            response = await self.aot_contractor.contract_atoms(atom_results, user_input, conversation_history)
+            
+            # Record timing information
+            elapsed_time = time.time() - start_time
+            logger.info(f"AoT response generation completed in {elapsed_time:.2f}s")
+            
+            # Return the final response
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error in AoT response generation: {e}")
+            # Fall back to standard response generation
+            logger.info("Falling back to standard response generation")
+            return await self.llm.generate_response(self.local_conversation_history)
             
     async def _process_response(self, response: str) -> bool:
         """Process commands and handle user input requests in the response"""
@@ -597,7 +696,22 @@ class AutonomousAgent:
                         "timestamp": time.time()
                     }
                 )
-                self.memory_manager.memory_operations += 1
+                # Update memory operations counter using a robust approach
+                try:
+                    # First try using the memory_stats dictionary (Memory/Manager implementation)
+                    if hasattr(self.memory_manager, 'memory_stats') and isinstance(self.memory_manager.memory_stats, dict):
+                        self.memory_manager.memory_stats['memory_operations'] = self.memory_manager.memory_stats.get('memory_operations', 0) + 1
+                    # Fall back to direct attribute (Core implementation)
+                    elif hasattr(self.memory_manager, 'memory_operations'):
+                        self.memory_manager.memory_operations += 1
+                    # If neither exists, add the attribute
+                    else:
+                        self.memory_manager.memory_operations = 1
+                    
+                    # Also update our local tracking
+                    self.agent_state['memory_operations'] += 1
+                except Exception as e:
+                    logger.error(f"Error updating memory operations: {e}")
             
             return True
         

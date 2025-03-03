@@ -85,6 +85,31 @@ agent:
   
   # Resource monitoring interval in seconds
   resource_check_interval: 300
+  
+  # Whether to enable Atom of Thoughts (AoT) reasoning
+  enable_aot: false
+
+# Atom of Thoughts configuration
+aot:
+  enabled: false
+  
+  # Decomposition settings
+  decomposition:
+    max_atoms: 8  # Maximum number of atoms to decompose a problem into
+    temperature: 0.7  # Temperature for decomposition
+    max_depth: 3  # Maximum atom nesting depth
+    atom_types: ["research", "analysis", "synthesis", "verification", "planning"]
+  
+  # Execution settings
+  execution:
+    max_concurrent: 3  # Maximum number of atoms to execute concurrently
+    timeout: 60  # Timeout in seconds for atom execution
+    retries: 1  # Number of retries for failed atom executions
+  
+  # Contraction settings
+  contraction:
+    temperature: 0.3  # Temperature for contraction
+    include_atom_content: true  # Whether to include atom content in the final response
 
 # Security settings
 security:

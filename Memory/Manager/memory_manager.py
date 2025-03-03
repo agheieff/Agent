@@ -26,6 +26,17 @@ class MemoryManager:
         "important", "task", "mind_map", "code", "project"
     ]
     
+    # Add property for compatibility with Core implementation
+    @property
+    def memory_operations(self) -> int:
+        """Return the number of memory operations performed for compatibility with Core implementation"""
+        return self.memory_stats.get('memory_operations', 0)
+    
+    @memory_operations.setter
+    def memory_operations(self, value: int):
+        """Set the number of memory operations performed for compatibility with Core implementation"""
+        self.memory_stats['memory_operations'] = value
+    
     def __init__(self, base_path: Path = None):
         if base_path is None:
             base_path = self._get_configured_path()
@@ -75,8 +86,16 @@ class MemoryManager:
             'backup_interval': 3600
         }
         self.mind_maps = {}
+        
+        # Initialize global memory structures
+        self.global_memory = {}
+        self.project_memories = {}
+        self.zettelkasten_notes = {}
+        
+        # Load memory components
         self._load_mind_maps()
         self._load_command_history()
+        self._load_global_memory()
         self._check_for_recovery()
         self._cleanup_temp_files()
         
@@ -94,9 +113,21 @@ class MemoryManager:
                             return Path(memory_path)
                 except:
                     pass
+        
+        # Check if Config package is available and use its path resolution
+        try:
+            from Config import get_config
+            config = get_config()
+            memory_path = config.get_value('paths.memory_dir')
+            if memory_path:
+                return Path(memory_path)
+        except (ImportError, AttributeError):
+            logger.debug("Config package not available, falling back to environment variables")
+            
         memory_dir = os.environ.get("AGENT_MEMORY_DIR")
         if memory_dir:
             return Path(memory_dir)
+        
         agent_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         for path_option in [agent_dir.parent / "AgentMemory", Path.cwd() / "memory", Path.cwd() / "AgentMemory"]:
             if path_option.exists() or path_option.parent.exists():
@@ -105,21 +136,39 @@ class MemoryManager:
         
     def _save_configured_path(self, path: Path):
         try:
-            agent_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            config_path = agent_dir / "memory.config"
-            with open(config_path, 'w') as f:
-                f.write(str(path))
+            # Try to use Config package first if available
+            try:
+                from Config import get_config
+                config = get_config()
+                config.set_value('paths.memory_dir', str(path))
+                config.save_config()
+                logger.debug(f"Saved memory path to central configuration: {path}")
+            except (ImportError, AttributeError):
+                # Fall back to legacy config file
+                agent_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                config_path = agent_dir / "memory.config"
+                with open(config_path, 'w') as f:
+                    f.write(str(path))
+                logger.debug(f"Saved memory path to legacy config file: {path}")
         except Exception as e:
             logger.error(f"Error saving memory configuration: {e}")
+            
+        # Create standard directory structure
         for d in ['documents','conversations','vector_index','temporal','commands','backups',
-                  'tasks','reflections','notes','working_memory','archive','mind_maps']:
+                  'tasks','reflections','notes','working_memory','archive','mind_maps','projects',
+                  'zettelkasten', 'global']:
             (self.base_path / d).mkdir(exist_ok=True)
+            
+        # Initialize global agent memory file if it doesn't exist
+        self._initialize_global_memory()
     
     def save_document(self, title: str, content: str,
                       tags: List[str] = None,
                       metadata: Dict = None,
                       category_id: Optional[str] = None,
-                      permanent: bool = False) -> str:
+                      permanent: bool = False,
+                      project: Optional[str] = None,
+                      zettel_id: Optional[str] = None) -> str:
         try:
             if len(content) > self.memory_limits['max_document_size']:
                 original_size = len(content)
@@ -129,15 +178,34 @@ class MemoryManager:
                     metadata = {}
                 metadata['truncated'] = True
                 metadata['original_size'] = original_size
-            if permanent:
-                if metadata is None:
-                    metadata = {}
-                metadata['permanent'] = True
             if metadata is None:
                 metadata = {}
+                
+            # Handle permanent flag
+            if permanent:
+                metadata['permanent'] = True
+                
+            # Handle project association
+            if project:
+                metadata['project'] = project
+                # Also add to tags for searchability
+                if tags is None:
+                    tags = []
+                if f"project:{project}" not in tags:
+                    tags.append(f"project:{project}")
+                    
+            # Handle zettelkasten note
+            if zettel_id:
+                metadata['zettel_id'] = zettel_id
+                if tags is None:
+                    tags = []
+                if "zettelkasten" not in tags:
+                    tags.append("zettelkasten")
+                
             timestamp = time.time()
             metadata['timestamp'] = timestamp
             metadata['created_at'] = datetime.now().isoformat()
+            
             node_id = self.graph.add_node(
                 title=title,
                 content=content,
@@ -146,18 +214,42 @@ class MemoryManager:
                 metadata=metadata,
                 category_id=category_id
             )
-            doc_path = self.base_path / "documents" / f"{node_id}.json"
+            # Determine the appropriate directory based on document type
+            if zettel_id:
+                base_dir = self.base_path / "zettelkasten"
+                file_name = f"{zettel_id}.json"
+            elif project:
+                # Create project-specific directory if it doesn't exist
+                base_dir = self.base_path / "projects" / project
+                base_dir.mkdir(exist_ok=True, parents=True)
+                file_name = f"{node_id}.json"
+            else:
+                # Default document location
+                base_dir = self.base_path / "documents"
+                file_name = f"{node_id}.json"
+                
+            doc_path = base_dir / file_name
+            doc_data = {
+                'id': node_id,
+                'title': title,
+                'content': content,
+                'tags': tags or [],
+                'metadata': metadata,
+                'category_id': category_id,
+                'type': 'document',
+                'created_at': metadata['created_at']
+            }
+            
+            # Save the document to the appropriate location
             with open(doc_path, 'w') as f:
-                json.dump({
-                    'id': node_id,
-                    'title': title,
-                    'content': content,
-                    'tags': tags or [],
-                    'metadata': metadata,
-                    'category_id': category_id,
-                    'type': 'document',
-                    'created_at': metadata['created_at']
-                }, f, indent=2)
+                json.dump(doc_data, f, indent=2)
+                
+            # Also create a standard link in the documents folder for consistency
+            if base_dir != self.base_path / "documents":
+                with open(self.base_path / "documents" / f"{node_id}.json", 'w') as f:
+                    json.dump(doc_data, f, indent=2)
+                    
+            # Add to vector index for searching
             self.vector_index.add_text(node_id, f"{title}\n{content}")
             self.memory_stats['nodes_added'] += 1
             self.memory_stats['documents_saved'] += 1
@@ -427,6 +519,204 @@ class MemoryManager:
             logger.error(f"Error loading command history: {e}")
             self.command_history = []
             
+    def _initialize_global_memory(self):
+        """Initialize the global memory file if it doesn't exist"""
+        global_memory_file = self.base_path / "global" / "AGENT.md"
+        
+        if not global_memory_file.exists():
+            template = """# Agent Memory System
+
+## General Information
+- Initialized: {date}
+- Memory Location: {memory_path}
+
+## Command Patterns
+Common command patterns will be stored here for future reference.
+
+## Code Conventions
+Observed code conventions and patterns will be documented here.
+
+## Project Structure
+Information about how projects are organized.
+
+## Refactoring Notes
+Notes on ongoing refactoring efforts and design decisions.
+"""
+            try:
+                with open(global_memory_file, 'w') as f:
+                    f.write(template.format(
+                        date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        memory_path=str(self.base_path)
+                    ))
+                logger.info(f"Initialized global memory file at {global_memory_file}")
+                
+                # Also create a symlink in the working directory for convenience
+                cwd_claude_md = Path.cwd() / "CLAUDE.md"
+                if cwd_claude_md.exists():
+                    # If CLAUDE.md already exists, copy its contents to our global memory
+                    try:
+                        with open(cwd_claude_md, 'r') as src:
+                            existing_content = src.read()
+                        
+                        with open(global_memory_file, 'w') as dest:
+                            dest.write(existing_content)
+                        logger.info(f"Copied existing CLAUDE.md content to global memory")
+                    except Exception as e:
+                        logger.error(f"Error copying CLAUDE.md content: {e}")
+            except Exception as e:
+                logger.error(f"Error initializing global memory file: {e}")
+    
+    def _load_global_memory(self):
+        """Load the global memory file and any project-specific memory files"""
+        try:
+            # Load global memory
+            global_memory_file = self.base_path / "global" / "AGENT.md"
+            if global_memory_file.exists():
+                with open(global_memory_file, 'r') as f:
+                    self.global_memory['content'] = f.read()
+                    self.global_memory['last_loaded'] = time.time()
+                    logger.debug(f"Loaded global memory from {global_memory_file}")
+            
+            # Load project memories
+            projects_dir = self.base_path / "projects"
+            if projects_dir.exists():
+                for project_dir in projects_dir.iterdir():
+                    if project_dir.is_dir():
+                        project_memory_file = project_dir / "PROJECT.md"
+                        if project_memory_file.exists():
+                            with open(project_memory_file, 'r') as f:
+                                self.project_memories[project_dir.name] = {
+                                    'content': f.read(),
+                                    'last_loaded': time.time()
+                                }
+                                logger.debug(f"Loaded project memory for {project_dir.name}")
+            
+            # Load zettelkasten notes
+            zettelkasten_dir = self.base_path / "zettelkasten"
+            if zettelkasten_dir.exists():
+                for note_file in zettelkasten_dir.glob("*.md"):
+                    with open(note_file, 'r') as f:
+                        self.zettelkasten_notes[note_file.stem] = {
+                            'content': f.read(),
+                            'last_loaded': time.time()
+                        }
+                        logger.debug(f"Loaded zettelkasten note {note_file.stem}")
+        except Exception as e:
+            logger.error(f"Error loading global memory: {e}")
+    
+    def save_global_memory(self, content: str):
+        """Save the global memory file"""
+        try:
+            global_memory_file = self.base_path / "global" / "AGENT.md"
+            with open(global_memory_file, 'w') as f:
+                f.write(content)
+            
+            # Also update the CLAUDE.md in the working directory
+            cwd_claude_md = Path.cwd() / "CLAUDE.md"
+            with open(cwd_claude_md, 'w') as f:
+                f.write(content)
+                
+            self.global_memory['content'] = content
+            self.global_memory['last_loaded'] = time.time()
+            logger.info(f"Saved global memory to {global_memory_file} and CLAUDE.md")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving global memory: {e}")
+            return False
+    
+    def get_global_memory(self) -> str:
+        """Get the global memory content"""
+        if 'content' not in self.global_memory:
+            self._load_global_memory()
+        return self.global_memory.get('content', '')
+    
+    def save_project_memory(self, project_name: str, content: str):
+        """Save a project-specific memory file"""
+        try:
+            project_dir = self.base_path / "projects" / project_name
+            project_dir.mkdir(exist_ok=True, parents=True)
+            
+            project_memory_file = project_dir / "PROJECT.md"
+            with open(project_memory_file, 'w') as f:
+                f.write(content)
+                
+            self.project_memories[project_name] = {
+                'content': content,
+                'last_loaded': time.time()
+            }
+            logger.info(f"Saved project memory for {project_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving project memory: {e}")
+            return False
+    
+    def get_project_memory(self, project_name: str) -> str:
+        """Get a project-specific memory content"""
+        if project_name not in self.project_memories:
+            project_dir = self.base_path / "projects" / project_name
+            project_memory_file = project_dir / "PROJECT.md"
+            if project_memory_file.exists():
+                try:
+                    with open(project_memory_file, 'r') as f:
+                        content = f.read()
+                        self.project_memories[project_name] = {
+                            'content': content,
+                            'last_loaded': time.time()
+                        }
+                        return content
+                except Exception as e:
+                    logger.error(f"Error loading project memory for {project_name}: {e}")
+                    return ""
+            else:
+                return ""
+        return self.project_memories[project_name].get('content', '')
+            
+    def get_documents_by_tag(self, tag: str) -> List[dict]:
+        """Get all documents with a specific tag"""
+        return self.search_memory("", limit=100, tags=[tag])
+        
+    def get_execution_context(self) -> str:
+        """
+        Retrieve relevant execution context from memory for guiding the LLM.
+        This includes global agent context and any project-specific information.
+        """
+        context_parts = []
+        
+        # Add global memory if it exists
+        global_memory = self.get_global_memory()
+        if global_memory:
+            context_parts.append("# AGENT GLOBAL CONTEXT\n")
+            context_parts.append(global_memory)
+            context_parts.append("\n\n")
+        
+        # Add active project context if it exists
+        active_projects = self.get_documents_by_tag("active_project")
+        if active_projects:
+            for project_doc in active_projects[:1]:  # Just get the first active project
+                project_name = project_doc.get('metadata', {}).get('project')
+                if project_name:
+                    project_memory = self.get_project_memory(project_name)
+                    if project_memory:
+                        context_parts.append(f"# PROJECT CONTEXT: {project_name}\n")
+                        context_parts.append(project_memory)
+                        context_parts.append("\n\n")
+                
+        # Add recent command history
+        if self.command_history:
+            recent_commands = self.command_history[-5:]
+            context_parts.append("# RECENT COMMAND HISTORY\n")
+            for cmd in recent_commands:
+                command_str = cmd.get('command', '')
+                if len(command_str) > 50:
+                    command_str = command_str[:47] + "..."
+                context_parts.append(f"- {cmd.get('shell', 'command')}: {command_str}\n")
+            context_parts.append("\n")
+            
+        if not context_parts:
+            return "The agent is executing in a command-line environment."
+            
+        return "\n".join(context_parts)
+        
     def search_memory(self, query: str, limit: int = 10, category_id: Optional[str] = None,
                     tags: List[str] = None, types: List[str] = None, recency_boost: bool = True) -> List[dict]:
         try:
@@ -859,6 +1149,118 @@ class MemoryManager:
                 summary_parts.append(f"...and {len(mm['links']) - link_count} more relationships")
         return "\n".join(summary_parts)
         
+    def add_to_knowledge_base(self, title: str, content: str, source: str = None, 
+                          tags: List[str] = None, permanent: bool = True) -> str:
+        """
+        Add information to the agent's knowledge base.
+        
+        Args:
+            title: Title of the knowledge item
+            content: Content of the knowledge item
+            source: Source of the information
+            tags: List of tags to categorize the knowledge
+            permanent: Whether this knowledge should be preserved in long-term memory
+            
+        Returns:
+            ID of the created memory node
+        """
+        if not tags:
+            tags = []
+        
+        # Add knowledge_base tag if not present
+        if "knowledge_base" not in tags:
+            tags.append("knowledge_base")
+            
+        metadata = {
+            "source": source,
+            "added_at": time.time(),
+            "conversation_turn": self.conversation_turn_count,
+            "permanent": permanent
+        }
+        
+        node_id = self.save_document(
+            title=title,
+            content=content,
+            tags=tags,
+            metadata=metadata,
+            permanent=permanent
+        )
+        
+        logger.info(f"Added to knowledge base: {title} (ID: {node_id})")
+        self.add_agent_note(
+            f"Added to knowledge base: {title}",
+            note_type="knowledge_base",
+            importance="normal",
+            tags=["knowledge_base"]
+        )
+        
+        return node_id
+        
+    def prioritize_memory_items(self, query: str, context: str, limit: int = 10) -> List[Dict]:
+        """
+        Prioritize memory items based on relevance to the current query and context.
+        
+        Args:
+            query: User query or command
+            context: Current conversation context
+            limit: Maximum number of items to return
+            
+        Returns:
+            List of prioritized memory items
+        """
+        try:
+            # First search for results directly related to the query
+            direct_results = self.search_memory(query, limit=limit, recency_boost=True)
+            
+            # Then search for results related to the broader context
+            context_results = []
+            if context and len(context) > 10:
+                context_results = self.search_memory(context, limit=limit*2, recency_boost=True)
+                
+            # Deduplicate results
+            seen_ids = set(item["id"] for item in direct_results)
+            unique_context_results = []
+            
+            for item in context_results:
+                if item["id"] not in seen_ids:
+                    unique_context_results.append(item)
+                    seen_ids.add(item["id"])
+            
+            # Prioritize results:
+            # 1. Direct matches to query with "important" tag
+            # 2. Direct matches to query
+            # 3. Context matches with "important" tag
+            # 4. Context matches
+            important_direct = []
+            normal_direct = []
+            important_context = []
+            normal_context = []
+            
+            for item in direct_results:
+                if "important" in item.get("tags", []):
+                    important_direct.append(item)
+                else:
+                    normal_direct.append(item)
+                    
+            for item in unique_context_results:
+                if "important" in item.get("tags", []):
+                    important_context.append(item)
+                else:
+                    normal_context.append(item)
+            
+            # Combine results in priority order
+            prioritized = []
+            prioritized.extend(important_direct)
+            prioritized.extend(normal_direct)
+            prioritized.extend(important_context)
+            prioritized.extend(normal_context)
+            
+            return prioritized[:limit]
+            
+        except Exception as e:
+            logger.error(f"Error prioritizing memory items: {e}")
+            return self.search_memory(query, limit=limit)  # Fall back to basic search
+            
     def get_session_persistent_memory(self) -> Dict[str, Any]:
         persistent_data = {
             "agent_notes": [],

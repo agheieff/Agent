@@ -1,10 +1,3 @@
-"""
-Configuration module for the Arcadia Agent.
-
-This module provides a simple interface for accessing and managing agent configuration settings,
-with support for configuration via files, environment variables, and code.
-"""
-
 import os
 import yaml
 import logging

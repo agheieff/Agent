@@ -1,41 +1,55 @@
+
 """
-Tool for creating new files with content.
+Tool for creating new files with the specified content (does NOT overwrite existing files).
+Now includes examples for multiline usage.
 """
 
 import os
 import logging
 from typing import Dict, Any, Optional
 
-
 TOOL_NAME = "write"
 TOOL_DESCRIPTION = "Create a new file with the specified content"
-TOOL_HELP = """
+TOOL_HELP = r"""
 Create a new file with the specified content. Will not overwrite existing files.
 
 Usage:
   /write <file_path> content="file content"
   /write file_path=<path> content="file content"
-  /write file_path=<path> content="""multiline
+  /write file_path=<path> content=""""""multiline
   content goes
-  here"""
+  here""""""
 
 Arguments:
   file_path     Path to the new file to create (required)
   content       Content to write to the file (required)
   mkdir         Whether to create parent directories if they don't exist (default: True)
+
+Notes:
+  - This tool only creates new files and will not overwrite existing files
+  - To overwrite existing files, use the replace tool instead
+  - Parent directories will be created by default if they don't exist
+  - Multiline content can be specified using triple quotes, for example:
+    /write file_path="/tmp/script.sh" content=""""""#!/bin/bash
+    echo "Hello"
+    echo "Multiline script!"
+    """"""
 """
 
 TOOL_EXAMPLES = [
-    ("/write /tmp/hello.txt content=\"Hello, world!\"", "Create a file with a simple message"),
-    ("/write file_path=\"data/config.json\" content=\"{\\\"key\\\": \\\"value\\\"}\"", "Create a JSON configuration file"),
-    ("/write file_path=\"script.py\" content=\"\"\"import os\nprint(os.getcwd())\n\"\"\"", "Create a Python script with multiline content")
+    ("/write /tmp/hello.txt content=\"Hello, world!\"",
+     "Create a file with a simple message"),
+    ("/write file_path=\"data/config.json\" content=\"{\\\"key\\\": \\\"value\\\"}\"",
+     "Create a JSON configuration file"),
+    ("/write file_path=\"script.py\" content=\"\"\"import os\nprint(os.getcwd())\n\"\"\"",
+     "Create a Python script with multiline content"),
+    ("/write file_path=\"/tmp/multiline.txt\" content=\"\"\"Line 1\nLine 2\nLine 3\n\"\"\"",
+     "Multiline text file creation"),
 ]
 
 TOOL_NOTES = """
-- This tool only creates new files and will not overwrite existing files
-- To overwrite existing files, use the replace tool instead
-- Parent directories will be created by default if they don't exist
-- Multiline content can be specified using triple quotes: content=\"\"\"multiple lines\"\"\"
+- If the file already exists, this tool will return an error
+- Use triple quotes to pass multiline content
 """
 
 logger = logging.getLogger(__name__)
@@ -58,24 +72,24 @@ def _get_help() -> Dict[str, Any]:
         "is_help": True
     }
 
-async def tool_write(file_path: str = None, content: str = None, mkdir: bool = True, 
+async def tool_write(file_path: str = None, content: str = None, mkdir: bool = True,
                     help: bool = False, value: str = None, **kwargs) -> Dict[str, Any]:
-
+    """
+    Create a new file with `content`. Does not overwrite existing files.
+    If mkdir=True, will create missing parent directories.
+    """
     if help:
         return _get_help()
 
-
+    # Positional usage
     if file_path is None and value is not None:
         file_path = value
 
-
     if file_path is None:
-
         for k in kwargs:
             if k.isdigit():
                 file_path = kwargs[k]
                 break
-
 
     if file_path is None:
         return {
@@ -96,7 +110,7 @@ async def tool_write(file_path: str = None, content: str = None, mkdir: bool = T
     try:
         abs_path = _ensure_absolute_path(file_path)
 
-
+        # Check if file already exists
         if os.path.exists(abs_path):
             return {
                 "output": "",
@@ -104,7 +118,6 @@ async def tool_write(file_path: str = None, content: str = None, mkdir: bool = T
                 "success": False,
                 "exit_code": 1
             }
-
 
         parent_dir = os.path.dirname(abs_path)
         if not os.path.exists(parent_dir):
@@ -134,7 +147,6 @@ async def tool_write(file_path: str = None, content: str = None, mkdir: bool = T
                     "exit_code": 1
                 }
 
-
         try:
             with open(abs_path, 'w', encoding='utf-8') as f:
                 f.write(content)
@@ -153,9 +165,8 @@ async def tool_write(file_path: str = None, content: str = None, mkdir: bool = T
                 "exit_code": 1
             }
 
-
         file_size = os.path.getsize(abs_path)
-        line_count = content.count('\n') + 1 if content else 0
+        line_count = content.count('\n') + 1 if content else 1
 
         return {
             "output": f"Created file: {abs_path}\nSize: {file_size} bytes\nLines: {line_count}",

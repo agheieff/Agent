@@ -1,9 +1,9 @@
 """
-Tool for editing file contents.
+Tool for editing file contents (replace a unique occurrence of `old` with `new`).
+Now includes examples for multiline usage.
 """
 import os
 from typing import Dict, Any, Set, Optional
-
 
 TOOL_NAME = "edit"
 TOOL_DESCRIPTION = "Edit a file by replacing a specific string with a new one"
@@ -20,29 +20,31 @@ Arguments:
   new           New text to replace with (required)
 
 Notes:
-  - The old_string must match exactly, including all whitespace
-  - The old_string must uniquely identify a single location in the file
-  - If old_string is empty, the new_string will replace the entire file content
-  - For creating a new file, provide a new file path and empty old_string
+  - The `old` string must match exactly, including all whitespace
+  - The `old` string must uniquely identify a single location in the file
+  - If `old` is empty and file does not exist, a new file is created with content = `new`
+  - If file does not exist but `old` is not empty, it will raise an error (since there's nowhere to replace)
+  - For multiline replacements, use triple quotes:
+    /edit file_path=/tmp/code.py old=\"\"\"class Foo:\"\"\" new=\"\"\"class Foo:\n    def bar(self):\n        pass\n\"\"\"
 
 Examples:
   /edit /path/to/file.txt old="Hello World" new="Hello Universe"
   /edit file_path="/etc/hosts" old="127.0.0.1 localhost" new="127.0.0.1 localhost myhost"
+  /edit file_path="/some_file.py" old=\"\"\"def hello():\n    pass\"\"\" new=\"\"\"def hello():\n    print('Hi!')\"\"\"
 """
 
 TOOL_EXAMPLES = [
-    ("/edit /path/to/file.py old=\"def hello():\" new=\"def hello_world():\"", 
+    ("/edit /path/to/file.py old=\"def hello():\" new=\"def hello_world():\"",
      "Rename a function in a Python file"),
-    ("/edit /path/to/config.json old=\"\\\"port\\\": 8080\" new=\"\\\"port\\\": 9090\"", 
+    ("/edit /path/to/config.json old=\"\\\"port\\\": 8080\" new=\"\\\"port\\\": 9090\"",
      "Change a port number in a JSON configuration file"),
-    ("/edit file_path=\"/new_file.txt\" old=\"\" new=\"This is a new file\"", 
-     "Create a new file with initial content")
+    ("/edit file_path=\"/new_file.txt\" old=\"\" new=\"This is a new file\"",
+     "Create a new file with initial content"),
+    ("/edit file_path=\"/tmp/code.py\" old=\"\"\"def foo():\n    pass\"\"\" new=\"\"\"def foo():\n    print('Updated!')\"\"\"",
+     "Multiline replacement in code file"),
 ]
 
-
 _viewed_files: Set[str] = set()
-
-
 _pending_confirmations = {}
 _next_confirmation_id = 1
 
@@ -63,29 +65,30 @@ def _get_help() -> Dict[str, Any]:
         "exit_code": 0
     }
 
-def tool_edit(file_path: str = None, old: str = None, new: str = None, 
-             old_string: str = None, new_string: str = None, 
-             help: bool = False, **kwargs) -> Dict[str, Any]:
+def tool_edit(file_path: str = None, old: str = None, new: str = None,
+              old_string: str = None, new_string: str = None,
+              help: bool = False, **kwargs) -> Dict[str, Any]:
+    """
+    Perform the replacement of `old` with `new` in the specified file (must be unique).
+    If the file doesn't exist and `old` is empty, create a new file with content = `new`.
+    """
     global _next_confirmation_id
-
 
     if help:
         return _get_help()
 
-
+    # Accept positional usage
     if file_path is None:
-
         for k in kwargs:
+            # If there's a numeric key "0", we treat that as the file_path
             if k.isdigit() and int(k) == 0:
                 file_path = kwargs[k]
                 break
-
 
     if old is None and old_string is not None:
         old = old_string
     if new is None and new_string is not None:
         new = new_string
-
 
     if file_path is None:
         return {
@@ -114,34 +117,30 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
     try:
         abs_path = _ensure_absolute_path(file_path)
 
+        # If the file does not exist, but old is not empty => error
+        if not os.path.exists(abs_path) and old != "":
+            return {
+                "output": "",
+                "error": f"File not found: {abs_path}",
+                "success": False,
+                "exit_code": 1
+            }
+        elif not os.path.exists(abs_path) and old == "":
+            # Create new file with content = new
+            parent_dir = os.path.dirname(abs_path)
+            if parent_dir and not os.path.exists(parent_dir):
+                os.makedirs(parent_dir, exist_ok=True)
+            with open(abs_path, 'w', encoding='utf-8') as f:
+                f.write(new)
+            _viewed_files.add(abs_path)
+            return {
+                "output": f"Created new file: {abs_path}",
+                "error": "",
+                "success": True,
+                "exit_code": 0
+            }
 
-        if not os.path.exists(abs_path):
-
-            if old:
-                return {
-                    "output": "",
-                    "error": f"File not found: {abs_path}",
-                    "success": False,
-                    "exit_code": 1
-                }
-            else:
-
-                parent_dir = os.path.dirname(abs_path)
-                if parent_dir and not os.path.exists(parent_dir):
-                    os.makedirs(parent_dir, exist_ok=True)
-
-                with open(abs_path, 'w', encoding='utf-8') as f:
-                    f.write(new)
-
-                _viewed_files.add(abs_path)
-                return {
-                    "output": f"Created new file: {abs_path}",
-                    "error": "",
-                    "success": True,
-                    "exit_code": 0
-                }
-
-
+        # If file exists but wasn't "viewed", require confirmation
         if abs_path not in _viewed_files:
             confirmation_id = _next_confirmation_id
             _next_confirmation_id += 1
@@ -162,7 +161,7 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
                 "confirmation_id": confirmation_id
             }
 
-
+        # Perform the actual replacement
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
 
@@ -174,29 +173,23 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
                 "exit_code": 1
             }
 
+        occurrences = content.count(old)
+        if occurrences > 1:
+            return {
+                "output": "",
+                "error": f"The target string appears {occurrences} times in {abs_path}. It must uniquely identify a single instance.",
+                "success": False,
+                "exit_code": 1
+            }
+        elif occurrences == 0:
+            return {
+                "output": "",
+                "error": f"Target string not found in {abs_path}",
+                "success": False,
+                "exit_code": 1
+            }
 
-        if old:
-            occurrences = content.count(old)
-            if occurrences > 1:
-                return {
-                    "output": "",
-                    "error": f"The target string appears {occurrences} times in {abs_path}. It must uniquely identify a single instance.",
-                    "success": False,
-                    "exit_code": 1
-                }
-            elif occurrences == 0:
-                return {
-                    "output": "",
-                    "error": f"Target string not found in {abs_path}",
-                    "success": False,
-                    "exit_code": 1
-                }
-
-
-            new_content = content.replace(old, new, 1)
-        else:
-
-            new_content = new
+        new_content = content.replace(old, new, 1)
 
         with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(new_content)

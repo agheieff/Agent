@@ -77,106 +77,15 @@ def generate_reasoning_protocol() -> str:
 
 2. **Planning** - Create explicit plans before execution, step by step.
 
-3. **Task Planning** - Define tasks for long-term planning:
-```xml
-<task>
-Create authentication system for the web app
-The authentication system should handle user registration, login, and password reset.
-Key requirements: secure password storage, email verification, session management.
-</task>
-```
-
-5. **Subtask Definition** - Break down tasks into manageable components:
-```xml
-<subtask>
-Set up database schema for users
-Create tables for users, sessions, password reset tokens with appropriate fields and relationships.
-</subtask>
-```
-
-6. **Summary** - Conclude with a summary:
-```xml
-<summary>
-- What was accomplished
-- Current state of the system
-- Any remaining work or follow-ups
-</summary>
-```
+Expand later
 """
 
 
 def generate_command_execution_guide() -> str:
     return """
 ## Command Execution
-Use these XML tags for all system interactions:
 
-```xml
-<bash>
-echo "Hello world"
-ls -la /path/to/directory
-</bash>
-```
-
-```xml
-<python>
-import os
-print("Current directory:", os.getcwd())
-</python>
-```
-
-When you need to request information from the user, use:
-
-```xml
-<user_input>
-What is the name of the file you want to modify?
-</user_input>
-```
-
-## File Operations
-
-For file operations, use these structured formats:
-
-```xml
-<view>
-file_path: /path/to/file.txt
-</view>
-```
-
-```xml
-<edit>
-file_path: /path/to/file.txt
-old_string: text to replace
-new_string: new text
-</edit>
-```
-
-```xml
-<replace>
-file_path: /path/to/file.txt
-content: entire new content
-</replace>
-```
-
-```xml
-<glob>
-pattern: **/*.py
-path: /path/to/directory
-</glob>
-```
-
-```xml
-<grep>
-pattern: search_pattern
-include: *.py
-path: /path/to/directory
-</grep>
-```
-
-```xml
-<ls>
-path: /path/to/directory
-</ls>
-```
+TODO add later
 
 IMPORTANT: Each parameter MUST be on its own line with no parameters on the same line as opening or closing tags.
 """

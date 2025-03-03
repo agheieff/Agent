@@ -12,7 +12,7 @@ from datetime import datetime
 import yaml
 from typing import Dict, List
 
-from Config import get_config, ConfigManager
+from Config import config, Config
 from Core.agent import AutonomousAgent
 
 INITIAL_PROMPT_HISTORY_FILE = '~/.agent_prompt_history'

@@ -1,14 +1,10 @@
 """
-Arcadia Agent Configuration Package.
+Configuration package for handling agent settings.
 
-This package manages configuration settings for the Arcadia Agent, including:
-- Path configurations (memory, projects, etc.)
-- Agent behavior settings
-- LLM model configurations
-- Security settings
-- Logging settings
+This package provides configuration management for the Arcadia Agent,
+primarily focusing on loading, accessing, and modifying configuration settings.
 """
 
-from .config_manager import ConfigManager, get_config
+from Config.config import Config, config
 
-__all__ = ["ConfigManager", "get_config"]
+__all__ = ["Config", "config"]

@@ -1,0 +1,6 @@
+# Default Agent Configuration
+
+# Agent behavior configuration
+agent:
+  # Whether to run in test mode (no actual commands executed)
+  test_mode: false

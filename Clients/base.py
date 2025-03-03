@@ -98,14 +98,14 @@ class BaseLLMClient(ABC):
 
     @abstractmethod
     async def check_for_user_input_request(
-        self, 
+        self,
         response: str
     ) -> Tuple[bool, Optional[str]]:
         pass
 
     @abstractmethod
     async def generate_response(
-        self, 
+        self,
         conversation_history: List[Dict]
     ) -> str:
         pass

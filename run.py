@@ -1,5 +1,3 @@
-"""Main entry point for the autonomous agent."""
-
 import asyncio
 import os
 import sys
@@ -14,7 +12,6 @@ from typing import Dict, List, Optional
 
 from Config import config, Config
 from Core.agent import AutonomousAgent
-
 
 from Prompts.main import generate_system_prompt
 
@@ -39,14 +36,12 @@ async def pause_for_context_input():
 
     try:
         import readline
-
         history_file = os.path.expanduser(CONTEXT_HISTORY_FILE)
         try:
             readline.read_history_file(history_file)
             readline.set_history_length(1000)
         except FileNotFoundError:
             pass
-
         import atexit
         if not hasattr(pause_for_context_input, "_readline_initialized"):
             atexit.register(readline.write_history_file, history_file)
@@ -66,8 +61,6 @@ async def pause_for_context_input():
 
     additional_context = "\n".join(lines)
     if additional_context.strip():
-
-
         if hasattr(current_agent, 'local_conversation_history'):
             current_agent.local_conversation_history.append({"role": "user", "content": additional_context})
         print("Context added. Conversation will continue.")
@@ -131,7 +124,6 @@ def get_model_choice(available_providers: Dict[str, Dict[str, List[str]]]) -> Di
         print(f"\nUsing single available provider: {only_provider}, model: {only_model}")
         return {"provider": only_provider, "model": only_model}
     else:
-
         providers = list(available_providers.keys())
         for i, p in enumerate(providers, start=1):
             print(f"{i}. {p} (models: {available_providers[p]['models']})")
@@ -144,7 +136,6 @@ def get_model_choice(available_providers: Dict[str, Dict[str, List[str]]]) -> Di
         except:
             chosen_provider = providers[0]
             print(f"Invalid choice. Using default: {chosen_provider}")
-
 
         provider_models = available_providers[chosen_provider]["models"]
         if len(provider_models) == 1:
@@ -195,7 +186,6 @@ async def main():
 
     available_providers = get_available_model_providers()
     if args.provider:
-
         if args.provider not in available_providers:
             print(f"Provider {args.provider} not found or no API key set. Exiting.")
             sys.exit(1)
@@ -209,23 +199,19 @@ async def main():
             print("No providers found. Please set ANTHROPIC_API_KEY or DEEPSEEK_API_KEY.")
             sys.exit(1)
         if args.model:
-
             guess_provider = None
             for p in available_providers:
                 if args.model in available_providers[p]["models"]:
                     guess_provider = p
                     break
             if guess_provider is None:
-
                 guess_provider = list(available_providers.keys())[0]
             provider = guess_provider
             model = args.model
         else:
-
             chosen = get_model_choice(available_providers)
             provider = chosen["provider"]
             model = chosen["model"]
-
 
     env_prefix = {"anthropic": "ANTHROPIC", "deepseek": "DEEPSEEK"}.get(provider, provider.upper())
     api_key = os.getenv(f"{env_prefix}_API_KEY", "")
@@ -233,9 +219,7 @@ async def main():
         print(f"No API key for {provider} found in environment under {env_prefix}_API_KEY. Exiting.")
         sys.exit(1)
 
-
     if config.get("agent.headless", False):
-
         initial_prompt = "Headless mode, no user input provided."
     else:
         initial_prompt = get_initial_prompt()
@@ -251,16 +235,11 @@ async def main():
     full_system_prompt = generate_system_prompt()
 
 
+    from Clients import get_llm_client
+    llm = get_llm_client(provider, api_key)
 
-    system_prompt = None
-    user_prompt = initial_prompt
-    if provider == "anthropic":
-        system_prompt = full_system_prompt
 
-    else:
-
-        system_prompt = None
-        user_prompt = full_system_prompt + "\n\n" + initial_prompt
+    system_prompt, user_prompt = llm.adjust_prompts(full_system_prompt, initial_prompt)
 
 
     agent = AutonomousAgent(
@@ -272,15 +251,18 @@ async def main():
         test_mode=config.get("agent.test_mode", False),
         config=config.to_dict()
     )
+
+    agent.llm = llm
     current_agent = agent
 
-
     try:
-        await agent.run(initial_prompt=user_prompt, system_prompt=system_prompt)
+        await agent.run(
+            initial_prompt=user_prompt,
+            system_prompt=system_prompt
+        )
     except KeyboardInterrupt:
         print("\nExiting (KeyboardInterrupt).")
     finally:
-
         if agent and hasattr(agent, 'llm') and getattr(agent.llm, 'usage_history', None):
             print("\n=== API USAGE SUMMARY ===")
             print(f"Total API Calls: {len(agent.llm.usage_history)}")

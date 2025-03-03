@@ -1,3 +1,4 @@
+
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Union, Tuple, Any
 from datetime import datetime
@@ -65,6 +66,7 @@ class BaseLLMClient(ABC):
 
     def calculate_token_cost(self, usage: Dict[str, int], model_pricing: Dict[str, float], 
                              cache_hit: bool = False, cache_write: bool = False) -> Dict[str, float]:
+
         if cache_hit and "input_cache_read" in model_pricing:
             prompt_cost = usage["prompt_tokens"] * model_pricing["input_cache_read"]
         elif cache_write and "input_cache_write" in model_pricing:
@@ -113,3 +115,9 @@ class BaseLLMClient(ABC):
     @abstractmethod
     def get_model_pricing(self, model: str) -> Dict[str, float]:
         pass
+
+
+
+
+    def adjust_prompts(self, system_prompt: Optional[str], user_prompt: str) -> Tuple[Optional[str], str]:
+        return (system_prompt, user_prompt)

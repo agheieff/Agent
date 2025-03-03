@@ -82,6 +82,18 @@ class DeepSeekClient(BaseLLMClient):
 
         return pricing
 
+
+
+
+
+    def adjust_prompts(self, system_prompt: Optional[str], user_prompt: str) -> Tuple[Optional[str], str]:
+        if system_prompt:
+            combined = system_prompt + "\n\n" + user_prompt
+            return None, combined
+        else:
+
+            return None, user_prompt
+
     async def generate_response(self, conversation_history: List[Dict]) -> str:
         system_content = ""
         user_messages = []
@@ -151,6 +163,7 @@ class DeepSeekClient(BaseLLMClient):
         tool_usage: bool = False,
         model: Optional[str] = None
     ) -> Optional[str]:
+
         try:
             if conversation_history:
                 messages = conversation_history
@@ -208,7 +221,6 @@ class DeepSeekClient(BaseLLMClient):
                     model=model_name,
                     cache_hit=cache_hit
                 )
-
                 self.add_usage(token_usage)
 
             if response.choices and len(response.choices) > 0:

@@ -39,6 +39,13 @@ class AnthropicClient(BaseLLMClient):
     def get_model_pricing(self, model: str) -> Dict[str, float]:
         return CLAUDE_PRICING.get(model, CLAUDE_PRICING["default"])
 
+
+
+
+
+    def adjust_prompts(self, system_prompt: Optional[str], user_prompt: str) -> Tuple[Optional[str], str]:
+        return (system_prompt, user_prompt)
+
     async def get_response(
         self,
         prompt: Optional[str],
@@ -49,6 +56,8 @@ class AnthropicClient(BaseLLMClient):
         tool_usage: bool = False,
         model: Optional[str] = None
     ) -> Optional[str]:
+
+
         try:
             if conversation_history:
                 messages = conversation_history
@@ -142,6 +151,7 @@ class AnthropicClient(BaseLLMClient):
             return None
 
     async def generate_response(self, conversation_history: List[Dict]) -> str:
+
         try:
             response = await self.get_response(
                 prompt=None,

@@ -1,7 +1,7 @@
 import openai
 import logging
 from typing import Optional, List, Dict, Tuple, Any
-from .base_client import BaseLLMClient, TokenUsage
+from .base import BaseLLMClient, TokenUsage
 
 logger = logging.getLogger(__name__)
 

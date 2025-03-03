@@ -38,11 +38,8 @@ def tool_telegram_send(
             "exit_code": 0
         }
 
-
-
     if not message and value:
         message = value
-
 
     bot_token = token or os.getenv("TELEGRAM_BOT_TOKEN", "")
     default_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -100,7 +97,7 @@ def tool_telegram_send(
     except Exception as e:
         return {
             "output": "",
-            "error": f"Error sending Telegram message: {str(e)}",
+            "error": f"Telegram API error: {str(e)}",
             "success": False,
             "exit_code": 1
         }

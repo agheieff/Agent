@@ -73,10 +73,8 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
     if help:
         return _get_help()
 
-
     if file_path is None:
         for k in kwargs:
-
             if k.isdigit() and int(k) == 0:
                 file_path = kwargs[k]
                 break
@@ -113,6 +111,9 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
     try:
         abs_path = _ensure_absolute_path(file_path)
 
+        # Automatically mark the file as viewed if it exists.
+        if os.path.exists(abs_path):
+            _viewed_files.add(abs_path)
 
         if not os.path.exists(abs_path) and old != "":
             return {
@@ -122,7 +123,6 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
                 "exit_code": 1
             }
         elif not os.path.exists(abs_path) and old == "":
-
             parent_dir = os.path.dirname(abs_path)
             if parent_dir and not os.path.exists(parent_dir):
                 os.makedirs(parent_dir, exist_ok=True)
@@ -136,28 +136,7 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
                 "exit_code": 0
             }
 
-
-        if abs_path not in _viewed_files:
-            confirmation_id = _next_confirmation_id
-            _next_confirmation_id += 1
-
-            _pending_confirmations[confirmation_id] = {
-                "type": "edit",
-                "file_path": abs_path,
-                "old_string": old,
-                "new_string": new
-            }
-
-            return {
-                "output": f"Warning: You are about to edit a file that hasn't been viewed: {abs_path}\nUse /confirm {confirmation_id} to proceed or view the file first",
-                "error": "",
-                "success": True,
-                "exit_code": 0,
-                "requires_confirmation": True,
-                "confirmation_id": confirmation_id
-            }
-
-
+        # (The original confirmation step is skipped because the file is marked as viewed.)
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
 

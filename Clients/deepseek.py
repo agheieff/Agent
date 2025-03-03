@@ -2,7 +2,7 @@ import logging
 import datetime
 from typing import Optional, List, Dict, Tuple, Any
 from openai import OpenAI
-from .base_client import BaseLLMClient, TokenUsage
+from .base import BaseLLMClient, TokenUsage
 
 logger = logging.getLogger(__name__)
 

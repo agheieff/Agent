@@ -1,9 +1,9 @@
 from typing import Optional
 import logging
-from .base_client import BaseLLMClient, TokenUsage
-from .anthropic_client import AnthropicClient
-from .deepseek_client import DeepSeekClient
-from .openai_client import OpenAIClient                       
+from .base import BaseLLMClient, TokenUsage
+from .anthropic import AnthropicClient
+from .deepseek import DeepSeekClient
+from .openai import OpenAIClient                       
 
 logger = logging.getLogger(__name__)
 

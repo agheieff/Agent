@@ -51,7 +51,6 @@ def tool_telegram_view(
             "exit_code": 1
         }
 
-
     if not isinstance(limit, int) and value:
         try:
             limit = int(value)
@@ -88,7 +87,6 @@ def tool_telegram_view(
                 "exit_code": 0
             }
 
-
         messages = messages[-limit:]
         formatted = []
         for m in messages:
@@ -113,7 +111,7 @@ def tool_telegram_view(
     except Exception as e:
         return {
             "output": "",
-            "error": f"Error retrieving Telegram messages: {str(e)}",
+            "error": f"Telegram API error: {str(e)}",
             "success": False,
             "exit_code": 1
         }

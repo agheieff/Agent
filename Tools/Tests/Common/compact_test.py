@@ -13,19 +13,18 @@ class MockLLM:
         max_tokens: int = 1024,
         **kwargs
     ):
-
         return "This is a MOCK summary of the conversation."
 
 @pytest.mark.asyncio
 class TestCompactTool:
 
     async def test_help_parameter(self):
-        result = tool_compact(help=True)
+        result = await tool_compact(help=True)
         assert result["success"] is True
         assert "Summarize the conversation so far" in result["output"]
 
     async def test_no_conversation_provided(self):
-        result = tool_compact(llm=MockLLM())
+        result = await tool_compact(llm=MockLLM())
         assert result["success"] is False
         assert "No valid conversation history" in result["error"]
 
@@ -33,7 +32,7 @@ class TestCompactTool:
         conversation_history = [
             {"role": "user", "content": "Hello, I'd like to summarize."}
         ]
-        result = tool_compact(conversation_history=conversation_history)
+        result = await tool_compact(conversation_history=conversation_history)
         assert result["success"] is False
         assert "No LLM provided" in result["error"]
 
@@ -41,7 +40,7 @@ class TestCompactTool:
         conversation_history = [
             {"role": "system", "content": "This is the system's instructions."}
         ]
-        result = tool_compact(conversation_history=conversation_history, llm=MockLLM())
+        result = await tool_compact(conversation_history=conversation_history, llm=MockLLM())
         assert result["success"] is True
         assert "No user or assistant messages to summarize." in result["output"]
 

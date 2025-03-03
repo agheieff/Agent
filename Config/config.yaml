@@ -1,6 +1,0 @@
-# Arcadia Agent Configuration
-
-# Agent behavior settings
-agent:
-  # Whether to run in test mode (no actual commands executed)
-  test_mode: true

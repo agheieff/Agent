@@ -5,7 +5,7 @@ from .base_client import BaseLLMClient, TokenUsage
 
 logger = logging.getLogger(__name__)
 
-# Pricing per million tokens
+
 OPENAI_PRICING = {
     "gpt-4.5-preview": {
          "input": 75.00 / 1_000_000,
@@ -45,14 +45,14 @@ class OpenAIClient(BaseLLMClient):
         if not api_key:
             raise ValueError("OpenAI API key is required")
         openai.api_key = api_key
-        # Default model: "o1" if not specified
+
         self.default_model = model or "o1"
 
     def get_model_pricing(self, model: str) -> Dict[str, float]:
         return OPENAI_PRICING.get(model, OPENAI_PRICING["default"])
 
     def adjust_prompts(self, system_prompt: Optional[str], user_prompt: str) -> Tuple[Optional[str], str]:
-        # For OpenAI Chat models, we keep system and user messages separate.
+
         return (system_prompt, user_prompt)
 
     async def get_response(

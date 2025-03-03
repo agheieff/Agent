@@ -1,61 +1,7 @@
-# Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 
-# Virtual environments
 .env
 .venv
-env/
-venv/
-ENV/
 
-# IDE settings
-.idea/
-.vscode/
-*.swp
-*.swo
-
-temp/
-tmp/
-
-# Logs and debug files
-*.log
-logs/
-data/
-cache/
-*.db
-*.sqlite
-*.sqlite3
-.history/
-.DS_Store
-config.local.ini
-env_audit.log
-agent_status.log
-debug_agent.py
-
-# API keys and sensitive configuration
-*.pem
-*.key
-.env*
-.secrets
-secrets/
-
+Config/config.yaml
 clean.py

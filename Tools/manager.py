@@ -1,6 +1,7 @@
 import logging
 import asyncio
 from typing import List, Dict, Any, Tuple, Optional
+from datetime import datetime
 
 from Tools.parser import ToolParser
 from Tools.executor import execute_tool
@@ -17,27 +18,82 @@ class ToolManager:
     def __init__(self):
         self.parser = ToolParser()
         self.composer = ToolResponseComposer()
+        # We'll hold a reference to the agent's config or LLM (if needed)
+        # so we can block internet when not allowed, or do /compact with LLM.
+        self.agent_config = None
+        self.agent_llm = None
+        self.agent_conversation_history = None
+
+    def set_agent_context(self, config: Dict[str, Any], llm, conversation_ref: List[Dict]):
+        """
+        Allow the manager to know about the agent config, LLM, and
+        conversation history. This is optional but helps with /compact
+        and for allow_internet checks.
+        """
+        self.agent_config = config
+        self.agent_llm = llm
+        self.agent_conversation_history = conversation_ref
 
     async def process_message(self, message: str) -> str:
-        tool_calls = self.parser.extract_tool_calls(message)
+        """
+        Parse the user's message for tool calls and handle them.
+        If there's a /compact command, handle that specially.
+        """
+        # Check for /compact command
+        if "/compact" in message.lower():
+            return await self._handle_compact_command()
 
+        tool_calls = self.parser.extract_tool_calls(message)
         if not tool_calls:
             return ""
 
         results = []
 
+        # For each tool call, see if we allow internet or not.
         for tool_name, params, is_help in tool_calls:
             logger.info(f"Executing tool: {tool_name} with params: {params}, help={is_help}")
 
+            # Check if agent has allow_internet = False and if the tool is "curl" or search.
+            # We'll block those if not allowed.
+            if self.agent_config:
+                allow_inet = self.agent_config.get("agent", {}).get("allow_internet", True)
+                if not allow_inet:
+                    # If user tries /curl, /search, or other net tools, block them.
+                    net_tools = {"curl", "search_engine", "internet_tool", "web_client"}
+                    if tool_name.lower() in net_tools or "url" in params or "internet" in tool_name.lower():
+                        logger.warning("Internet access is disabled; blocking this tool call.")
+                        result = {
+                            "output": "",
+                            "error": "Internet access is disabled in config. This tool call is blocked.",
+                            "success": False,
+                            "exit_code": 1
+                        }
+                        # Store partial result
+                        results.append((tool_name, params, result))
+                        continue
+
             if is_help:
-                result = await execute_tool(tool_name, {"help": True})
+                tool_result = await execute_tool(tool_name, {"help": True})
             else:
-                result = await execute_tool(tool_name, params)
+                tool_result = await execute_tool(tool_name, params)
+
+            # Add the datetime + usage stats:
+            # We'll do a small summary of total tokens used so far vs max.
+            usage_str = ""
+            if self.agent_llm and hasattr(self.agent_llm, "total_tokens"):
+                used_tokens = self.agent_llm.total_tokens
+                max_tokens = getattr(self.agent_llm, "max_model_tokens", 128000)
+                percent = (used_tokens / max_tokens) * 100.0
+                usage_str = f"[Status: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Used {used_tokens}/{max_tokens} ({percent:.2f}%)]"
+                if tool_result.get("output"):
+                    tool_result["output"] += f"\n\n{usage_str}"
+                else:
+                    tool_result["output"] = usage_str
 
             if output_manager:
-                await output_manager.handle_tool_output(tool_name, result)
+                await output_manager.handle_tool_output(tool_name, tool_result)
 
-            results.append((tool_name, params, result))
+            results.append((tool_name, params, tool_result))
 
         if results:
             return self.composer.compose_response(results)
@@ -46,6 +102,17 @@ class ToolManager:
     async def execute_single_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         result = await execute_tool(tool_name, params)
 
+        # Optionally apply the usage status stamping
+        if self.agent_llm and hasattr(self.agent_llm, "total_tokens"):
+            used_tokens = self.agent_llm.total_tokens
+            max_tokens = getattr(self.agent_llm, "max_model_tokens", 128000)
+            percent = (used_tokens / max_tokens) * 100.0
+            stamp = f"[Status: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Used {used_tokens}/{max_tokens} ({percent:.2f}%)]"
+            if result.get("output"):
+                result["output"] += f"\n\n{stamp}"
+            else:
+                result["output"] = stamp
+
         if output_manager:
             await output_manager.handle_tool_output(tool_name, result)
 
@@ -53,14 +120,57 @@ class ToolManager:
 
     async def execute_tools_concurrently(self, tool_requests: List[Tuple[str, Dict[str, Any]]]) -> List[Tuple[str, Dict[str, Any], Dict[str, Any]]]:
         async def _execute_tool(tool_name, params):
-            result = await execute_tool(tool_name, params)
-
-            if output_manager:
-                await output_manager.handle_tool_output(tool_name, result)
-
-            return tool_name, params, result
+            return await self.execute_single_tool(tool_name, params)
 
         tasks = [_execute_tool(name, params) for name, params in tool_requests]
-        results = await asyncio.gather(*tasks)
+        results_raw = await asyncio.gather(*tasks)
+
+        # Combine each with the (tool_name, params)
+        results = []
+        for (tool_name, params), tool_result in zip(tool_requests, results_raw):
+            results.append((tool_name, params, tool_result))
 
         return results
+
+    async def _handle_compact_command(self) -> str:
+        """
+        Summarize the conversation so far, then replace conversation
+        with that summary (plus system prompt).
+        """
+        if not self.agent_llm or not self.agent_conversation_history:
+            # We can't do summarization if we lack references.
+            return "Unable to compact; no LLM or conversation reference."
+
+        # Gather conversation minus system messages
+        user_and_assistant = []
+        system_msg = None
+        for msg in self.agent_conversation_history:
+            if msg["role"] == "system" and system_msg is None:
+                system_msg = msg["content"]
+            else:
+                user_and_assistant.append(msg["content"])
+
+        conversation_text = "\n".join(user_and_assistant)
+        # We'll ask the LLM: "Please summarize..."
+        prompt_for_summary = (
+            "Please summarize the important details, decisions, actions, and next steps from the conversation. "
+            "Keep it concise but mention key points. Then end with an outline of next steps."
+        )
+
+        # Make an LLM call
+        summary_resp = await self.agent_llm.get_response(
+            prompt=prompt_for_summary,
+            system=None,
+            conversation_history=[{"role": "user", "content": conversation_text}],
+            temperature=0.5,
+            max_tokens=1024
+        )
+
+        # Replace conversation with system + summary
+        if system_msg:
+            self.agent_conversation_history.clear()
+            self.agent_conversation_history.append({"role": "system", "content": system_msg})
+            self.agent_conversation_history.append({"role": "assistant", "content": summary_resp or ""})
+            return "Conversation has been compacted into a summary."
+        else:
+            return "No system prompt found. Summarization done, but system prompt was missing."

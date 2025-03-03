@@ -68,19 +68,15 @@ def _get_help() -> Dict[str, Any]:
 def tool_edit(file_path: str = None, old: str = None, new: str = None,
               old_string: str = None, new_string: str = None,
               help: bool = False, **kwargs) -> Dict[str, Any]:
-    """
-    Perform the replacement of `old` with `new` in the specified file (must be unique).
-    If the file doesn't exist and `old` is empty, create a new file with content = `new`.
-    """
     global _next_confirmation_id
 
     if help:
         return _get_help()
 
-    # Accept positional usage
+
     if file_path is None:
         for k in kwargs:
-            # If there's a numeric key "0", we treat that as the file_path
+
             if k.isdigit() and int(k) == 0:
                 file_path = kwargs[k]
                 break
@@ -117,7 +113,7 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
     try:
         abs_path = _ensure_absolute_path(file_path)
 
-        # If the file does not exist, but old is not empty => error
+
         if not os.path.exists(abs_path) and old != "":
             return {
                 "output": "",
@@ -126,7 +122,7 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
                 "exit_code": 1
             }
         elif not os.path.exists(abs_path) and old == "":
-            # Create new file with content = new
+
             parent_dir = os.path.dirname(abs_path)
             if parent_dir and not os.path.exists(parent_dir):
                 os.makedirs(parent_dir, exist_ok=True)
@@ -140,7 +136,7 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
                 "exit_code": 0
             }
 
-        # If file exists but wasn't "viewed", require confirmation
+
         if abs_path not in _viewed_files:
             confirmation_id = _next_confirmation_id
             _next_confirmation_id += 1
@@ -161,7 +157,7 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
                 "confirmation_id": confirmation_id
             }
 
-        # Perform the actual replacement
+
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
 

@@ -74,14 +74,10 @@ def _get_help() -> Dict[str, Any]:
 
 async def tool_write(file_path: str = None, content: str = None, mkdir: bool = True,
                     help: bool = False, value: str = None, **kwargs) -> Dict[str, Any]:
-    """
-    Create a new file with `content`. Does not overwrite existing files.
-    If mkdir=True, will create missing parent directories.
-    """
     if help:
         return _get_help()
 
-    # Positional usage
+
     if file_path is None and value is not None:
         file_path = value
 
@@ -110,7 +106,7 @@ async def tool_write(file_path: str = None, content: str = None, mkdir: bool = T
     try:
         abs_path = _ensure_absolute_path(file_path)
 
-        # Check if file already exists
+
         if os.path.exists(abs_path):
             return {
                 "output": "",

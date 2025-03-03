@@ -32,19 +32,19 @@ echo "Line 3"
         assert "Line 3" in out
 
     async def test_timeout(self):
-        # Try a command that sleeps for 3s, but a 1s timeout
+
         result = await tool_bash(command="sleep 3", timeout=1)
         assert result["success"] is False
         assert "timed out" in result["error"].lower()
         assert result["exit_code"] == 124
 
     async def test_no_timeout(self):
-        # A sleep with 0 timeout means no limit
+
         result = await tool_bash(command="sleep 1", timeout=0)
         assert result["success"] is True
 
     async def test_error_command(self):
-        # A command that fails
+
         result = await tool_bash(command="ls /no_such_file_exists")
         assert result["success"] is False
         assert "No such file or directory" in result["output"] or "no_such_file_exists" in result["output"]

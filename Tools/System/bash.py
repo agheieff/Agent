@@ -48,9 +48,6 @@ TOOL_EXAMPLES = [
 
 async def tool_bash(command: str = None, timeout: int = 60, help: bool = False,
                     value: str = None, **kwargs) -> Dict[str, Any]:
-    """
-    Executes a bash command with optional timeout. No security checks.
-    """
     if help:
         examples = "\nExamples:\n" + "\n".join(
             [f"  {ex[0]}\n    {ex[1]}" for ex in TOOL_EXAMPLES]
@@ -62,7 +59,7 @@ async def tool_bash(command: str = None, timeout: int = 60, help: bool = False,
             "exit_code": 0
         }
 
-    # Support positional usage
+
     if command is None and value is not None:
         command = value
 
@@ -81,7 +78,7 @@ async def tool_bash(command: str = None, timeout: int = 60, help: bool = False,
         }
 
     try:
-        # Convert possible string "0" or negative
+
         try:
             timeout = int(timeout)
             if timeout < 0:
@@ -97,7 +94,7 @@ async def tool_bash(command: str = None, timeout: int = 60, help: bool = False,
         )
 
         if timeout == 0:
-            # No timeout - just wait
+
             stdout_bytes, stderr_bytes = await process.communicate()
         else:
             try:

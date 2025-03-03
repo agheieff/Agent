@@ -54,14 +54,14 @@ class TestEditTool:
 
     @pytest.mark.asyncio
     async def test_multiline_replacement(self, existing_file):
-        # Add multiline content
+
         with open(existing_file, "w", encoding="utf-8") as f:
             f.write("""class Foo:
     def bar(self):
         pass
 """)
 
-        # Replacing an entire multiline block
+
         old_text = """class Foo:
     def bar(self):
         pass

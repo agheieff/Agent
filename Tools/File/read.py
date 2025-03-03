@@ -7,14 +7,14 @@ import logging
 from typing import Dict, Any, Optional
 
 
-TOOL_NAME = "view"
-TOOL_DESCRIPTION = "View the contents of a file with optional offset and limit"
+TOOL_NAME = "read"
+TOOL_DESCRIPTION = "Read the contents of a file with optional offset and limit"
 TOOL_HELP = """
 View the contents of a file.
 
 Usage:
-  /view <file_path> [offset=N] [limit=N]
-  /view file_path=<path> [offset=N] [limit=N]
+  /read <file_path> [offset=N] [limit=N]
+  /read file_path=<path> [offset=N] [limit=N]
 
 Arguments:
   file_path     Path to the file to view (required)
@@ -23,9 +23,9 @@ Arguments:
 """
 
 TOOL_EXAMPLES = [
-    ("/view /etc/hosts", "View the contents of /etc/hosts"),
-    ("/view /var/log/syslog limit=10", "View only the first 10 lines of /var/log/syslog"),
-    ("/view file_path=/path/to/file.txt offset=100 limit=20", "View 20 lines of a file starting from line 100")
+    ("/read /etc/hosts", "View the contents of /etc/hosts"),
+    ("/read /var/log/syslog limit=10", "View only the first 10 lines of /var/log/syslog"),
+    ("/read file_path=/path/to/file.txt offset=100 limit=20", "View 20 lines of a file starting from line 100")
 ]
 
 TOOL_NOTES = """

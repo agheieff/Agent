@@ -6,9 +6,8 @@ to interact with the environment, perform tasks, and access external resources.
 """
 
 from . import File
-from . import Package
-from . import Search
 from . import System
 from . import Internet
+from . import Telegram
 
-__all__ = ["File", "Package", "Search", "System", "Internet"]
+__all__ = ["File", "System", "Internet", "Telegram"]

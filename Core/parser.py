@@ -19,7 +19,8 @@ class ToolParser:
     @staticmethod
     def extract_tool_calls(message: str) -> List[Tuple[str, Dict[str, Any], bool]]:
         tool_calls = []
-        tool_pattern = r'/(\w+)(?:\s+((?:[^-]|\-[^h]|(?:\-h\S)).*?))?(?:\s*$|\n)'
+        # Modified regex: capture any optional arguments non-greedily.
+        tool_pattern = r'/(\w+)(?:\s+(.*?))?(?:\s*$|\n)'
         matches = re.finditer(tool_pattern, message, re.MULTILINE | re.DOTALL)
         for match in matches:
             tool_name = match.group(1)

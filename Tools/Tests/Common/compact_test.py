@@ -52,7 +52,7 @@ class TestCompactTool:
             {"role": "assistant", "content": "Hi, how can I help?"}
         ]
 
-        result = tool_compact(conversation_history=conversation_history, llm=MockLLM())
+        result = await tool_compact(conversation_history=conversation_history, llm=MockLLM())
         assert result["success"] is True
         assert "Conversation has been compacted" in result["output"]
         assert len(conversation_history) == 2                                     

@@ -4,7 +4,6 @@ import asyncio
 from Tools.Common.compact import tool_compact
 
 class MockLLM:
-    """A mock LLM that pretends to return a summary."""
     async def get_response(
         self,
         prompt: str,
@@ -14,7 +13,7 @@ class MockLLM:
         max_tokens: int = 1024,
         **kwargs
     ):
-        # Just return a fake summary
+
         return "This is a MOCK summary of the conversation."
 
 @pytest.mark.asyncio
@@ -56,5 +55,5 @@ class TestCompactTool:
         result = tool_compact(conversation_history=conversation_history, llm=MockLLM())
         assert result["success"] is True
         assert "Conversation has been compacted" in result["output"]
-        assert len(conversation_history) == 2  # system + 1 assistant with summary
+        assert len(conversation_history) == 2                                     
         assert "MOCK summary" in conversation_history[-1]["content"]

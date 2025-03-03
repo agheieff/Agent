@@ -19,7 +19,7 @@ class TestTelegramViewTool:
         assert result["success"] is False
         assert "No Telegram bot token provided" in result["error"]
 
-        # Restore
+
         if original_token:
             os.environ["TELEGRAM_BOT_TOKEN"] = original_token
 

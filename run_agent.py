@@ -307,6 +307,13 @@ async def main():
     parser.add_argument('--no-internet', action='store_true', help="Disable internet access")
     parser.add_argument('--aot', action='store_true', help="Enable Atom of Thoughts reasoning")
     parser.add_argument('--aot-config', type=str, help="Path to Atom of Thoughts configuration file")
+    
+    # Verbosity options
+    verbosity_group = parser.add_argument_group('Verbosity Options')
+    verbosity_group.add_argument('--verbose', '-v', action='count', default=0, 
+                         help="Increase output verbosity (can use multiple times, e.g. -vv)")
+    verbosity_group.add_argument('--quiet', '-q', action='store_true', 
+                         help="Minimize output verbosity")
 
     args = parser.parse_args()
     
@@ -331,7 +338,18 @@ async def main():
         
     if args.no_internet:
         config.set_value("agent.allow_internet", False)
-        
+    
+    # Handle verbosity settings
+    if args.verbose > 0:
+        # Enable verbose output and set level based on -v count
+        config.set_value("output.verbose_output", True)
+        config.set_value("output.verbose_level", min(args.verbose, 3))  # Cap at level 3
+        print(f"Verbose output enabled (level {min(args.verbose, 3)})")
+    elif args.quiet:
+        # Set to minimal verbosity
+        config.set_value("output.verbose_output", False)
+        config.set_value("output.verbose_level", 0)
+    
     # Add AoT configuration
     if args.aot:
         config.set_value("aot.enabled", True)

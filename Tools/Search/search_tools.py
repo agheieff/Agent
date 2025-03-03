@@ -94,9 +94,14 @@ class SearchTools:
             logger.error(f"Error in grep: {e}")
             return [{"error": f"{str(e)}"}]
 
-    def ls(self, path: str) -> Dict[str, Any]:
+    def ls(self, path: str, hide_hidden: bool = False) -> Dict[str, Any]:
         """
         Lists directories and files at the given path.
+        
+        Args:
+            path: Path to list
+            hide_hidden: If True, hide files/directories that start with '.'
+                         Default is False (show all files, including hidden ones)
         """
         try:
             abs_path = self._ensure_absolute_path(path)
@@ -106,21 +111,58 @@ class SearchTools:
                 return {"error": f"Not a directory: {abs_path}"}
 
             entries = os.listdir(abs_path)
+            
+            # Filter out hidden files if requested
+            if hide_hidden:
+                entries = [entry for entry in entries if not entry.startswith('.')]
+                
             directories = []
             files = []
+            hidden_dirs = []
+            hidden_files = []
 
             for entry in sorted(entries):
                 entry_path = os.path.join(abs_path, entry)
-                if os.path.isdir(entry_path):
-                    directories.append(entry)
+                is_hidden = entry.startswith('.')
+                
+                # Create an entry with metadata
+                entry_info = {
+                    "name": entry, 
+                    "is_hidden": is_hidden,
+                    "is_dir": os.path.isdir(entry_path)
+                }
+                
+                # Add to the appropriate list
+                if entry_info["is_dir"]:
+                    if is_hidden:
+                        hidden_dirs.append(entry)
+                    else:
+                        directories.append(entry)
+                    entry_info["type"] = "directory"
                 else:
                     st = os.stat(entry_path)
-                    files.append({"name": entry, "size": st.st_size, "modified": st.st_mtime})
+                    entry_info["size"] = st.st_size
+                    entry_info["modified"] = st.st_mtime
+                    entry_info["type"] = "file"
+                    if is_hidden:
+                        hidden_files.append({"name": entry, "size": st.st_size, "modified": st.st_mtime})
+                    else:
+                        files.append({"name": entry, "size": st.st_size, "modified": st.st_mtime})
+                        
+                # Add the entire entry to the entries list
+                if not "entries_list" in locals():
+                    entries_list = []
+                
+                entries_list.append(entry_info)
 
             return {
                 "path": abs_path,
                 "directories": directories,
-                "files": files
+                "files": files,
+                "hidden_directories": hidden_dirs,
+                "hidden_files": hidden_files,
+                "entries": entries_list,
+                "show_hidden": not hide_hidden
             }
 
         except Exception as e:

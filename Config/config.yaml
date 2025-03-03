@@ -1,11 +1,31 @@
 agent:
   allow_internet: true
-  headless: false
+  enable_aot: false
+  headless: true
   max_inactivity: 3600
   max_tasks: 100
   monitor_resources: true
   resource_check_interval: 300
-  test_mode: false
+  test_mode: true
+aot:
+  contraction:
+    include_atom_content: true
+    temperature: 0.3
+  decomposition:
+    atom_types:
+    - research
+    - analysis
+    - synthesis
+    - verification
+    - planning
+    max_atoms: 8
+    max_depth: 3
+    temperature: 0.7
+  enabled: false
+  execution:
+    max_concurrent: 3
+    retries: 1
+    timeout: 60
 internet:
   research:
     cache_size_limit: 100
@@ -42,7 +62,8 @@ llm:
   deepseek:
     max_tokens: 4000
     temperature: 0.7
-  default_model: deepseek
+  default_model: deepseek-reasoner
+  default_provider: deepseek
   models:
   - anthropic
   - deepseek
@@ -71,6 +92,9 @@ memory:
   max_backups: 10
   max_document_size: 1048576
   max_indexed_entries: 10000
+output:
+  verbose_level: 2
+  verbose_output: true
 paths:
   backup_dir: None/backups
   memory_dir: /home/agheieff/AgentMemory

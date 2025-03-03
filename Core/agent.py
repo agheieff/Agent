@@ -56,14 +56,60 @@ class CommandResult:
         }
 
 class CommandExtractor:
+    """
+    Extracts commands and other structured information from LLM responses.
+    Handles both code execution and file operations.
+    
+    Commands are extracted from XML-style tags in the response.
+    """
+    
+    # Command types
     COMMAND_TAGS = ['bash', 'python']
+    
+    # Thinking and planning tags
     THINKING_TAG = 'thinking'
     DECISION_TAG = 'decision'
     PLAN_TAG = 'plan'
     SUMMARY_TAG = 'summary'
     TASK_TAG = 'task'
     SUBTASK_TAG = 'subtask'
+    
+    # File operation tags with parameters:
+    # <view>
+    #   file_path: /path/to/file
+    #   offset: 0 (optional)
+    #   limit: 100 (optional)
+    # </view>
+    #
+    # <edit>
+    #   file_path: /path/to/file
+    #   old_string: text to replace
+    #   new_string: replacement text
+    # </edit>
+    #
+    # <replace>
+    #   file_path: /path/to/file
+    #   content: new content for the file
+    # </replace>
+    #
+    # <glob>
+    #   pattern: *.py
+    #   path: /path (optional)
+    # </glob>
+    #
+    # <grep>
+    #   pattern: regex
+    #   include: *.py (optional)
+    #   path: /path (optional)
+    # </grep>
+    #
+    # <ls>
+    #   path: /path/to/dir
+    #   hide_hidden: false (optional, default is false - shows hidden files)
+    # </ls>
     FILE_OP_TAGS = ['view', 'edit', 'replace', 'glob', 'grep', 'ls']
+    
+    # User interaction tags
     USER_INPUT_TAG = 'user_input'
 
     @staticmethod
@@ -278,8 +324,16 @@ class SystemControl:
                           path: Optional[str] = None) -> List[Dict[str, Any]]:
         return self.search_tools.grep_tool(pattern, include, path)
     
-    async def list_directory(self, path: str) -> Dict[str, Any]:
-        return self.search_tools.ls(path)
+    async def list_directory(self, path: str, hide_hidden: bool = False) -> Dict[str, Any]:
+        """
+        List files and directories in a path. 
+        
+        Args:
+            path: Directory path to list
+            hide_hidden: If True, hide files/directories that start with '.'
+                         Default is False (show all files, including hidden)
+        """
+        return self.search_tools.ls(path, hide_hidden)
     
     async def install_package(self, package_name: str, package_type: str = "python", 
                              version: Optional[str] = None) -> str:
@@ -635,22 +689,68 @@ class AutonomousAgent:
     async def _process_response(self, response: str) -> bool:
         """Process commands and handle user input requests in the response"""
         try:
+            # Get verbosity level for logging
+            verbose_level = self.config.get("output", {}).get("verbose_level", 0)
+            
             # Extract commands
             commands = self.command_extractor.extract_commands(response)
             
             # Extract user input requests
             input_requests = self.command_extractor.extract_user_input_requests(response)
             
-            # Process user input requests first
+            # Extract thinking and planning in verbose mode
+            thinking = self.command_extractor.extract_thinking(response)
+            planning = self.command_extractor.extract_plan(response)
+            
+            # Log the extracted elements if in verbose mode
+            if verbose_level >= 2:
+                if commands:
+                    print(f"\n[VERBOSE] Extracted {len(commands)} commands")
+                if input_requests:
+                    print(f"[VERBOSE] Extracted {len(input_requests)} input requests")
+                if thinking:
+                    print(f"[VERBOSE] Extracted {len(thinking)} thinking blocks")
+                if planning:
+                    print(f"[VERBOSE] Extracted {len(planning)} planning blocks")
+            
+            # Process user input requests with improved autonomy
             if input_requests:
-                print("\n" + "=" * 60)
-                print("| AGENT REQUESTING INPUT |")
-                print("-" * 60)
-                print(input_requests[0])  # Take the first input request
-                print("=" * 60 + "\n")
+                # Check if input is essential or can be skipped for better autonomy
+                should_ask_for_input = False
+                input_text = input_requests[0].lower()
                 
-                # Get user input
-                user_input = await self._get_user_input()
+                # Analyze the request - only request input for truly critical things
+                critical_terms = ["confirm", "choose", "select", "password", "must", "required", 
+                                 "need your", "your preference", "permission", "authorize"]
+                
+                # Check if the request contains critical terms indicating user input is essential
+                is_critical = any(term in input_text for term in critical_terms)
+                
+                # In autonomous mode, only ask for input if it seems critical
+                # The more verbose the mode, the more likely we'll ask for input
+                if is_critical or verbose_level >= 2:
+                    should_ask_for_input = True
+                    
+                    if verbose_level >= 2:
+                        print(f"[VERBOSE] Input request considered {'critical' if is_critical else 'non-critical'}")
+                        print(f"[VERBOSE] Will ask for input: {should_ask_for_input}")
+                
+                # If we're not asking for input, log this in verbose mode
+                if not should_ask_for_input and verbose_level >= 1:
+                    print(f"[VERBOSE] Autonomously continuing without asking for non-critical input")
+                    # Use a default response to continue without user input
+                    default_response = "Please continue with what you think is best."
+                    user_input = default_response
+                else:
+                    # We need to ask for input, show the prompt
+                    print("\n" + "=" * 60)
+                    print("| AGENT REQUESTING INPUT |")
+                    print("-" * 60)
+                    print(input_requests[0])  # Take the first input request
+                    print("=" * 60 + "\n")
+                    
+                    # Get user input
+                    user_input = await self._get_user_input()
                 
                 # Modify the last assistant message to include the user input request
                 # instead of adding a new message, to maintain user-assistant alternation
@@ -684,7 +784,12 @@ class AutonomousAgent:
                     # Process the new response
                     return await self._process_response(new_response)
             
+            # Get verbosity details
+            auto_handle_output = verbose_level <= 1  # Only automatically handle output in less verbose modes
+            
             # Process commands
+            command_results = []  # Store results for auto-handling
+            
             for cmd_type, command in commands:
                 if self.command_extractor.is_exit_command(cmd_type, command):
                     self.should_exit = True
@@ -692,7 +797,14 @@ class AutonomousAgent:
                 
                 # Process file operations
                 if cmd_type in self.command_extractor.FILE_OP_TAGS:
-                    await self._process_file_operation(cmd_type, command)
+                    result = await self._process_file_operation(cmd_type, command)
+                    if result:
+                        command_results.append({
+                            "type": cmd_type,
+                            "command": command,
+                            "output": result,
+                            "success": "error" not in result.lower()
+                        })
                     continue
                 
                 # Process bash or python commands
@@ -701,11 +813,24 @@ class AutonomousAgent:
                     command_preview = command.splitlines()[0]
                     if len(command_preview) > 60:
                         command_preview = command_preview[:57] + "..."
+                    
+                    if verbose_level >= 2:
+                        print(f"[VERBOSE] Executing {cmd_type} command: {command_preview}")
                         
                     print(f"> {cmd_type}: {command_preview}", end="", flush=True)
                     
                     # Execute the command
                     stdout, stderr, code = await self.system_control.execute_command(cmd_type, command)
+                    
+                    # Store result for auto-handling
+                    command_results.append({
+                        "type": cmd_type,
+                        "command": command,
+                        "stdout": stdout,
+                        "stderr": stderr,
+                        "code": code,
+                        "success": code == 0
+                    })
                     
                     # Display result on the same line or just below
                     if code == 0:
@@ -713,15 +838,28 @@ class AutonomousAgent:
                     else:
                         print(f" ✗ (exit code: {code})")  # Error indicator
                         
-                    # Show compact output if there's any
+                    # Show output based on verbosity
                     if stdout or stderr:
                         output = stdout if stdout else stderr
-                        # Limit to 3 lines max
-                        lines = output.splitlines()[:3]
-                        for line in lines:
+                        
+                        # Determine how many lines to show based on verbosity
+                        if verbose_level >= 3:
+                            max_preview_lines = 20
+                        elif verbose_level >= 2:
+                            max_preview_lines = 10
+                        elif verbose_level >= 1:
+                            max_preview_lines = 5
+                        else:
+                            max_preview_lines = 3
+                            
+                        # Show preview lines
+                        lines = output.splitlines()
+                        preview_lines = lines[:max_preview_lines]
+                        for line in preview_lines:
                             print(f"  {line}")
-                        if len(output.splitlines()) > 3:
-                            print("  ...")
+                        if len(lines) > max_preview_lines:
+                            remaining = len(lines) - max_preview_lines
+                            print(f"  ... {remaining} more line{'s' if remaining != 1 else ''} ...")
                     
                     self.agent_state['commands_executed'] += 1
                     self.agent_state['last_active'] = datetime.now().isoformat()
@@ -731,12 +869,52 @@ class AutonomousAgent:
                         "command": command,
                         "type": cmd_type,
                         "timestamp": time.time(),
-                        "success": code == 0
+                        "success": code == 0,
+                        "stdout": stdout,
+                        "stderr": stderr
                     })
                     
                     # Add the result to memory
                     if self.memory_manager:
                         self.memory_manager.add_command_to_history(command, cmd_type, code == 0)
+            
+            # Automatically handle command results if appropriate
+            if auto_handle_output and command_results and all(r.get("success", False) for r in command_results):
+                # If we have successful commands, automatically continue with their output
+                if verbose_level >= 1:
+                    print("[VERBOSE] Automatically continuing with command results")
+                
+                # Create a summary of command results to add to conversation
+                results_summary = "\n\nI've executed the following commands with these results:\n"
+                for result in command_results:
+                    cmd_type = result.get("type", "unknown")
+                    cmd_preview = result.get("command", "").splitlines()[0][:40]
+                    if cmd_type in self.command_extractor.FILE_OP_TAGS:
+                        results_summary += f"- {cmd_type}: {cmd_preview}... - {result.get('output', 'No output')}\n"
+                    else:
+                        stdout = result.get("stdout", "").strip()
+                        if stdout:
+                            # Add a short preview of stdout
+                            stdout_preview = stdout.splitlines()[0][:60]
+                            if len(stdout.splitlines()) > 1 or len(stdout.splitlines()[0]) > 60:
+                                stdout_preview += "..."
+                            results_summary += f"- {cmd_type}: {cmd_preview}... - Output: {stdout_preview}\n"
+                        else:
+                            results_summary += f"- {cmd_type}: {cmd_preview}... - Completed successfully\n"
+                
+                results_summary += "\nPlease continue with the next steps based on these results."
+                
+                # Add as user message and generate response
+                self.local_conversation_history.append({
+                    "role": "user",
+                    "content": results_summary
+                })
+                
+                # Generate new response with the command results
+                new_response = await self._generate_response(None, results_summary)
+                
+                # Process the new response
+                return await self._process_response(new_response)
             
             # Extract other structured elements like thinking, plan, etc.
             thinking = self.command_extractor.extract_thinking(response)
@@ -796,8 +974,13 @@ class AutonomousAgent:
             logger.error(f"Error processing response: {e}")
             return True  # Continue despite error
             
-    async def _process_file_operation(self, op_type: str, command: str) -> None:
-        """Process file operations extracted from the response"""
+    async def _process_file_operation(self, op_type: str, command: str) -> str:
+        """
+        Process file operations extracted from the response
+        
+        Returns:
+            str: A summary of the operation result for auto-handling
+        """
         try:
             # More robust parsing for command parameters that handles multi-line values
             # First, normalize line endings
@@ -877,6 +1060,9 @@ class AutonomousAgent:
                     print("  ...")
                 else:
                     print(result)
+                    
+                # Return summary for auto-handling
+                return f"Viewed {file_path} ({line_count} lines)"
                 
             elif op_type == "edit":
                 file_path = params.get("file_path")
@@ -896,9 +1082,13 @@ class AutonomousAgent:
                 if "successfully" in result.lower():
                     old_lines = old_string.count('\n') + 1
                     new_lines = new_string.count('\n') + 1
-                    print(f"✏️ Edited {file_path}: replaced {old_lines} line(s) with {new_lines} line(s)")
+                    summary = f"Edited {file_path}: replaced {old_lines} line(s) with {new_lines} line(s)"
+                    print(f"✏️ {summary}")
+                    return summary
                 else:
-                    print(f"❌ Edit failed: {result}")
+                    error_msg = f"Edit failed: {result}"
+                    print(f"❌ {error_msg}")
+                    return f"Error: {error_msg}"
                 
             elif op_type == "replace":
                 file_path = params.get("file_path")
@@ -916,9 +1106,13 @@ class AutonomousAgent:
                 
                 # Show a compact summary of the replacement
                 if "successfully" in result.lower():
-                    print(f"💾 Replaced {file_path} with {line_count} lines of content")
+                    summary = f"Replaced {file_path} with {line_count} lines of content"
+                    print(f"💾 {summary}")
+                    return summary
                 else:
-                    print(f"❌ Replace failed: {result}")
+                    error_msg = f"Replace failed: {result}"
+                    print(f"❌ {error_msg}")
+                    return f"Error: {error_msg}"
                 
             elif op_type == "glob":
                 pattern = params.get("pattern")
@@ -932,7 +1126,8 @@ class AutonomousAgent:
                 
                 results = await self.system_control.glob_search(pattern, path)
                 result_count = len(results)
-                print(f"🔍 Glob search for '{pattern}': found {result_count} file(s)")
+                summary = f"Glob search for '{pattern}': found {result_count} file(s)"
+                print(f"🔍 {summary}")
                 
                 # Show compact results
                 if result_count > 0:
@@ -942,6 +1137,16 @@ class AutonomousAgent:
                         print(f"  {results[i]}")
                     if result_count > max_display:
                         print(f"  ...and {result_count - max_display} more files")
+                
+                # Include first few results in the summary for auto-handling
+                if result_count > 0:
+                    result_summary = summary + "\n" + "\n".join(
+                        [f"- {results[i]}" for i in range(min(5, result_count))]
+                    )
+                    if result_count > 5:
+                        result_summary += f"\n- ... and {result_count - 5} more files"
+                    return result_summary
+                return summary
                 
             elif op_type == "grep":
                 pattern = params.get("pattern")
@@ -957,18 +1162,19 @@ class AutonomousAgent:
                 results = await self.system_control.grep_search(pattern, include, path)
                 result_count = len(results)
                 include_str = f" in '{include}' files" if include else ""
-                print(f"🔍 Grep search for '{pattern}'{include_str}: {result_count} match(es)")
+                summary = f"Grep search for '{pattern}'{include_str}: {result_count} match(es)"
+                print(f"🔍 {summary}")
+                
+                # Group by file for display and summary
+                files = {}
+                for result in results:
+                    file_path = result['file']
+                    if file_path not in files:
+                        files[file_path] = []
+                    files[file_path].append((result['line_number'], result['line']))
                 
                 # Show compact results
                 if result_count > 0:
-                    # Group by file
-                    files = {}
-                    for result in results:
-                        file_path = result['file']
-                        if file_path not in files:
-                            files[file_path] = []
-                        files[file_path].append((result['line_number'], result['line']))
-                    
                     # Display up to 5 files
                     file_count = len(files)
                     displayed_files = 0
@@ -992,6 +1198,31 @@ class AutonomousAgent:
                     if file_count > 5:
                         print(f"  ...and matches in {file_count - 5} more files")
                 
+                # Create summary for auto-handling
+                if result_count > 0:
+                    result_summary = summary + "\n"
+                    file_summaries = []
+                    for i, (file_path, matches) in enumerate(files.items()):
+                        if i >= 3:  # Limit to 3 files in summary
+                            break
+                        match_previews = []
+                        for j, (line_num, line) in enumerate(matches[:2]):  # Limit to 2 matches per file
+                            # Limit line length
+                            preview = line[:50] + "..." if len(line) > 50 else line
+                            match_previews.append(f"  Line {line_num}: {preview}")
+                        
+                        file_summary = f"- {file_path} ({len(matches)} match(es)):\n" + "\n".join(match_previews)
+                        if len(matches) > 2:
+                            file_summary += f"\n  ... and {len(matches) - 2} more matches"
+                        file_summaries.append(file_summary)
+                        
+                    result_summary += "\n".join(file_summaries)
+                    if len(files) > 3:
+                        result_summary += f"\n\n... and matches in {len(files) - 3} more files"
+                    return result_summary
+                    
+                return summary
+                
             elif op_type == "ls":
                 path = params.get("path")
                 if not path:
@@ -1001,13 +1232,19 @@ class AutonomousAgent:
                 # Handle tilde expansion
                 path = expand_path(path)
                 
+                # Get hide_hidden parameter (default is False - show hidden files)
+                hide_hidden_param = params.get("hide_hidden", "false").lower()
+                hide_hidden = hide_hidden_param in ["true", "yes", "1"]
+                
                 try:
-                    result = await self.system_control.list_directory(path)
+                    # Pass the hide_hidden parameter (by default we show hidden files)
+                    result = await self.system_control.list_directory(path, hide_hidden)
                     item_count = len(result["entries"])
                     dir_count = sum(1 for item in result["entries"] if item["is_dir"])
                     file_count = item_count - dir_count
                     
-                    print(f"📂 Directory '{path}': {dir_count} directories, {file_count} files")
+                    summary = f"Directory '{path}': {dir_count} directories, {file_count} files"
+                    print(f"📂 {summary}")
                     
                     # Count special types
                     hidden_count = sum(1 for item in result["entries"] if item["name"].startswith("."))
@@ -1044,8 +1281,33 @@ class AutonomousAgent:
                         # Special note for hidden files
                         if hidden_count > 0:
                             print(f"  ({hidden_count} hidden items)")
+                        
+                        # Create detailed summary for auto-handling
+                        result_summary = summary + "\n"
+                        
+                        # Add directories to summary
+                        if dirs:
+                            result_summary += "\nDirectories:\n"
+                            for item in dirs[:min(5, len(dirs))]:
+                                result_summary += f"- {item['name']}/\n"
+                            if len(dirs) > 5:
+                                result_summary += f"- ... and {len(dirs) - 5} more directories\n"
+                        
+                        # Add files to summary
+                        if files:
+                            result_summary += "\nFiles:\n"
+                            for item in files[:min(5, len(files))]:
+                                result_summary += f"- {item['name']}\n"
+                            if len(files) > 5:
+                                result_summary += f"- ... and {len(files) - 5} more files\n"
+                        
+                        return result_summary
+                    
+                    return summary
                 except Exception as e:
-                    print(f"❌ Error listing directory: {str(e)}")
+                    error_msg = f"Error listing directory: {str(e)}"
+                    print(f"❌ {error_msg}")
+                    return f"Error: {error_msg}"
                     
         except Exception as e:
             logger.error(f"Error processing file operation {op_type}: {e}")
@@ -1086,20 +1348,36 @@ class AutonomousAgent:
         try:
             # Clear any pending input buffer before showing prompt
             import sys
-            import termios
-            import tty
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
+            
+            # Import termios first to avoid referring to a module that might not exist
             try:
-                tty.setraw(fd)
-                # Just check if there's input waiting but don't block
-                ready_to_read = select.select([sys.stdin], [], [], 0)[0]
-                if ready_to_read:
-                    # Clear pending input
-                    os.read(fd, 1024)
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        except (ImportError, AttributeError, IOError):
+                import termios
+                import tty
+                has_termios = True
+            except (ImportError, ModuleNotFoundError):
+                has_termios = False
+            
+            # Check if we're in an interactive TTY and termios is available
+            if sys.stdin.isatty() and has_termios:
+                fd = sys.stdin.fileno()
+                try:
+                    old_settings = termios.tcgetattr(fd)
+                    try:
+                        tty.setraw(fd)
+                        # Just check if there's input waiting but don't block
+                        ready_to_read = select.select([sys.stdin], [], [], 0)[0]
+                        if ready_to_read:
+                            # Clear pending input
+                            os.read(fd, 1024)
+                    finally:
+                        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                except termios.error:
+                    # Terminal doesn't support termios operations
+                    pass
+            else:
+                # Not connected to a TTY, skip terminal operations
+                pass
+        except (AttributeError, IOError):
             # Not on Unix or terminal doesn't support these operations
             pass
         

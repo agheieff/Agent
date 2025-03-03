@@ -19,7 +19,8 @@ class OutputConfig:
         "colors_enabled": True,
         "compact_errors": True,
         "indent_size": 2,
-        "verbose_output": False
+        "verbose_output": False,
+        "verbose_level": 0  # 0=minimal, 1=normal, 2=detailed, 3=debug
     }
     
     def __init__(self, config_path: Optional[str] = None):

@@ -52,6 +52,10 @@ class DisplayManager:
             command: The command that was executed
             result: The command result dictionary
         """
+        # Get verbose level to determine output detail
+        verbose_level = self._config.get("verbose_level", 0)
+        verbose_output = self._config.get("verbose_output", False)
+        
         # Format the command result line
         formatted = self._formatter.format_command_result(command, result)
         
@@ -64,22 +68,63 @@ class DisplayManager:
         
         print(formatted)
         
-        # If successful and has output, display it indented
-        if result.get('success', False) and result.get('stdout'):
-            # Only display output if verbose mode is enabled or output is short
-            if self._config.get("verbose_output", False) or len(result.get('stdout', '').splitlines()) <= 3:
+        # Verbose level determines output display
+        show_output = (verbose_output or verbose_level >= 1 or 
+                      (verbose_level == 0 and result.get('stdout', '') and 
+                       len(result.get('stdout', '').splitlines()) <= 3))
+        
+        # If has output and verbose settings allow display
+        if result.get('stdout'):
+            if show_output:
                 indent = ' ' * self._config.get("indent_size", 2)
-                max_lines = self._config.get("max_output_lines", 10)
                 
-                # Limit output lines if very verbose
+                # Determine max lines based on verbose level
+                if verbose_level >= 3:  # Debug level - show everything
+                    max_lines = 1000
+                elif verbose_level >= 2:  # Detailed level
+                    max_lines = 30
+                elif verbose_level >= 1:  # Normal level
+                    max_lines = 15
+                else:  # Minimal level
+                    max_lines = self._config.get("max_output_lines", 10)
+                
+                # Limit output lines based on verbose level
                 lines = result.get('stdout', '').splitlines()
-                if len(lines) > max_lines:
-                    output = '\n'.join(lines[:max(1, max_lines-5)] + ['...'] + lines[-min(3, max_lines-1):])
+                if len(lines) > max_lines and verbose_level < 3:
+                    # More sophisticated truncation for different verbose levels
+                    if verbose_level >= 2:
+                        # Show more content with clearer markers in detailed mode
+                        head_lines = max(5, max_lines // 2)
+                        tail_lines = max(5, max_lines - head_lines - 1)
+                        output = '\n'.join(
+                            lines[:head_lines] + 
+                            [f"... {len(lines) - head_lines - tail_lines} more lines ..."] + 
+                            lines[-tail_lines:]
+                        )
+                    else:
+                        # Basic truncation for lower verbose levels
+                        output = '\n'.join(
+                            lines[:max(1, max_lines-5)] + 
+                            ['...'] + 
+                            lines[-min(3, max_lines-1):]
+                        )
                 else:
                     output = result.get('stdout')
-                    
+                
+                # Output each line with indentation
                 for line in output.splitlines():
                     print(f"{indent}{line}")
+            elif verbose_level >= 1:
+                # In normal verbose mode, at least indicate that output was truncated
+                line_count = len(result.get('stdout', '').splitlines())
+                print(f"  ... {line_count} lines of output (use higher verbose level to see) ...")
+        
+        # Always show stderr if present, regardless of verbose level
+        if result.get('stderr') and result.get('stderr', '').strip():
+            indent = ' ' * self._config.get("indent_size", 2)
+            print(f"{indent}\033[31m[Error Output]\033[0m")
+            for line in result.get('stderr', '').splitlines()[:10]:  # Limit error lines
+                print(f"{indent}{line}")
     
     def display_api_error(self, error_msg: str):
         """

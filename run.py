@@ -1,3 +1,6 @@
+
+"""Main entry point for the autonomous agent."""
+
 import asyncio
 import os
 import sys
@@ -12,7 +15,6 @@ from typing import Dict, List, Optional
 
 from Config import config, Config
 from Core.agent import AutonomousAgent
-
 from Prompts.main import generate_system_prompt
 
 INITIAL_PROMPT_HISTORY_FILE = '~/.agent_prompt_history'
@@ -105,6 +107,10 @@ def get_available_model_providers() -> Dict[str, Dict[str, List[str]]]:
             "env_prefix": "DEEPSEEK",
             "models": ["deepseek-reasoner", "deepseek-reasoner-tools"]
         },
+        "openai": {
+            "env_prefix": "OPENAI",
+            "models": ["o1", "o3-mini", "gpt-4o", "gpt-4.5-preview"]
+        },
     }
     available_providers = {}
     for prov, info in provider_config.items():
@@ -115,10 +121,9 @@ def get_available_model_providers() -> Dict[str, Dict[str, List[str]]]:
 
 def get_model_choice(available_providers: Dict[str, Dict[str, List[str]]]) -> Dict[str, str]:
     if not available_providers:
-        print("No valid providers found. Please set ANTHROPIC_API_KEY or DEEPSEEK_API_KEY.")
+        print("No valid providers found. Please set an API key.")
         sys.exit(1)
     if len(available_providers) == 1:
-
         only_provider = list(available_providers.keys())[0]
         only_model = available_providers[only_provider]["models"][0]
         print(f"\nUsing single available provider: {only_provider}, model: {only_model}")
@@ -163,14 +168,13 @@ async def main():
 
     parser = argparse.ArgumentParser(description="Run the Autonomous Agent.")
     parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands execution)")
-    parser.add_argument('--provider', choices=['anthropic', 'deepseek'], help="Specify model provider directly")
-    parser.add_argument('--model', help="Specify model name directly (e.g. claude-3-7-sonnet, deepseek-reasoner)")
+    parser.add_argument('--provider', choices=['anthropic', 'deepseek', 'openai'], help="Specify model provider directly")
+    parser.add_argument('--model', help="Specify model name directly (e.g. claude-3-7-sonnet, deepseek-reasoner, o1, gpt-4o, gpt-4.5-preview)")
     parser.add_argument('--headless', action='store_true', help="Run in headless mode (no interactive prompts)")
     parser.add_argument('--no-internet', action='store_true', help="Disable internet access")
     parser.add_argument('--non-autonomous', action='store_true', help="Disable autonomous mode")
     parser.add_argument('--autonomous', action='store_true', help="Enable autonomous mode")
     args = parser.parse_args()
-
 
     if args.test:
         config.set("agent.test_mode", True)
@@ -182,7 +186,6 @@ async def main():
         config.set("agent.autonomous_mode", False)
     elif args.autonomous:
         config.set("agent.autonomous_mode", True)
-
 
     available_providers = get_available_model_providers()
     if args.provider:
@@ -196,7 +199,7 @@ async def main():
             model = available_providers[provider]["models"][0]
     else:
         if not available_providers:
-            print("No providers found. Please set ANTHROPIC_API_KEY or DEEPSEEK_API_KEY.")
+            print("No providers found. Please set an API key.")
             sys.exit(1)
         if args.model:
             guess_provider = None
@@ -213,7 +216,7 @@ async def main():
             provider = chosen["provider"]
             model = chosen["model"]
 
-    env_prefix = {"anthropic": "ANTHROPIC", "deepseek": "DEEPSEEK"}.get(provider, provider.upper())
+    env_prefix = {"anthropic": "ANTHROPIC", "deepseek": "DEEPSEEK", "openai": "OPENAI"}.get(provider, provider.upper())
     api_key = os.getenv(f"{env_prefix}_API_KEY", "")
     if not api_key:
         print(f"No API key for {provider} found in environment under {env_prefix}_API_KEY. Exiting.")
@@ -231,16 +234,13 @@ async def main():
     if config.get("agent.test_mode", False):
         print("TEST MODE is enabled. Commands are not actually executed.")
 
-
     full_system_prompt = generate_system_prompt()
 
-
     from Clients import get_llm_client
-    llm = get_llm_client(provider, api_key)
+    llm = get_llm_client(provider, api_key, model=model)
 
 
     system_prompt, user_prompt = llm.adjust_prompts(full_system_prompt, initial_prompt)
-
 
     agent = AutonomousAgent(
         memory_manager=None,
@@ -251,7 +251,6 @@ async def main():
         test_mode=config.get("agent.test_mode", False),
         config=config.to_dict()
     )
-
     agent.llm = llm
     current_agent = agent
 

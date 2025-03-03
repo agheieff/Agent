@@ -428,9 +428,15 @@ async def main():
             provider = args.provider.lower()
             # Check if the specified provider has an API key
             if provider not in available_providers:
-                print(f"Error: No API key found for provider '{provider}'.")
-                print(f"Please set {provider.upper()}_API_KEY in your environment.")
-                sys.exit(1)
+                print(f"Warning: No API key found for provider '{provider}'.")
+                if available_providers:
+                    # Fall back to an available provider
+                    fallback_provider = next(iter(available_providers.keys()))
+                    print(f"Falling back to available provider: {fallback_provider}")
+                    provider = fallback_provider
+                else:
+                    print(f"Please set {provider.upper()}_API_KEY in your environment.")
+                    sys.exit(1)
             
             # If model is also specified, check that it's valid for the provider
             if args.model:

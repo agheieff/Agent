@@ -102,9 +102,9 @@ setup_environment() {
         # Create new virtual environment
         python -m venv .venv
         
-        # Upgrade pip
+        # Activate and upgrade pip
         source .venv/bin/activate
-        pip install --upgrade pip
+        python -m pip install --upgrade pip
         
         # Pre-install lxml separately with specific options
         echo -e "${YELLOW}Pre-installing lxml with explicit build options...${NC}"
@@ -155,9 +155,9 @@ setup_environment() {
         # Create new virtual environment
         python -m venv .venv
         
-        # Upgrade pip
+        # Activate and upgrade pip
         source .venv/bin/activate
-        pip install --upgrade pip
+        python -m pip install --upgrade pip
         
         # Pre-install lxml separately with specific options
         echo -e "${YELLOW}Pre-installing lxml with explicit build options...${NC}"

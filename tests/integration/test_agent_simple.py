@@ -1,8 +1,7 @@
-#\!/usr/bin/env python
+#!/usr/bin/env python
 
 """
-A simpler test runner for the agent that avoids terminal I/O issues
-and allows better automation of tests.
+A simple integration test for the agent
 """
 
 import asyncio
@@ -11,12 +10,13 @@ import os
 from pathlib import Path
 
 # Add parent directory to path to allow imports
-sys.path.append(str(Path(__file__).parent))
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from Core.agent import AutonomousAgent
 from Config import get_config
 
 async def main():
+    """Test the agent with a simple prompt"""
     # Load configuration
     config = get_config()
     
@@ -25,17 +25,25 @@ async def main():
     config.set_value("output.verbose_output", True)
     config.set_value("output.verbose_level", 2)  # Detailed level
     
-    # Provider and model selection
-    provider = "deepseek"
-    model = "deepseek-reasoner"
+    # Provider detection - try available providers in order
+    api_key = None
+    provider = None
+    model = None
     
-    # Get API key from environment
-    env_prefix = {"anthropic": "ANTHROPIC", "deepseek": "DEEPSEEK"}.get(provider, provider.upper())
-    api_key = os.getenv(f"{env_prefix}_API_KEY")
+    # Try DeepSeek first
+    if os.getenv("DEEPSEEK_API_KEY"):
+        provider = "deepseek"
+        model = "deepseek-reasoner"
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+    # Then try Anthropic
+    elif os.getenv("ANTHROPIC_API_KEY"):
+        provider = "anthropic"
+        model = "claude-3-7-sonnet"
+        api_key = os.getenv("ANTHROPIC_API_KEY")
     
     if not api_key:
-        print(f"Error: {env_prefix}_API_KEY not found in environment")
-        sys.exit(1)
+        print("No API keys found for any provider. Please set DEEPSEEK_API_KEY or ANTHROPIC_API_KEY.")
+        return False
     
     # Create agent
     print(f"Creating agent with {provider.title()} model: {model}")
@@ -48,7 +56,7 @@ async def main():
     )
     
     # Test prompt
-    test_prompt = "List the files in the project directory and explain their purpose"
+    test_prompt = "List the files in the current directory and explain their purpose"
     
     # System prompt - simple version
     system_prompt = "You are an AI assistant helping with coding tasks."
@@ -57,10 +65,12 @@ async def main():
     print(f"Running agent with prompt: {test_prompt}")
     try:
         await agent.run(test_prompt, system_prompt)
+        print("\n✅ Agent test completed successfully")
+        return True
     except Exception as e:
-        print(f"Error running agent: {e}")
-    
-    print("Test completed")
+        print(f"\n❌ Error running agent: {e}")
+        return False
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    result = asyncio.run(main())
+    sys.exit(0 if result else 1)

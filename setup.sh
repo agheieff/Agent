@@ -40,20 +40,10 @@ create_requirement_files() {
     # Create Requirements directory if it doesn't exist
     mkdir -p Requirements
     
-    # Create CPU requirements - this is the default
+    # Simply copy the base requirements file to the hardware-specific ones.
     cp Requirements/requirements.txt Requirements/requirements.cpu.txt
-    
-    # Create NVIDIA GPU requirements
     cp Requirements/requirements.txt Requirements/requirements.nvidia.txt
-    # Replace CPU-specific packages with GPU versions
-    sed -i 's/faiss-cpu==1.10.0/faiss-gpu==1.10.0/g' Requirements/requirements.nvidia.txt
-    # Add CUDA-specific packages if needed
-    
-    # Create AMD GPU requirements
     cp Requirements/requirements.txt Requirements/requirements.amd.txt
-    # Replace CPU-specific packages with AMD versions
-    sed -i 's/faiss-cpu==1.10.0/faiss-cpu==1.10.0/g' Requirements/requirements.amd.txt
-    # Add ROCm-specific packages if needed
 }
 
 # Clean up unnecessary files and folders
@@ -66,23 +56,20 @@ cleanup() {
     # Remove temporary files
     find . -name "*.tmp" -type f -delete
     
-    # Clean up old directories (with confirmation)
-    if [ -d "memory" ] || [ -d "config" ] || [ -d "scheduler" ] || [ -f "memory.config" ] || [ -f "projects.config" ]; then
-        echo -e "${YELLOW}Legacy directories and files detected.${NC}"
-        read -p "Would you like to remove old lowercase directories (memory, config, scheduler) and config files? (y/n): " clean_legacy
+    # Clean up legacy lowercase directories and config files if present
+    if [ -d "config" ] || [ -f "projects.config" ]; then
+        echo -e "${YELLOW}Legacy configuration files detected.${NC}"
+        read -p "Would you like to remove old lowercase directories (config) and config files? (y/n): " clean_legacy
         if [[ $clean_legacy =~ ^[Yy]$ ]]; then
-            echo -e "${YELLOW}Removing legacy directories and files...${NC}"
-            [ -d "memory" ] && rm -rf memory
+            echo -e "${YELLOW}Removing legacy configuration files...${NC}"
             [ -d "config" ] && rm -rf config
-            [ -d "scheduler" ] && rm -rf scheduler
-            [ -f "memory.config" ] && rm -f memory.config
             [ -f "projects.config" ] && rm -f projects.config
-            echo -e "${GREEN}Legacy directories and files removed.${NC}"
+            echo -e "${GREEN}Legacy configuration removed.${NC}"
         fi
     fi
     
-    # Ensure uppercase directory structure
-    mkdir -p Config Core Memory Tools Output Clients Docs Scheduler Requirements
+    # Ensure uppercase directory structure for Config, Core, Tools, Output, and Clients
+    mkdir -p Config Core Tools Output Clients Docs Scheduler Requirements
     
     echo -e "${GREEN}Cleanup complete.${NC}"
 }
@@ -94,111 +81,49 @@ setup_environment() {
     
     echo -e "${YELLOW}Setting up virtual environment...${NC}"
     
-    # Only remove existing .venv if skip_venv is false
     if [ "$skip_venv" = false ] && [ -d ".venv" ]; then
         echo -e "${YELLOW}Removing existing virtual environment...${NC}"
         rm -rf .venv
         
         # Create new virtual environment
         python -m venv .venv
-        
-        # Activate and upgrade pip
         source .venv/bin/activate
         python -m pip install --upgrade pip
         
-        # Pre-install lxml separately with specific options
-        echo -e "${YELLOW}Pre-installing lxml with explicit build options...${NC}"
-        pip install --no-binary :all: lxml || {
-            echo -e "${RED}Failed to build lxml. Trying with pre-built binary...${NC}"
-            pip install lxml || {
-                echo -e "${RED}Both methods to install lxml failed. The script will continue, but you may need to install lxml manually.${NC}"
-            }
-        }
-        
-        # Install dependencies based on hardware
         case $gpu_type in
-            0) # CPU
+            0)
                 echo -e "${YELLOW}Installing CPU dependencies...${NC}"
-                pip install -r Requirements/requirements.cpu.txt || {
-                    echo -e "${RED}Error during installation of dependencies.${NC}"
-                    echo -e "${YELLOW}Trying to install without lxml (already installed separately)...${NC}"
-                    grep -v "lxml" Requirements/requirements.cpu.txt > Requirements/temp_requirements.txt
-                    pip install -r Requirements/temp_requirements.txt
-                    rm Requirements/temp_requirements.txt
-                }
+                pip install -r Requirements/requirements.cpu.txt
                 ;;
-            1) # NVIDIA
+            1)
                 echo -e "${YELLOW}Installing NVIDIA GPU dependencies...${NC}"
-                pip install -r Requirements/requirements.nvidia.txt || {
-                    echo -e "${RED}Error during installation of dependencies.${NC}"
-                    echo -e "${YELLOW}Trying to install without lxml (already installed separately)...${NC}"
-                    grep -v "lxml" Requirements/requirements.nvidia.txt > Requirements/temp_requirements.txt
-                    pip install -r Requirements/temp_requirements.txt
-                    rm Requirements/temp_requirements.txt
-                }
+                pip install -r Requirements/requirements.nvidia.txt
                 ;;
-            2) # AMD
+            2)
                 echo -e "${YELLOW}Installing AMD GPU dependencies...${NC}"
-                pip install -r Requirements/requirements.amd.txt || {
-                    echo -e "${RED}Error during installation of dependencies.${NC}"
-                    echo -e "${YELLOW}Trying to install without lxml (already installed separately)...${NC}"
-                    grep -v "lxml" Requirements/requirements.amd.txt > Requirements/temp_requirements.txt
-                    pip install -r Requirements/temp_requirements.txt
-                    rm Requirements/temp_requirements.txt
-                }
+                pip install -r Requirements/requirements.amd.txt
                 ;;
         esac
     elif [ -d ".venv" ]; then
         echo -e "${GREEN}Using existing virtual environment.${NC}"
         source .venv/bin/activate
     else
-        # Create new virtual environment
         python -m venv .venv
-        
-        # Activate and upgrade pip
         source .venv/bin/activate
         python -m pip install --upgrade pip
         
-        # Pre-install lxml separately with specific options
-        echo -e "${YELLOW}Pre-installing lxml with explicit build options...${NC}"
-        pip install --no-binary :all: lxml || {
-            echo -e "${RED}Failed to build lxml. Trying with pre-built binary...${NC}"
-            pip install lxml || {
-                echo -e "${RED}Both methods to install lxml failed. The script will continue, but you may need to install lxml manually.${NC}"
-            }
-        }
-        
-        # Install dependencies based on hardware
         case $gpu_type in
-            0) # CPU
+            0)
                 echo -e "${YELLOW}Installing CPU dependencies...${NC}"
-                pip install -r Requirements/requirements.cpu.txt || {
-                    echo -e "${RED}Error during installation of dependencies.${NC}"
-                    echo -e "${YELLOW}Trying to install without lxml (already installed separately)...${NC}"
-                    grep -v "lxml" Requirements/requirements.cpu.txt > Requirements/temp_requirements.txt
-                    pip install -r Requirements/temp_requirements.txt
-                    rm Requirements/temp_requirements.txt
-                }
+                pip install -r Requirements/requirements.cpu.txt
                 ;;
-            1) # NVIDIA
+            1)
                 echo -e "${YELLOW}Installing NVIDIA GPU dependencies...${NC}"
-                pip install -r Requirements/requirements.nvidia.txt || {
-                    echo -e "${RED}Error during installation of dependencies.${NC}"
-                    echo -e "${YELLOW}Trying to install without lxml (already installed separately)...${NC}"
-                    grep -v "lxml" Requirements/requirements.nvidia.txt > Requirements/temp_requirements.txt
-                    pip install -r Requirements/temp_requirements.txt
-                    rm Requirements/temp_requirements.txt
-                }
+                pip install -r Requirements/requirements.nvidia.txt
                 ;;
-            2) # AMD
+            2)
                 echo -e "${YELLOW}Installing AMD GPU dependencies...${NC}"
-                pip install -r Requirements/requirements.amd.txt || {
-                    echo -e "${RED}Error during installation of dependencies.${NC}"
-                    echo -e "${YELLOW}Trying to install without lxml (already installed separately)...${NC}"
-                    grep -v "lxml" Requirements/requirements.amd.txt > Requirements/temp_requirements.txt
-                    pip install -r Requirements/temp_requirements.txt
-                    rm Requirements/temp_requirements.txt
-                }
+                pip install -r Requirements/requirements.amd.txt
                 ;;
         esac
     fi
@@ -207,11 +132,7 @@ setup_environment() {
     cat > activate.nu << 'EOF'
 let virtual_env = ([$env.VIRTUAL_ENV, '.venv'] | path join)
 let bin = ([$virtual_env, 'bin'] | path join)
-
-# This puts the venv binary directory at the front of PATH
 let-env PATH = ($bin | append $env.PATH)
-
-# This sets VIRTUAL_ENV environment variable
 let-env VIRTUAL_ENV = $virtual_env
 EOF
     
@@ -221,345 +142,85 @@ EOF
 # Function to check for system dependencies
 check_system_dependencies() {
     echo -e "${YELLOW}Checking system dependencies...${NC}"
-    
-    # Check for libxml2 and libxslt development packages
-    if command -v apt-get &> /dev/null; then
-        # Debian/Ubuntu
-        if ! dpkg -l libxml2-dev libxslt-dev python3-dev gcc &>/dev/null | grep -q "^ii"; then
-            echo -e "${YELLOW}Missing required system dependencies for lxml.${NC}"
-            echo -e "${YELLOW}The following packages are required: libxml2-dev libxslt-dev python3-dev gcc${NC}"
-            read -p "Would you like to install them now? (y/n): " install_deps
-            if [[ $install_deps =~ ^[Yy]$ ]]; then
-                echo -e "${YELLOW}Installing dependencies...${NC}"
-                sudo apt-get update && sudo apt-get install -y libxml2-dev libxslt-dev python3-dev gcc
-            else
-                echo -e "${RED}Warning: lxml installation may fail without these dependencies.${NC}"
-                echo -e "${YELLOW}You can install them manually with: sudo apt-get install libxml2-dev libxslt-dev python3-dev gcc${NC}"
-            fi
-        fi
-    elif command -v yum &> /dev/null; then
-        # RedHat/CentOS/Fedora
-        if ! rpm -q libxml2-devel libxslt-devel python3-devel gcc &>/dev/null; then
-            echo -e "${YELLOW}Missing required system dependencies for lxml.${NC}"
-            echo -e "${YELLOW}The following packages are required: libxml2-devel libxslt-devel python3-devel gcc${NC}"
-            read -p "Would you like to install them now? (y/n): " install_deps
-            if [[ $install_deps =~ ^[Yy]$ ]]; then
-                echo -e "${YELLOW}Installing dependencies...${NC}"
-                sudo yum install -y libxml2-devel libxslt-devel python3-devel gcc
-            else
-                echo -e "${RED}Warning: lxml installation may fail without these dependencies.${NC}"
-                echo -e "${YELLOW}You can install them manually with: sudo yum install libxml2-devel libxslt-devel python3-devel gcc${NC}"
-            fi
-        fi
-    elif command -v pacman &> /dev/null; then
-        # Arch Linux
-        if ! pacman -Q libxml2 libxslt python gcc python-setuptools &>/dev/null || ! pacman -Q libxml2-devel libxslt-devel &>/dev/null 2>/dev/null; then
-            echo -e "${YELLOW}Missing required system dependencies for lxml.${NC}"
-            echo -e "${YELLOW}The following packages are required for Arch Linux:${NC}"
-            echo -e "${YELLOW}- libxml2${NC}"
-            echo -e "${YELLOW}- libxslt${NC}" 
-            echo -e "${YELLOW}- python${NC}"
-            echo -e "${YELLOW}- gcc${NC}"
-            echo -e "${YELLOW}- python-setuptools${NC}"
-            echo -e "${YELLOW}You may also need additional dev packages if available in your repositories:${NC}"
-            echo -e "${YELLOW}- libxml2-devel${NC}"
-            echo -e "${YELLOW}- libxslt-devel${NC}"
-            
-            read -p "Would you like to install the main dependencies now? (y/n): " install_deps
-            if [[ $install_deps =~ ^[Yy]$ ]]; then
-                echo -e "${YELLOW}Installing dependencies...${NC}"
-                sudo pacman -S --noconfirm libxml2 libxslt python gcc python-setuptools
-                
-                # Try to install dev packages if they exist in the repository
-                sudo pacman -S --noconfirm libxml2-devel libxslt-devel 2>/dev/null || true
-            else
-                echo -e "${RED}Warning: lxml installation may fail without these dependencies.${NC}"
-                echo -e "${YELLOW}You can install them manually with: sudo pacman -S libxml2 libxslt python gcc python-setuptools${NC}"
-            fi
-        fi
-        
-        # Set CFLAGS for Arch Linux to help with compiling lxml
-        export CFLAGS="-I/usr/include/libxml2 $CFLAGS"
-        export LDFLAGS="-L/usr/lib $LDFLAGS"
-        
-        # On Arch, the dev packages are sometimes named differently
-        if [ -d "/usr/include/libxml2" ]; then
-            export CFLAGS="-I/usr/include/libxml2 $CFLAGS"
-        fi
-        
-    elif command -v brew &> /dev/null; then
-        # macOS with Homebrew
-        if ! brew list libxml2 libxslt &>/dev/null; then
-            echo -e "${YELLOW}Missing required system dependencies for lxml.${NC}"
-            echo -e "${YELLOW}The following packages are required: libxml2 libxslt${NC}"
-            read -p "Would you like to install them now? (y/n): " install_deps
-            if [[ $install_deps =~ ^[Yy]$ ]]; then
-                echo -e "${YELLOW}Installing dependencies...${NC}"
-                brew install libxml2 libxslt
-            else
-                echo -e "${RED}Warning: lxml installation may fail without these dependencies.${NC}"
-                echo -e "${YELLOW}You can install them manually with: brew install libxml2 libxslt${NC}"
-            fi
-        fi
-        
-        # Export PKG_CONFIG_PATH on macOS to help find the libraries
-        export PKG_CONFIG_PATH="$(brew --prefix libxml2)/lib/pkgconfig:$(brew --prefix libxslt)/lib/pkgconfig:$PKG_CONFIG_PATH"
-        # Set CFLAGS for macOS
-        export CFLAGS="-I$(brew --prefix libxml2)/include/libxml2 -I$(brew --prefix libxslt)/include $CFLAGS"
-        export LDFLAGS="-L$(brew --prefix libxml2)/lib -L$(brew --prefix libxslt)/lib $LDFLAGS"
-    else
-        echo -e "${YELLOW}Unable to detect package manager. Please ensure libxml2 and libxslt development packages are installed manually.${NC}"
-        echo -e "${YELLOW}These are required for the lxml package to build successfully.${NC}"
-    fi
-    
-    # Print environment information 
-    echo -e "${YELLOW}Environment information for diagnosing lxml installation issues:${NC}"
-    echo -e "${CYAN}Python version:${NC} $(python --version 2>&1)"
-    echo -e "${CYAN}System:${NC} $(uname -a)"
-    if [ -n "$CFLAGS" ]; then
-        echo -e "${CYAN}CFLAGS:${NC} $CFLAGS"
-    fi
-    if [ -n "$LDFLAGS" ]; then
-        echo -e "${CYAN}LDFLAGS:${NC} $LDFLAGS"
-    fi
-    if [ -n "$PKG_CONFIG_PATH" ]; then
-        echo -e "${CYAN}PKG_CONFIG_PATH:${NC} $PKG_CONFIG_PATH"
-    fi
+    echo -e "${GREEN}No additional system dependencies are required for this implementation.${NC}"
 }
 
 # Function to setup the agent
 setup_agent() {
     echo -e "${CYAN}${BOLD}Setting up Agent${NC}"
     
-    # Clean up first
     cleanup
-    
-    # Create standard directory structure
-    echo -e "${YELLOW}Creating standard directory structure...${NC}"
     mkdir -p Config/SystemPrompts Config/defaults
-    mkdir -p Core Memory Tools Output Clients Docs Scheduler Requirements
+    mkdir -p Core Tools Output Clients Docs Scheduler Requirements
     
-    # Create requirements files for different hardware
     create_requirement_files
-    
-    # Check for system dependencies
     check_system_dependencies
     
-    # Detect hardware
     detect_gpu
     local gpu_type=$?
     
-    # Ask if we should reuse the existing venv and check if it has all required packages
     local skip_venv=false
     if [ -d ".venv" ]; then
         echo -e "${YELLOW}Existing virtual environment detected.${NC}"
-        
-        # Check if the virtual environment is activated properly
-        local venv_activation_failed=false
         if [[ -z "$VIRTUAL_ENV" ]]; then
-            source .venv/bin/activate 2>/dev/null || {
-                echo -e "${RED}Failed to activate existing virtual environment. Creating a new one.${NC}"
-                skip_venv=false
-                venv_activation_failed=true
-            }
+            source .venv/bin/activate 2>/dev/null || { echo -e "${RED}Failed to activate existing virtual environment. Creating a new one.${NC}"; skip_venv=false; }
         fi
-        
-        # Skip the rest of the checks if activation failed
-        if [ "$venv_activation_failed" = true ]; then
-            # We can't use continue here as we're not in a loop
-            # Just set flags to create a new environment and skip the remaining checks
-            skip_venv=false
-        else
-            echo -e "${YELLOW}Checking if virtual environment has all required packages...${NC}"
-            
-            # Get a list of required packages by name (without version)
-            local required_packages=$(grep -v "^#" Requirements/requirements.txt | cut -d'=' -f1 | grep -v "^$")
-            local missing_packages=()
-            
-            # Check each required package
-            for package in $required_packages; do
-                if ! python -c "import $package" &>/dev/null && ! python -c "import $(echo $package | tr '-' '_')" &>/dev/null; then
-                    missing_packages+=("$package")
-                fi
-            done
-            
-            # Special case for packages that can't be imported directly
-            if ! python -c "import sklearn" &>/dev/null; then
-                missing_packages+=("scikit-learn")
-            fi
-            
-            if [ ${#missing_packages[@]} -gt 0 ]; then
-                echo -e "${YELLOW}The existing virtual environment is missing some required packages:${NC}"
-                for pkg in "${missing_packages[@]}"; do
-                    echo -e "  - ${CYAN}$pkg${NC}"
-                done
-                
-                read -p "Would you like to reuse and update the existing environment? (y/n): " reuse_venv
-                if [[ $reuse_venv =~ ^[Yy]$ ]]; then
-                    skip_venv=true
-                    echo -e "${YELLOW}Will update the existing virtual environment.${NC}"
-                    
-                    # Pre-install lxml if it's in the missing packages
-                    if [[ " ${missing_packages[*]} " =~ " lxml " ]]; then
-                        echo -e "${YELLOW}Pre-installing missing lxml with explicit build options...${NC}"
-                        pip install --no-binary :all: lxml || {
-                            echo -e "${RED}Failed to build lxml. Trying with pre-built binary...${NC}"
-                            pip install lxml || {
-                                echo -e "${RED}Both methods to install lxml failed. Will attempt to continue.${NC}"
-                            }
-                        }
-                    fi
-                    
-                    # Install missing packages
-                    echo -e "${YELLOW}Installing missing packages...${NC}"
-                    for pkg in "${missing_packages[@]}"; do
-                        if [ "$pkg" != "lxml" ]; then  # Skip lxml as we tried to install it earlier
-                            echo -e "${CYAN}Installing $pkg...${NC}"
-                            pip install "$pkg" || echo -e "${RED}Failed to install $pkg${NC}"
-                        fi
-                    done
-                else
-                    echo -e "${YELLOW}Will create a new virtual environment.${NC}"
-                    skip_venv=false
-                fi
-            else
-                echo -e "${GREEN}Virtual environment has all required packages.${NC}"
-                read -p "Would you like to reuse it? (y/n): " reuse_venv
-                if [[ $reuse_venv =~ ^[Yy]$ ]]; then
-                    skip_venv=true
-                fi
-            fi
+        echo -e "${GREEN}Using existing virtual environment.${NC}"
+        read -p "Would you like to reuse it? (y/n): " reuse_venv
+        if [[ $reuse_venv =~ ^[Yy]$ ]]; then
+            skip_venv=true
         fi
     fi
     
-    # Setup environment based on detected hardware
     setup_environment $gpu_type $skip_venv
     
-    # Ensure config files exist
     if [ ! -f "Config/config.yaml" ]; then
         echo -e "${YELLOW}Creating default configuration...${NC}"
         mkdir -p Config/defaults
-        
-        # Create default config file
         cat > Config/defaults/default_config.yaml << 'EOF'
 # Default Agent Configuration
 
-# Base paths for agent operation
 paths:
-  # Memory storage location - where all agent memory will be stored
-  memory_dir: memory
-  
-  # Projects directory - where code projects will be managed
   projects_dir: projects
-  
-  # Temporary file storage
-  temp_dir: ${paths.memory_dir}/temp
-  
-  # Backup directory for agent memory
-  backup_dir: ${paths.memory_dir}/backups
 
-# Memory system configuration
-memory:
-  # Maximum size for indexed documents in bytes (1MB)
-  max_document_size: 1048576
-  
-  # Maximum number of entries in vector index
-  max_indexed_entries: 10000
-  
-  # Maximum number of backups to keep
-  max_backups: 5
-  
-  # Backup interval in seconds (1 hour)
-  backup_interval: 3600
-  
-  # Context keys to track
-  context_keys:
-    - system_config
-    - tool_usage
-    - error_history
-    - active_projects
-    - agent_notes
-    - status_updates
-    - command_skills
-    - knowledge_base
-    - important
-    - task
-    - mind_map
-    - code
-    - project
-
-# LLM model configuration
 llm:
-  # Default model to use
   default_model: deepseek
-  
-  # Available models
   models:
     - anthropic
     - deepseek
-  
-  # Model-specific settings
   anthropic:
     temperature: 0.7
     max_tokens: 4000
-  
   deepseek:
     temperature: 0.7
     max_tokens: 4000
 
-# Agent behavior configuration
 agent:
-  # Whether to run in headless mode (no interactive prompts)
   headless: false
-  
-  # Whether to run in test mode (no actual commands executed)
   test_mode: false
-  
-  # Maximum inactivity time in seconds before agent auto-terminates (1 hour)
   max_inactivity: 3600
-  
-  # Whether to allow internet access
   allow_internet: true
 
-# Security settings
-security:
-  # Maximum file size the agent can create/modify (100MB)
-  max_file_size: 104857600
-
-# Logging configuration
 logging:
-  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
   level: INFO
-  
-  # Whether to log to file
   log_to_file: true
-  
-  # Log file path
-  log_file: ${paths.memory_dir}/logs/agent.log
-  
-  # Whether to log command executions
+  log_file: Config/agent.log
   log_commands: true
 EOF
-
-        # Copy default config to main config
         cp Config/defaults/default_config.yaml Config/config.yaml
         echo -e "${GREEN}Default configuration created.${NC}"
     fi
     
-    # Create required directories
-    echo -e "${YELLOW}Creating required directories...${NC}"
-    mkdir -p Memory/Data Memory/Graph Memory/Hierarchy Memory/Manager Memory/Temporal Memory/Text Memory/Vector
-    
     echo -e "${GREEN}Setup complete!${NC}"
     echo -e "${YELLOW}For bash, use: ${NC}source .venv/bin/activate"
     echo -e "${YELLOW}For nushell, use: ${NC}source activate.nu"
+    echo -e "${YELLOW}To run all tests, use: ${NC}python test.py"
 }
 
 # Function to restore the agent to a clean state
 restore_agent() {
     echo -e "${CYAN}${BOLD}Restoring Agent to clean state${NC}"
-    echo -e "${RED}WARNING: This will delete all local changes, reset to the remote repository state, and reinitialize the agent.${NC}"
-    echo -e "${RED}Only your .venv directory and .env file will be preserved.${NC}"
+    echo -e "${RED}WARNING: This will delete all local changes and reset to the remote repository state.${NC}"
     read -p "Are you sure you want to continue? (y/n): " confirm
     if [[ ! $confirm =~ ^[Yy]$ ]]; then
         echo -e "${YELLOW}Restore operation cancelled.${NC}"
@@ -571,44 +232,27 @@ restore_agent() {
     local backup_dir="agent_backup_$backup_time"
     mkdir -p "$backup_dir"
     
-    # Save current config if it exists
     if [ -f "Config/config.yaml" ]; then
         mkdir -p "$backup_dir/Config"
         cp -r Config "$backup_dir/"
         echo -e "${GREEN}Configuration backed up at $backup_dir/Config${NC}"
     fi
     
-    # Backup memory directory if it exists (both lowercase and uppercase)
-    if [ -d "Memory" ]; then
-        cp -r Memory "$backup_dir/"
-        echo -e "${GREEN}Memory backup created at $backup_dir/Memory${NC}"
-    fi
-    if [ -d "memory" ]; then
-        cp -r memory "$backup_dir/memory_old"
-        echo -e "${GREEN}Old memory backup created at $backup_dir/memory_old${NC}"
-    fi
-    
-    # Backup .env file if it exists
     if [ -f ".env" ]; then
         cp .env "$backup_dir/"
         echo -e "${GREEN}Environment file backed up at $backup_dir/.env${NC}"
     fi
     
-    # Determine if .venv exists to restore it later
     has_venv=false
     if [ -d ".venv" ]; then
         has_venv=true
-        echo -e "${YELLOW}Detected existing virtual environment, it will be preserved.${NC}"
+        echo -e "${YELLOW}Existing virtual environment detected; it will be preserved.${NC}"
     fi
     
-    # Get the name of the current branch
     current_branch=$(git rev-parse --abbrev-ref HEAD)
-    
-    # Fetch latest from remote
     echo -e "${YELLOW}Fetching latest updates from remote...${NC}"
     git fetch origin
     
-    # Stash .env and Config if they exist (to prevent them from being removed)
     if [ -f ".env" ]; then
         cp .env .env.tmp
     fi
@@ -617,15 +261,11 @@ restore_agent() {
         cp -r Config/* Config.tmp/ 2>/dev/null || true
     fi
     
-    # Clean all untracked files and directories
     echo -e "${YELLOW}Removing all untracked files and directories...${NC}"
     git clean -xdf --exclude=.venv --exclude=.env.tmp --exclude=Config.tmp
-    
-    # Reset all changes to tracked files
     echo -e "${YELLOW}Resetting all local changes...${NC}"
     git reset --hard origin/$current_branch
     
-    # Restore .env file and Config directory
     if [ -f ".env.tmp" ]; then
         mv .env.tmp .env
         echo -e "${GREEN}.env file restored${NC}"
@@ -637,34 +277,18 @@ restore_agent() {
         echo -e "${GREEN}Configuration restored${NC}"
     fi
     
-    # Run setup process automatically
     echo -e "${YELLOW}Running setup process...${NC}"
-    
-    # Create standard directory structure
-    echo -e "${YELLOW}Creating standard directory structure...${NC}"
     mkdir -p Config/SystemPrompts Config/defaults
-    mkdir -p Core Memory Tools Output Clients Docs Scheduler Requirements
-    
-    # Clean up first
     cleanup
-    
-    # Create requirements files for different hardware
     create_requirement_files
-    
-    # Detect hardware
     detect_gpu
     local gpu_type=$?
     
-    # Setup environment using existing venv if available
     if [ "$has_venv" = true ]; then
         setup_environment $gpu_type true
     else
         setup_environment $gpu_type false
     fi
-    
-    # Create required memory structure
-    echo -e "${YELLOW}Creating memory directories...${NC}"
-    mkdir -p Memory/Data Memory/Graph Memory/Hierarchy Memory/Manager Memory/Temporal Memory/Text Memory/Vector
     
     echo -e "${GREEN}Complete restoration and setup finished!${NC}"
     echo -e "${GREEN}The Agent has been reset to the remote repository state and reinitialized.${NC}"
@@ -675,13 +299,11 @@ restore_agent() {
 update_agent() {
     echo -e "${CYAN}${BOLD}Updating Agent from Git${NC}"
     
-    # Check if this is a git repository
     if [ ! -d ".git" ]; then
         echo -e "${RED}This doesn't appear to be a git repository.${NC}"
         return
     fi
     
-    # Check for uncommitted changes
     if ! git diff-index --quiet HEAD --; then
         echo -e "${RED}You have uncommitted changes. Please commit or stash them before updating.${NC}"
         git status
@@ -697,11 +319,7 @@ update_agent() {
     
     echo -e "${YELLOW}Fetching latest updates...${NC}"
     git fetch
-    
-    # Get current branch
     current_branch=$(git rev-parse --abbrev-ref HEAD)
-    
-    # Count how many commits we're behind
     behind_count=$(git rev-list --count HEAD..origin/$current_branch)
     
     if [ "$behind_count" -eq "0" ]; then
@@ -710,11 +328,8 @@ update_agent() {
     fi
     
     echo -e "${YELLOW}Your branch is behind by $behind_count commits.${NC}"
-    
-    # Show what changes will be pulled
     echo -e "${YELLOW}Changes to be pulled:${NC}"
     git log --oneline --no-merges HEAD..origin/$current_branch
-    
     read -p "Do you want to pull these changes? (y/n): " confirm_pull
     if [[ ! $confirm_pull =~ ^[Yy]$ ]]; then
         echo -e "${YELLOW}Update cancelled.${NC}"
@@ -724,31 +339,15 @@ update_agent() {
     echo -e "${YELLOW}Pulling updates...${NC}"
     if git pull; then
         echo -e "${GREEN}Update successful!${NC}"
-        
-        # Check if requirements have changed
         echo -e "${YELLOW}Checking for dependency changes...${NC}"
         if git diff HEAD@{1} HEAD -- Requirements/requirements.txt | grep -q "^[+-]"; then
             echo -e "${YELLOW}Dependencies have changed. Updating virtual environment...${NC}"
-            
-            # Check for system dependencies first
             check_system_dependencies
-            
-            # Detect hardware
             detect_gpu
             local gpu_type=$?
-            
-            # Update requirement files
             create_requirement_files
-            
-            # Setup environment without recreating venv
             setup_environment $gpu_type true
         fi
-        
-        # Run any post-update steps if needed
-        echo -e "${YELLOW}Running post-update steps...${NC}"
-        # Example: migrations or data structure updates would go here
-        # For now, we just make sure all directories exist
-        mkdir -p Memory/Data Memory/Graph Memory/Hierarchy Memory/Manager Memory/Temporal Memory/Text Memory/Vector
     else
         echo -e "${RED}Update failed. Please check the error messages above.${NC}"
     fi
@@ -786,7 +385,6 @@ show_menu() {
             ;;
     esac
     
-    # Return to menu after operation completes
     if [[ $choice =~ ^[123]$ ]]; then
         echo
         read -p "Press Enter to return to the main menu..."

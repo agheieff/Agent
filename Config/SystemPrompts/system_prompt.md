@@ -202,6 +202,8 @@ When you request input, the agent will:
 ## File Operations: Must read or confirm a file before editing or replacing:
 The agent has enhanced file operation capabilities that are more efficient than using shell commands. Use these XML tags for file operations:
 
+IMPORTANT: You can use full file system paths AND the home directory shorthand "~". Your working directory is the directory you launched from, but you can access any path on the system (that you have permission for). For example, "~/my_project" refers to a directory in the user's home directory, not a subdirectory of your working directory.
+
 ```xml
 <view>
 file_path: /path/to/file.txt

@@ -5,6 +5,7 @@ import json
 import re
 import time
 import uuid
+import select
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
@@ -696,24 +697,32 @@ class AutonomousAgent:
                 
                 # Process bash or python commands
                 if cmd_type in ["bash", "python"]:
-                    # Add nicer command display
-                    if cmd_type == "bash":
-                        print(f"\n> Running bash command:\n")
-                    else:
-                        print(f"\n> Running python command:\n")
+                    # Execute the command and display result inline
+                    command_preview = command.splitlines()[0]
+                    if len(command_preview) > 60:
+                        command_preview = command_preview[:57] + "..."
                         
-                    # Show command with slight formatting improvement
-                    command_lines = command.splitlines()
-                    if len(command_lines) > 1:
-                        print(command_lines[0])
-                        for line in command_lines[1:]:
-                            print(f"  {line}")
-                    else:
-                        print(command)
-                    print("\n" + "-" * 40)  # Separator line
+                    print(f"> {cmd_type}: {command_preview}", end="", flush=True)
                     
                     # Execute the command
                     stdout, stderr, code = await self.system_control.execute_command(cmd_type, command)
+                    
+                    # Display result on the same line or just below
+                    if code == 0:
+                        print(f" ✓")  # Success indicator
+                    else:
+                        print(f" ✗ (exit code: {code})")  # Error indicator
+                        
+                    # Show compact output if there's any
+                    if stdout or stderr:
+                        output = stdout if stdout else stderr
+                        # Limit to 3 lines max
+                        lines = output.splitlines()[:3]
+                        for line in lines:
+                            print(f"  {line}")
+                        if len(output.splitlines()) > 3:
+                            print("  ...")
+                    
                     self.agent_state['commands_executed'] += 1
                     self.agent_state['last_active'] = datetime.now().isoformat()
                     
@@ -826,12 +835,23 @@ class AutonomousAgent:
             # Log the parsed parameters for debugging
             logger.debug(f"Parsed file operation parameters: {params}")
             
+            # Helper function to handle tilde expansion in paths
+            def expand_path(path):
+                if path and path.startswith("~"):
+                    from pathlib import Path
+                    home_dir = str(Path.home())
+                    return home_dir + path[1:]
+                return path
+                
             # Execute the appropriate file operation with better error handling
             if op_type == "view":
                 file_path = params.get("file_path")
                 if not file_path:
-                    print("\nError: Missing required parameter 'file_path' for view operation")
+                    print("Error: Missing required parameter 'file_path' for view operation")
                     return
+                
+                # Handle tilde expansion
+                file_path = expand_path(file_path)
                     
                 offset = 0
                 limit = 2000
@@ -841,76 +861,191 @@ class AutonomousAgent:
                     if "limit" in params:
                         limit = int(params["limit"])
                 except ValueError as e:
-                    print(f"\nError: Invalid offset or limit value: {e}")
+                    print(f"Error: Invalid offset or limit value: {e}")
                     return
                 
                 result = await self.system_control.view_file(file_path, offset, limit)
-                print(f"\n--- Contents of {file_path} ---\n")
-                print(result)
+                line_count = len(result.splitlines())
+                print(f"📄 Viewed {file_path} ({line_count} lines)")
+                
+                # For large files, only show a preview
+                if line_count > 5 and limit > 10:
+                    print("  First 3 lines:")
+                    for line in result.splitlines()[:3]:
+                        truncated = line[:80] + "..." if len(line) > 80 else line
+                        print(f"  {truncated}")
+                    print("  ...")
+                else:
+                    print(result)
                 
             elif op_type == "edit":
                 file_path = params.get("file_path")
                 if not file_path:
-                    print("\nError: Missing required parameter 'file_path' for edit operation")
+                    print("Error: Missing required parameter 'file_path' for edit operation")
                     return
+                
+                # Handle tilde expansion
+                file_path = expand_path(file_path)
                     
                 old_string = params.get("old_string", "")
                 new_string = params.get("new_string", "")
                 
                 result = await self.system_control.edit_file(file_path, old_string, new_string)
-                print(f"\n--- Edit result for {file_path} ---\n")
-                print(result)
+                
+                # Show a compact summary of the edit
+                if "successfully" in result.lower():
+                    old_lines = old_string.count('\n') + 1
+                    new_lines = new_string.count('\n') + 1
+                    print(f"✏️ Edited {file_path}: replaced {old_lines} line(s) with {new_lines} line(s)")
+                else:
+                    print(f"❌ Edit failed: {result}")
                 
             elif op_type == "replace":
                 file_path = params.get("file_path")
                 if not file_path:
-                    print("\nError: Missing required parameter 'file_path' for replace operation")
+                    print("Error: Missing required parameter 'file_path' for replace operation")
                     return
+                
+                # Handle tilde expansion
+                file_path = expand_path(file_path)
                     
                 content = params.get("content", "")
+                line_count = content.count('\n') + 1
                 
                 result = await self.system_control.replace_file(file_path, content)
-                print(f"\n--- Replace result for {file_path} ---\n")
-                print(result)
+                
+                # Show a compact summary of the replacement
+                if "successfully" in result.lower():
+                    print(f"💾 Replaced {file_path} with {line_count} lines of content")
+                else:
+                    print(f"❌ Replace failed: {result}")
                 
             elif op_type == "glob":
                 pattern = params.get("pattern")
                 if not pattern:
-                    print("\nError: Missing required parameter 'pattern' for glob operation")
+                    print("Error: Missing required parameter 'pattern' for glob operation")
                     return
                     
                 path = params.get("path")
+                # Handle tilde expansion
+                path = expand_path(path) if path else path
                 
                 results = await self.system_control.glob_search(pattern, path)
-                print(f"\n--- Glob search results for pattern '{pattern}' ---\n")
-                for result in results:
-                    print(result)
-                    
+                result_count = len(results)
+                print(f"🔍 Glob search for '{pattern}': found {result_count} file(s)")
+                
+                # Show compact results
+                if result_count > 0:
+                    # Display up to 10 results, with an indicator if there are more
+                    max_display = min(10, result_count)
+                    for i in range(max_display):
+                        print(f"  {results[i]}")
+                    if result_count > max_display:
+                        print(f"  ...and {result_count - max_display} more files")
+                
             elif op_type == "grep":
                 pattern = params.get("pattern")
                 if not pattern:
-                    print("\nError: Missing required parameter 'pattern' for grep operation")
+                    print("Error: Missing required parameter 'pattern' for grep operation")
                     return
                     
                 include = params.get("include")
                 path = params.get("path")
+                # Handle tilde expansion
+                path = expand_path(path) if path else path
                 
                 results = await self.system_control.grep_search(pattern, include, path)
-                print(f"\n--- Grep search results for pattern '{pattern}' ---\n")
-                for result in results:
-                    print(f"{result['file']}:{result['line_number']}: {result['line']}")
+                result_count = len(results)
+                include_str = f" in '{include}' files" if include else ""
+                print(f"🔍 Grep search for '{pattern}'{include_str}: {result_count} match(es)")
+                
+                # Show compact results
+                if result_count > 0:
+                    # Group by file
+                    files = {}
+                    for result in results:
+                        file_path = result['file']
+                        if file_path not in files:
+                            files[file_path] = []
+                        files[file_path].append((result['line_number'], result['line']))
                     
+                    # Display up to 5 files
+                    file_count = len(files)
+                    displayed_files = 0
+                    for file_path, matches in files.items():
+                        if displayed_files >= 5:
+                            break
+                        displayed_files += 1
+                        match_count = len(matches)
+                        print(f"  📄 {file_path} ({match_count} match(es))")
+                        
+                        # Display up to 3 matches per file
+                        for i, (line_num, line) in enumerate(matches[:3]):
+                            # Truncate long lines
+                            if len(line) > 60:
+                                line = line[:57] + "..."
+                            print(f"    {line_num}: {line}")
+                        
+                        if match_count > 3:
+                            print(f"    ...and {match_count - 3} more matches")
+                    
+                    if file_count > 5:
+                        print(f"  ...and matches in {file_count - 5} more files")
+                
             elif op_type == "ls":
                 path = params.get("path")
                 if not path:
-                    print("\nError: Missing required parameter 'path' for ls operation")
+                    print("Error: Missing required parameter 'path' for ls operation")
                     return
+                
+                # Handle tilde expansion
+                path = expand_path(path)
+                
+                try:
+                    result = await self.system_control.list_directory(path)
+                    item_count = len(result["entries"])
+                    dir_count = sum(1 for item in result["entries"] if item["is_dir"])
+                    file_count = item_count - dir_count
                     
-                result = await self.system_control.list_directory(path)
-                print(f"\n--- Directory listing for {path} ---\n")
-                for item in result["entries"]:
-                    item_type = "d" if item["is_dir"] else "f"
-                    print(f"{item_type} {item['name']}")
+                    print(f"📂 Directory '{path}': {dir_count} directories, {file_count} files")
+                    
+                    # Count special types
+                    hidden_count = sum(1 for item in result["entries"] if item["name"].startswith("."))
+                    
+                    if item_count > 0:
+                        # Group by type (directories first)
+                        dirs = [item for item in result["entries"] if item["is_dir"]]
+                        files = [item for item in result["entries"] if not item["is_dir"]]
+                        
+                        # Sort alphabetically
+                        dirs.sort(key=lambda x: x["name"])
+                        files.sort(key=lambda x: x["name"])
+                        
+                        # Display up to 5 directories
+                        if dirs:
+                            if len(dirs) <= 5:
+                                for item in dirs:
+                                    print(f"  📁 {item['name']}/")
+                            else:
+                                for item in dirs[:5]:
+                                    print(f"  📁 {item['name']}/")
+                                print(f"  ...and {len(dirs) - 5} more directories")
+                        
+                        # Display up to 5 files
+                        if files:
+                            if len(files) <= 5:
+                                for item in files:
+                                    print(f"  📄 {item['name']}")
+                            else:
+                                for item in files[:5]:
+                                    print(f"  📄 {item['name']}")
+                                print(f"  ...and {len(files) - 5} more files")
+                        
+                        # Special note for hidden files
+                        if hidden_count > 0:
+                            print(f"  ({hidden_count} hidden items)")
+                except Exception as e:
+                    print(f"❌ Error listing directory: {str(e)}")
                     
         except Exception as e:
             logger.error(f"Error processing file operation {op_type}: {e}")
@@ -922,8 +1057,6 @@ class AutonomousAgent:
         Uses readline for history if available.
         """
         self.agent_state['status'] = 'waiting_for_input'
-        prompt = "\n[User Input] > "  # Clearer prompt with newline
-        print(prompt, end="", flush=True)
         
         # Configure readline for history if it's available
         try:
@@ -949,10 +1082,45 @@ class AutonomousAgent:
         except (ImportError, ModuleNotFoundError):
             # Readline not available, continue without it
             pass
+        
+        try:
+            # Clear any pending input buffer before showing prompt
+            import sys
+            import termios
+            import tty
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                # Just check if there's input waiting but don't block
+                ready_to_read = select.select([sys.stdin], [], [], 0)[0]
+                if ready_to_read:
+                    # Clear pending input
+                    os.read(fd, 1024)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        except (ImportError, AttributeError, IOError):
+            # Not on Unix or terminal doesn't support these operations
+            pass
+        
+        # Show a clear, visible prompt
+        prompt = "\n[User Input] > "
+        print(prompt, end="", flush=True)
+        
+        # Visual indicator that input is being processed
+        def input_with_feedback():
+            try:
+                result = input()
+                return result
+            except EOFError:
+                return ""
             
         # Get input with asyncio to allow for other tasks
         loop = asyncio.get_event_loop()
-        user_input = await loop.run_in_executor(None, input)
+        user_input = await loop.run_in_executor(None, input_with_feedback)
+        
+        # Visual feedback that input was received
+        print(f"\n[Input received] Processing...", flush=True)
         
         self.agent_state['status'] = 'running'
         return user_input

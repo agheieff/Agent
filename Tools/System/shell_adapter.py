@@ -4,6 +4,7 @@ import sys
 import subprocess
 import logging
 from typing import Tuple, Dict, Any, Optional, List
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class ShellAdapter:
         self.shell_type = "bash" if sys.platform != "win32" else "cmd"
         self.interactive_shell = None
         self.interactive_process = None
+        self.home_directory = str(Path.home())
         
     async def execute_command(self, command: str, timeout: int = 30) -> Tuple[str, str, int]:
         """
@@ -32,6 +34,10 @@ class ShellAdapter:
             Tuple of (stdout, stderr, return_code)
         """
         try:
+            # Handle tilde expansion in paths
+            if "~" in command:
+                command = command.replace("~", self.home_directory)
+                
             logger.info(f"Executing command: {command}")
             
             # Security checks

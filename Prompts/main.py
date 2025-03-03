@@ -136,51 +136,54 @@ def discover_tools(tools_dir: str) -> List[Dict[str, Any]]:
     return tools
 
 
+
 def generate_tools_section(config: Dict[str, Any]) -> str:
-    tools_dir = config.get("paths", {}).get("tools_dir", "Tools")
-    tools = discover_tools(tools_dir)
+
+
 
     prompt = "## Available Tools\n\n"
 
-    if not tools:
-        prompt += "No tools discovered. Tools will be added as they become available.\n"
-        return prompt
 
-    tool_categories = {}
-    for tool in tools:
-        category = tool.get('category', 'Miscellaneous')
-        if category not in tool_categories:
-            tool_categories[category] = []
-        tool_categories[category].append(tool)
-
-    for category, category_tools in tool_categories.items():
-        prompt += f"### {category.title()} Tools\n\n"
-        for tool in category_tools:
-            prompt += generate_tool_overview(
-                tool['name'],
-                tool['description'],
-                tool['usage'],
-                tool['examples']
-            )
-            prompt += "\n"
-
+    prompt += (
+        "Commonly used built-in tools include:\n"
+        "- `/view` to view file contents\n"
+        "- `/write` to create a file\n"
+        "- `/replace` to replace entire file contents\n"
+        "- `/edit` to do a targeted single replacement in a file\n"
+        "- `/bash` to run arbitrary shell commands\n"
+        "- `/curl` to make HTTP requests\n"
+        "- `/telegram_send` and `/telegram_view` for Telegram operations\n"
+        "- And more...\n\n"
+        "Use `/tool_name --help` or `/tool_name -h` to see details for a specific tool.\n"
+    )
     return prompt
 
 
 def generate_best_practices() -> str:
     return """
 ## Best Practices
-
-To be added later TODO
+1. Thoroughly plan your steps before executing a system command.
+2. Keep track of changes you make to files and code.
+3. Frequently summarize or reflect on your progress (using /compact if it becomes too large).
+4. Use test mode if unsure about side effects.
 """
+
 
 def generate_memory_management() -> str:
     return """
 ## Memory Management
-
-To be added later TODO
+- You can store notes or data in memory for later recall.
+- The agent preserves conversation history across sessions, but you can summarize it with /compact.
+- Ensure you do not bloat memory with unnecessary details.
 """
 
+def generate_security_restrictions(config: Dict[str, Any]) -> str:
+
+    return """
+## Security Restrictions
+You should not leak credentials or destroy system files. 
+Exercise caution when using /bash for destructive actions.
+"""
 
 def generate_config_summary(config: Dict[str, Any]) -> str:
     prompt = "## Agent Configuration\n\n"
@@ -206,6 +209,20 @@ def generate_config_summary(config: Dict[str, Any]) -> str:
 
     return prompt
 
+def generate_session_summary(summary_path: Optional[str] = None) -> str:
+    if not summary_path:
+        summary_path = os.path.join(os.getcwd(), "Memory", "summaries", "last_session.txt")
+
+    if os.path.exists(summary_path):
+        try:
+            with open(summary_path, 'r') as f:
+                content = f.read().strip()
+                if content:
+                    return f"\n## Previous Session Summary\n{content}\n"
+        except:
+            pass
+
+    return ""
 
 def generate_final_guidelines() -> str:
     return """
@@ -232,7 +249,6 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         with open(config_path, 'r') as f:
             return yaml.safe_load(f) or {}
 
-
     standard_paths = [
         os.path.join(os.getcwd(), "Config", "config.yaml"),
         os.path.join(os.getcwd(), "config.yaml"),
@@ -244,25 +260,10 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             with open(path, 'r') as f:
                 return yaml.safe_load(f) or {}
 
-
     return {"agent": {"test_mode": False}}
 
-
-def generate_session_summary(summary_path: Optional[str] = None) -> str:
-    if not summary_path:
-        summary_path = os.path.join(os.getcwd(), "Memory", "summaries", "last_session.txt")
-
-    if os.path.exists(summary_path):
-        try:
-            with open(summary_path, 'r') as f:
-                content = f.read().strip()
-                if content:
-                    return f"\n## Previous Session Summary\n{content}\n"
-        except:
-            pass
-
-    return ""
-
+def generate_session_summary_wrapper(summary_path: Optional[str] = None) -> str:
+    return generate_session_summary(summary_path)
 
 def generate_system_prompt(config_path: Optional[str] = None, summary_path: Optional[str] = None) -> str:
     config = load_config(config_path)
@@ -277,7 +278,7 @@ def generate_system_prompt(config_path: Optional[str] = None, summary_path: Opti
         generate_memory_management(),
         generate_security_restrictions(config),
         generate_config_summary(config),
-        generate_session_summary(summary_path),
+        generate_session_summary_wrapper(summary_path),
         generate_final_guidelines()
     ]
 
@@ -292,3 +293,4 @@ def generate_system_prompt(config_path: Optional[str] = None, summary_path: Opti
 if __name__ == "__main__":
     prompt = generate_system_prompt()
     print(prompt)
+

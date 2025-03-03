@@ -243,14 +243,13 @@ async def main():
     system_prompt, user_prompt = llm.adjust_prompts(full_system_prompt, initial_prompt)
 
     agent = AutonomousAgent(
-        memory_manager=None,
-        session_manager=None,
         api_key=api_key,
         model=model,
         provider=provider,
         test_mode=config.get("agent.test_mode", False),
         config=config.to_dict()
     )
+
     agent.llm = llm
     current_agent = agent
 

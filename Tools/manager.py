@@ -3,9 +3,9 @@ import asyncio
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
 
-from Tools.parser import ToolParser
+from Core.parser import ToolParser
 from Tools.executor import execute_tool
-from Tools.composer import ToolResponseComposer
+from Core.composer import ToolResponseComposer
 
 try:
     from Output.output_manager import output_manager

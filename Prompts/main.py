@@ -141,15 +141,10 @@ def discover_tools(tools_dir: str) -> List[Dict[str, Any]]:
 
 
 def generate_tools_section(config: Dict[str, Any]) -> str:
-
-
-
     prompt = "## Available Tools\n\n"
-
-
     prompt += (
         "Commonly used built-in tools include:\n"
-        "- `/view` to view file contents\n"
+        "- `/read` to read file contents\n"
         "- `/write` to create a file\n"
         "- `/replace` to replace entire file contents\n"
         "- `/edit` to do a targeted single replacement in a file\n"
@@ -159,6 +154,7 @@ def generate_tools_section(config: Dict[str, Any]) -> str:
         "- And more...\n\n"
         "Use `/tool_name --help` or `/tool_name -h` to see details for a specific tool.\n"
     )
+
     return prompt
 
 

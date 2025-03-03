@@ -36,7 +36,7 @@ class ToolManager:
 
             if output_manager:
                 await output_manager.handle_tool_output(tool_name, result)
-            
+
             results.append((tool_name, params, result))
 
         if results:
@@ -45,19 +45,19 @@ class ToolManager:
 
     async def execute_single_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         result = await execute_tool(tool_name, params)
-        
+
         if output_manager:
             await output_manager.handle_tool_output(tool_name, result)
-            
+
         return result
 
     async def execute_tools_concurrently(self, tool_requests: List[Tuple[str, Dict[str, Any]]]) -> List[Tuple[str, Dict[str, Any], Dict[str, Any]]]:
         async def _execute_tool(tool_name, params):
             result = await execute_tool(tool_name, params)
-            
+
             if output_manager:
                 await output_manager.handle_tool_output(tool_name, result)
-                
+
             return tool_name, params, result
 
         tasks = [_execute_tool(name, params) for name, params in tool_requests]

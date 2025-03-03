@@ -6,7 +6,7 @@ import os
 import logging
 from typing import Dict, Any, Optional
 
-# Tool metadata
+
 TOOL_NAME = "write"
 TOOL_DESCRIPTION = "Create a new file with the specified content"
 TOOL_HELP = """
@@ -41,13 +41,11 @@ TOOL_NOTES = """
 logger = logging.getLogger(__name__)
 
 def _ensure_absolute_path(path: str) -> str:
-    """Convert a potentially relative path to an absolute path."""
     if not os.path.isabs(path):
         return os.path.abspath(os.path.join(os.getcwd(), path))
     return path
 
 def _get_help() -> Dict[str, Any]:
-    """Return help information for this tool."""
     example_text = "\nExamples:\n" + "\n".join(
         [f"  {example[0]}\n    {example[1]}" for example in TOOL_EXAMPLES]
     )
@@ -62,37 +60,23 @@ def _get_help() -> Dict[str, Any]:
 
 async def tool_write(file_path: str = None, content: str = None, mkdir: bool = True, 
                     help: bool = False, value: str = None, **kwargs) -> Dict[str, Any]:
-    """
-    Create a new file with the specified content.
 
-    Args:
-        file_path: Path to the new file to create
-        content: Content to write to the file
-        mkdir: Whether to create parent directories if they don't exist
-        help: Whether to return help information
-        value: Alternative way to specify file_path as positional parameter
-        **kwargs: Additional parameters
-
-    Returns:
-        Dict with keys: output, error, success, exit_code
-    """
-    # Return help information if requested
     if help:
         return _get_help()
 
-    # Handle positional parameter
+
     if file_path is None and value is not None:
         file_path = value
 
-    # Check for missing required parameters
+
     if file_path is None:
-        # Look for positional parameters in kwargs
+
         for k in kwargs:
             if k.isdigit():
                 file_path = kwargs[k]
                 break
 
-    # Check for required parameters
+
     if file_path is None:
         return {
             "output": "",
@@ -112,7 +96,7 @@ async def tool_write(file_path: str = None, content: str = None, mkdir: bool = T
     try:
         abs_path = _ensure_absolute_path(file_path)
 
-        # Check if file already exists
+
         if os.path.exists(abs_path):
             return {
                 "output": "",
@@ -121,7 +105,7 @@ async def tool_write(file_path: str = None, content: str = None, mkdir: bool = T
                 "exit_code": 1
             }
 
-        # Create parent directory if it doesn't exist
+
         parent_dir = os.path.dirname(abs_path)
         if not os.path.exists(parent_dir):
             if mkdir:
@@ -150,7 +134,7 @@ async def tool_write(file_path: str = None, content: str = None, mkdir: bool = T
                     "exit_code": 1
                 }
 
-        # Write content to file
+
         try:
             with open(abs_path, 'w', encoding='utf-8') as f:
                 f.write(content)
@@ -169,7 +153,7 @@ async def tool_write(file_path: str = None, content: str = None, mkdir: bool = T
                 "exit_code": 1
             }
 
-        # Get file stats for output
+
         file_size = os.path.getsize(abs_path)
         line_count = content.count('\n') + 1 if content else 0
 

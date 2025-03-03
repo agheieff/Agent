@@ -21,16 +21,16 @@ class OutputManager:
 
     async def handle_tool_output(self, tool_name: str, output: Dict[str, Any]) -> str:
         formatter = self.tool_formatters.get(tool_name, self.tool_formatters["default"])
-        
+
         formatted_output = await formatter(output)
-        
+
         self.display_output(formatted_output)
 
         return formatted_output
 
     async def handle_tool_outputs(self, tool_outputs: List[Tuple[str, Dict[str, Any]]]) -> List[str]:
         formatted_outputs = []
-        
+
         for tool_name, output in tool_outputs:
             formatted_output = await self.handle_tool_output(tool_name, output)
             formatted_outputs.append(formatted_output)
@@ -53,7 +53,7 @@ class OutputManager:
         response = await self.get_user_input(prompt)
         return response.lower() in ["y", "yes"]
 
-    # Default formatters
+
     async def _default_formatter(self, output: Dict[str, Any]) -> str:
         if isinstance(output, dict):
             if "error" in output and output["error"]:

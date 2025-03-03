@@ -7,19 +7,11 @@ from typing import List, Dict, Optional, Any
 logger = logging.getLogger(__name__)
 
 class SearchTools:
-    """
-    Implements file system search capabilities for the agent.
-    Includes glob pattern matching and content searching (grep).
-    """
 
     def __init__(self):
         self.current_dir = os.getcwd()
 
     def glob_tool(self, pattern: str, path: Optional[str] = None) -> List[str]:
-        """
-        Finds files that match a 'pattern' under the given directory ('path'),
-        or the current directory if none is provided.
-        """
         try:
             base_path = path if path else self.current_dir
             base_path = self._ensure_absolute_path(base_path)
@@ -40,10 +32,6 @@ class SearchTools:
             return [f"Error: {str(e)}"]
 
     def grep_tool(self, pattern: str, include: Optional[str] = None, path: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        Searches for 'pattern' (regex) in matching files. 
-        Optionally restrict to 'include' pattern, under 'path' or current directory if none given.
-        """
         results = []
         try:
             base_path = path if path else self.current_dir
@@ -51,16 +39,16 @@ class SearchTools:
             if not os.path.isdir(base_path):
                 return [{"error": f"Not a directory: {base_path}"}]
 
-            # Compile regex
+
             try:
                 regex = re.compile(pattern)
             except re.error as comp_err:
                 return [{"error": f"Invalid regex: {str(comp_err)}"}]
 
-            # Gather files to search
+
             if include:
                 file_paths = self.glob_tool(include, base_path)
-                # filter out any errors from the glob
+
                 file_paths = [f for f in file_paths if not (isinstance(f, str) and f.startswith("Error:"))]
             else:
                 file_paths = []
@@ -95,14 +83,6 @@ class SearchTools:
             return [{"error": f"{str(e)}"}]
 
     def ls(self, path: str, hide_hidden: bool = False) -> Dict[str, Any]:
-        """
-        Lists directories and files at the given path.
-
-        Args:
-            path: Path to list
-            hide_hidden: If True, hide files/directories that start with '.'
-                         Default is False (show all files, including hidden ones)
-        """
         try:
             abs_path = self._ensure_absolute_path(path)
             if not os.path.exists(abs_path):
@@ -112,7 +92,7 @@ class SearchTools:
 
             entries = os.listdir(abs_path)
 
-            # Filter out hidden files if requested
+
             if hide_hidden:
                 entries = [entry for entry in entries if not entry.startswith('.')]
 
@@ -125,14 +105,14 @@ class SearchTools:
                 entry_path = os.path.join(abs_path, entry)
                 is_hidden = entry.startswith('.')
 
-                # Create an entry with metadata
+
                 entry_info = {
                     "name": entry, 
                     "is_hidden": is_hidden,
                     "is_dir": os.path.isdir(entry_path)
                 }
 
-                # Add to the appropriate list
+
                 if entry_info["is_dir"]:
                     if is_hidden:
                         hidden_dirs.append(entry)
@@ -149,7 +129,7 @@ class SearchTools:
                     else:
                         files.append({"name": entry, "size": st.st_size, "modified": st.st_mtime})
 
-                # Add the entire entry to the entries list
+
                 if 'entries_list' not in locals():
                     entries_list = []
 
@@ -170,19 +150,11 @@ class SearchTools:
             return {"error": f"{str(e)}"}
 
     def _ensure_absolute_path(self, path: str) -> str:
-        """
-        Converts a potentially relative path to an absolute path 
-        based on the current_dir.
-        """
         if not os.path.isabs(path):
             return os.path.abspath(os.path.join(self.current_dir, path))
         return path
 
     def _is_binary_file(self, file_path: str) -> bool:
-        """
-        Basic detection if a file is binary by reading its first chunk 
-        and checking for null bytes.
-        """
         try:
             with open(file_path, 'rb') as f:
                 chunk = f.read(4096)

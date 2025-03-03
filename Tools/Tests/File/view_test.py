@@ -39,7 +39,7 @@ class TestViewTool:
     @pytest.mark.asyncio
     async def test_help_parameter(self):
         result = await tool_view(help=True)
-        
+
         assert result["success"] is True
         assert result["error"] == ""
         assert "View the contents of a file" in result["output"]
@@ -48,7 +48,7 @@ class TestViewTool:
     @pytest.mark.asyncio
     async def test_view_text_file(self, text_file):
         result = await tool_view(file_path=text_file)
-        
+
         assert result["success"] is True
         assert result["error"] == ""
         assert "File:" in result["output"]
@@ -58,27 +58,24 @@ class TestViewTool:
 
     @pytest.mark.asyncio
     async def test_view_binary_file(self, binary_file):
-        """Test viewing a binary file."""
         result = await tool_view(file_path=binary_file)
-        
+
         assert result["success"] is True
         assert result["error"] == ""
         assert "Binary file:" in result["output"]
 
     @pytest.mark.asyncio
     async def test_nonexistent_file(self, nonexistent_file):
-        """Test viewing a nonexistent file."""
         result = await tool_view(file_path=nonexistent_file)
-        
+
         assert result["success"] is False
         assert "File not found:" in result["error"]
         assert result["output"] == ""
 
     @pytest.mark.asyncio
     async def test_directory(self, directory):
-        """Test viewing a directory."""
         result = await tool_view(file_path=directory)
-        
+
         assert result["success"] is False
         assert "Path is a directory:" in result["error"]
         assert result["output"] == ""
@@ -86,7 +83,7 @@ class TestViewTool:
     @pytest.mark.asyncio
     async def test_missing_file_path(self):
         result = await tool_view()
-        
+
         assert result["success"] is False
         assert result["error"] == "Missing required parameter: file_path"
         assert result["output"] == ""
@@ -94,7 +91,7 @@ class TestViewTool:
     @pytest.mark.asyncio
     async def test_offset_and_limit(self, text_file):
         result = await tool_view(file_path=text_file, offset=10, limit=5)
-        
+
         assert result["success"] is True
         assert result["error"] == ""
         assert "Starting from line: 11" in result["output"]
@@ -109,7 +106,7 @@ class TestViewTool:
     @pytest.mark.asyncio
     async def test_offset_exceeds_file_length(self, text_file):
         result = await tool_view(file_path=text_file, offset=200)
-        
+
         assert result["success"] is True
         assert result["error"] == ""
         assert "Starting from line: 201" in result["output"]
@@ -119,7 +116,7 @@ class TestViewTool:
     @pytest.mark.asyncio
     async def test_negative_offset(self, text_file):
         result = await tool_view(file_path=text_file, offset=-10)
-        
+
         assert result["success"] is False
         assert "Offset must be a non-negative integer" in result["error"]
         assert result["output"] == ""
@@ -127,7 +124,7 @@ class TestViewTool:
     @pytest.mark.asyncio
     async def test_invalid_offset(self, text_file):
         result = await tool_view(file_path=text_file, offset="not-a-number")
-        
+
         assert result["success"] is False
         assert "Offset must be a valid integer" in result["error"]
         assert result["output"] == ""
@@ -135,7 +132,7 @@ class TestViewTool:
     @pytest.mark.asyncio
     async def test_zero_limit(self, text_file):
         result = await tool_view(file_path=text_file, limit=0)
-        
+
         assert result["success"] is False
         assert "Limit must be a positive integer" in result["error"]
         assert result["output"] == ""
@@ -143,7 +140,7 @@ class TestViewTool:
     @pytest.mark.asyncio
     async def test_invalid_limit(self, text_file):
         result = await tool_view(file_path=text_file, limit="not-a-number")
-        
+
         assert result["success"] is False
         assert "Limit must be a valid integer" in result["error"]
         assert result["output"] == ""
@@ -151,7 +148,7 @@ class TestViewTool:
     @pytest.mark.asyncio
     async def test_positional_parameter(self, text_file):
         result = await tool_view(value=text_file)
-        
+
         assert result["success"] is True
         assert "File:" in result["output"]
         assert "Line 1" in result["output"]
@@ -159,7 +156,7 @@ class TestViewTool:
     @pytest.mark.asyncio
     async def test_positional_parameter_in_kwargs(self, text_file):
         result = await tool_view(**{"0": text_file})
-        
+
         assert result["success"] is True
         assert "File:" in result["output"]
         assert "Line 1" in result["output"]
@@ -169,11 +166,11 @@ class TestViewTool:
         assert _is_binary_file(text_file) is False
 
     def test_ensure_absolute_path(self):
-        # Test with absolute path
+
         abs_path = "/absolute/path/to/file.txt"
         assert _ensure_absolute_path(abs_path) == abs_path
 
-        # Test with relative path
+
         rel_path = "relative/path/to/file.txt"
         abs_result = _ensure_absolute_path(rel_path)
         assert os.path.isabs(abs_result)

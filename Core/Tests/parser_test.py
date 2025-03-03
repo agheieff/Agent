@@ -12,10 +12,10 @@ class TestToolParser:
         """Test parsing a simple command."""
         message = "/view /etc/hosts"
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 1
         tool_name, params, is_help = tool_calls[0]
-        
+
         assert tool_name == "view"
         assert "value" in params
         assert params["value"] == "/etc/hosts"
@@ -25,10 +25,10 @@ class TestToolParser:
         """Test parsing named parameters."""
         message = "/view file_path=/etc/hosts offset=10 limit=20"
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 1
         tool_name, params, is_help = tool_calls[0]
-        
+
         assert tool_name == "view"
         assert params["file_path"] == "/etc/hosts"
         assert params["offset"] == "10"
@@ -39,10 +39,10 @@ class TestToolParser:
         """Test parsing parameters with quoted values."""
         message = '/write file_path="/tmp/file with spaces.txt" content="Hello, world!"'
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 1
         tool_name, params, is_help = tool_calls[0]
-        
+
         assert tool_name == "write"
         assert params["file_path"] == "/tmp/file with spaces.txt"
         assert params["content"] == "Hello, world!"
@@ -52,10 +52,10 @@ class TestToolParser:
         """Test parsing help parameter."""
         message = "/view -h"
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 1
         tool_name, params, is_help = tool_calls[0]
-        
+
         assert tool_name == "view"
         assert params == {}
         assert is_help is True
@@ -63,10 +63,10 @@ class TestToolParser:
         # Test alternative help format
         message = "/view --help"
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 1
         tool_name, params, is_help = tool_calls[0]
-        
+
         assert tool_name == "view"
         assert params == {}
         assert is_help is True
@@ -75,23 +75,23 @@ class TestToolParser:
         """Test parsing multiple commands in a single message."""
         message = """
         Here's what I'll do:
-        
+
         /view /etc/hosts
-        
+
         Now let's create a file:
-        
+
         /write file_path=/tmp/test.txt content="Hello, world!"
         """
-        
+
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 2
-        
+
         # First command
         tool_name, params, is_help = tool_calls[0]
         assert tool_name == "view"
         assert params["value"] == "/etc/hosts"
-        
+
         # Second command
         tool_name, params, is_help = tool_calls[1]
         assert tool_name == "write"
@@ -107,17 +107,17 @@ import sys
 def main():
     print("Hello, world!")
     print(f"Current directory: {os.getcwd()}")
-    
+
 if __name__ == "__main__":
     main()
 """
 """
-        
+
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 1
         tool_name, params, is_help = tool_calls[0]
-        
+
         assert tool_name == "write"
         assert params["file_path"] == "/tmp/test.py"
         assert "import os" in params["content"]
@@ -134,12 +134,12 @@ database:
   password: pass
 """ backup=true
 """
-        
+
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 1
         tool_name, params, is_help = tool_calls[0]
-        
+
         assert tool_name == "replace"
         assert params["file_path"] == "/tmp/config.yaml"
         assert "database:" in params["content"]
@@ -156,12 +156,12 @@ using single quotes
 for the heredoc
 '''
 """
-        
+
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 1
         tool_name, params, is_help = tool_calls[0]
-        
+
         assert tool_name == "write"
         assert params["file_path"] == "/tmp/test.txt"
         assert "This is a test" in params["content"]
@@ -180,12 +180,12 @@ updated
 content
 """
 """
-        
+
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 1
         tool_name, params, is_help = tool_calls[0]
-        
+
         assert tool_name == "edit"
         assert params["file_path"] == "/tmp/test.txt"
         assert "Original" in params["old_string"]
@@ -221,23 +221,23 @@ Let's check what we've created:
 
 /view main.py
 """
-        
+
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 3
-        
+
         # First command
         tool_name, params, is_help = tool_calls[0]
         assert tool_name == "write"
         assert params["file_path"] == "main.py"
         assert "import helper" in params["content"]
-        
+
         # Second command
         tool_name, params, is_help = tool_calls[1]
         assert tool_name == "write"
         assert params["file_path"] == "helper.py"
         assert "def say_hello()" in params["content"]
-        
+
         # Third command
         tool_name, params, is_help = tool_calls[2]
         assert tool_name == "view"
@@ -247,14 +247,14 @@ Let's check what we've created:
         """Test parsing an empty message."""
         message = ""
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 0
 
     def test_message_without_tools(self):
         """Test parsing a message with no tool calls."""
         message = "This is a message without any tool calls."
         tool_calls = ToolParser.extract_tool_calls(message)
-        
+
         assert len(tool_calls) == 0
 
 

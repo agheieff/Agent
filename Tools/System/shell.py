@@ -7,7 +7,7 @@ import asyncio
 import subprocess
 from typing import Dict, Any, Optional, List, Tuple
 
-# Tool metadata
+
 TOOL_NAME = "bash"
 TOOL_DESCRIPTION = "Execute shell commands in a bash environment"
 TOOL_HELP = """
@@ -41,12 +41,11 @@ TOOL_EXAMPLES = [
     ("/bash echo 'Hello world' > hello.txt && cat hello.txt", "Create a file and display its contents")
 ]
 
-# Store the process environment so it persists between calls
+
 _process_env = os.environ.copy()
 _working_directory = os.getcwd()
 
 def _get_help() -> Dict[str, Any]:
-    """Return help information for this tool."""
     example_text = "\nExamples:\n" + "\n".join(
         [f"  {example[0]}\n    {example[1]}" for example in TOOL_EXAMPLES]
     )
@@ -59,32 +58,19 @@ def _get_help() -> Dict[str, Any]:
     }
 
 async def tool_bash(command: str = None, timeout: int = 60, help: bool = False, value: str = None, **kwargs) -> Dict[str, Any]:
-    """
-    Execute a shell command in a bash environment.
-
-    Args:
-        command: The shell command to execute
-        timeout: Maximum execution time in seconds
-        help: Whether to return help information
-        value: Alternative way to specify command as positional parameter
-        **kwargs: Additional parameters
-
-    Returns:
-        Dict with keys: output, error, success, exit_code
-    """
     global _process_env, _working_directory
 
-    # Return help information if requested
+
     if help:
         return _get_help()
 
-    # Handle positional parameter
+
     if command is None and value is not None:
         command = value
 
-    # Check for missing command in named or positional parameters
+
     if command is None:
-        # Look for positional parameters in kwargs
+
         for k in kwargs:
             if k.isdigit():
                 command = kwargs[k]
@@ -99,7 +85,7 @@ async def tool_bash(command: str = None, timeout: int = 60, help: bool = False, 
         }
 
     try:
-        # Validate timeout
+
         try:
             timeout = int(timeout)
             if timeout <= 0:
@@ -107,7 +93,7 @@ async def tool_bash(command: str = None, timeout: int = 60, help: bool = False, 
         except (ValueError, TypeError):
             timeout = 60
 
-        # Execute the command
+
         process = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
@@ -125,16 +111,16 @@ async def tool_bash(command: str = None, timeout: int = 60, help: bool = False, 
                 "output": "",
                 "error": f"Command timed out after {timeout} seconds",
                 "success": False,
-                "exit_code": 124  # Standard timeout exit code
+                "exit_code": 124                              
             }
 
         stdout_str = stdout.decode('utf-8', errors='replace')
         stderr_str = stderr.decode('utf-8', errors='replace')
 
-        # Check if the command changed the working directory
+
         if 'cd ' in command:
-            # Extract the directory from the command
-            # This is a simplistic approach and may not work for complex cd commands
+
+
             parts = command.split('cd ')
             for part in parts[1:]:
                 dir_path = part.split(';')[0].split('&&')[0].strip()
@@ -146,7 +132,7 @@ async def tool_bash(command: str = None, timeout: int = 60, help: bool = False, 
                 if os.path.isdir(dir_path):
                     _working_directory = dir_path
 
-        # Combine stdout and stderr
+
         output = stdout_str
         if stderr_str:
             if output:

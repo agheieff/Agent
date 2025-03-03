@@ -5,51 +5,34 @@ from typing import Dict, Any, List, Optional, Union
 from .web_client import WebClient
 
 class SearchEngine:
-    """A tool for Agent to perform internet searches using various search engines."""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """Initialize the search engine with optional configuration.
-
-        Args:
-            config: Configuration options including API keys, search engine preferences, etc.
-        """
         self.config = config or {}
         self.web_client = WebClient(self.config.get('web_client'))
         self.logger = logging.getLogger(__name__)
 
-        # Default search engine
+
         self.default_engine = self.config.get('default_engine', 'duckduckgo')
 
-        # API keys for different search engines
+
         self.api_keys = self.config.get('api_keys', {})
 
-        # Rate limiting settings
+
         self.rate_limits = self.config.get('rate_limits', {
             'duckduckgo': {'requests_per_hour': 100, 'seconds_between_requests': 2},
             'google': {'requests_per_day': 100, 'seconds_between_requests': 1},
             'bing': {'requests_per_month': 1000, 'seconds_between_requests': 1}
         })
 
-        # Track last request time for rate limiting
+
         self.last_request_time = {}
 
     def search(self, query: str, engine: Optional[str] = None, 
                num_results: int = 10, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Perform a web search using the specified or default search engine.
-
-        Args:
-            query: The search query
-            engine: Search engine to use (google, bing, duckduckgo)
-            num_results: Number of results to return
-            filters: Optional filters for search (e.g., time, region, domain)
-
-        Returns:
-            Dictionary containing search results and metadata
-        """
         engine = engine or self.default_engine
         engine = engine.lower()
 
-        # Apply rate limiting
+
         self._apply_rate_limiting(engine)
 
         if engine == 'duckduckgo':
@@ -67,11 +50,6 @@ class SearchEngine:
             }
 
     def _apply_rate_limiting(self, engine: str) -> None:
-        """Apply rate limiting for the specified search engine.
-
-        Args:
-            engine: The search engine to apply rate limiting for
-        """
         now = time.time()
         if engine in self.last_request_time:
             elapsed = now - self.last_request_time[engine]
@@ -84,32 +62,22 @@ class SearchEngine:
 
     def _search_duckduckgo(self, query: str, num_results: int = 10, 
                           filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Perform a search using DuckDuckGo.
 
-        Args:
-            query: The search query
-            num_results: Number of results to return
-            filters: Optional filters for search
 
-        Returns:
-            Dictionary containing search results and metadata
-        """
-        # Note: DuckDuckGo doesn't have an official API, so we're using a web scraping approach
-        # This is less reliable than an official API but works for basic searches
 
-        # Create a DuckDuckGo search URL
+
         url = "https://html.duckduckgo.com/html/"
         params = {
             'q': query,
-            's': '0'  # Starting position
+            's': '0'                     
         }
 
-        # Add filters if provided
+
         if filters:
             if 'time' in filters:
-                params['df'] = filters['time']  # Time filter
+                params['df'] = filters['time']               
             if 'region' in filters:
-                params['kl'] = filters['region']  # Region filter
+                params['kl'] = filters['region']                 
 
         try:
             response = self.web_client.get(url, params=params)
@@ -121,7 +89,7 @@ class SearchEngine:
                     'results': []
                 }
 
-            # Parse the HTML to extract results
+
             html = response.get('html', '')
             if not html:
                 return {
@@ -168,17 +136,7 @@ class SearchEngine:
 
     def _search_google(self, query: str, num_results: int = 10, 
                       filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Perform a search using Google Custom Search API.
 
-        Args:
-            query: The search query
-            num_results: Number of results to return
-            filters: Optional filters for search
-
-        Returns:
-            Dictionary containing search results and metadata
-        """
-        # Check if Google API key and CSE ID are available
         api_key = self.api_keys.get('google', {}).get('api_key')
         cse_id = self.api_keys.get('google', {}).get('cse_id')
 
@@ -190,16 +148,16 @@ class SearchEngine:
                 'results': []
             }
 
-        # Create Google Custom Search API URL
+
         url = "https://www.googleapis.com/customsearch/v1"
         params = {
             'key': api_key,
             'cx': cse_id,
             'q': query,
-            'num': min(num_results, 10),  # Google API limits to 10 results per request
+            'num': min(num_results, 10),                                               
         }
 
-        # Add filters if provided
+
         if filters:
             if 'site' in filters:
                 params['siteSearch'] = filters['site']
@@ -220,7 +178,7 @@ class SearchEngine:
 
             content = response.get('content', {})
 
-            # Extract search results
+
             results = []
             for item in content.get('items', [])[:num_results]:
                 results.append({
@@ -248,17 +206,7 @@ class SearchEngine:
 
     def _search_bing(self, query: str, num_results: int = 10, 
                     filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Perform a search using Bing Search API.
 
-        Args:
-            query: The search query
-            num_results: Number of results to return
-            filters: Optional filters for search
-
-        Returns:
-            Dictionary containing search results and metadata
-        """
-        # Check if Bing API key is available
         api_key = self.api_keys.get('bing', {}).get('api_key')
 
         if not api_key:
@@ -269,30 +217,30 @@ class SearchEngine:
                 'results': []
             }
 
-        # Create Bing Search API URL
+
         url = "https://api.bing.microsoft.com/v7.0/search"
         params = {
             'q': query,
-            'count': min(num_results, 50)  # Bing API allows up to 50 results per request
+            'count': min(num_results, 50)                                                
         }
 
-        # Add filters if provided
+
         if filters:
             if 'freshness' in filters:
-                params['freshness'] = filters['freshness']  # e.g., Day, Week, Month
+                params['freshness'] = filters['freshness']                          
             if 'market' in filters:
-                params['mkt'] = filters['market']  # e.g., en-US
+                params['mkt'] = filters['market']               
             if 'safe_search' in filters:
-                params['safeSearch'] = filters['safe_search']  # Strict, Moderate, Off
+                params['safeSearch'] = filters['safe_search']                         
 
         try:
-            # Add Bing API key to headers
+
             headers = {'Ocp-Apim-Subscription-Key': api_key}
             self.web_client.session.headers.update(headers)
 
             response = self.web_client.get(url, params=params)
 
-            # Restore original headers
+
             self.web_client.session.headers.pop('Ocp-Apim-Subscription-Key', None)
 
             if 'error' in response:
@@ -304,7 +252,7 @@ class SearchEngine:
 
             content = response.get('content', {})
 
-            # Extract search results
+
             results = []
             for item in content.get('webPages', {}).get('value', [])[:num_results]:
                 results.append({
@@ -332,16 +280,6 @@ class SearchEngine:
 
     def get_search_results(self, query: str, engines: List[str] = None, 
                           num_results: int = 5) -> Dict[str, Any]:
-        """Perform a search using multiple search engines and combine results.
-
-        Args:
-            query: The search query
-            engines: List of search engines to use
-            num_results: Number of results to return per engine
-
-        Returns:
-            Dictionary containing combined search results
-        """
         engines = engines or [self.default_engine]
 
         all_results = []
@@ -366,7 +304,7 @@ class SearchEngine:
                     'error': result.get('error', 'Unknown error')
                 })
 
-        # Remove duplicate results based on URL
+
         unique_results = []
         seen_urls = set()
 

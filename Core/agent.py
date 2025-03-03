@@ -14,7 +14,7 @@ from Memory.Manager.memory_manager import MemoryManager
 from Memory.Cache.memory_cache import MemoryCache
 from Memory.Hierarchy.memory_hierarchy import MemoryHierarchy
 from Memory.Preloader.memory_preloader import MemoryPreloader
-# Tool imports handled by Tools.executor
+
 from Core.task_manager import TaskManager
 from Core.session_manager import SessionManager
 from Output.display_manager import DisplayManager
@@ -37,10 +37,6 @@ class ToolResult:
         }
 
 class ToolExtractor:
-    """
-    Extracts tool calls from LLM responses.
-    Tool format: /tool_name\nparam1: value1\nparam2: value2
-    """
 
     @staticmethod
     def extract_tools(response: str) -> List[Tuple[str, Dict[str, str]]]:
@@ -231,12 +227,12 @@ class AutonomousAgent:
         try:
             verbose_level = self.config.get("output", {}).get("verbose_level", 0)
 
-            # Check for exit requests
+
             if self.tool_extractor.is_exit_request(response):
                 self.should_exit = True
                 return False
 
-            # Extract thinking and planning blocks for debugging/logging
+
             thinking = self.tool_extractor.extract_thinking(response)
             planning = self.tool_extractor.extract_planning(response)
 
@@ -246,10 +242,10 @@ class AutonomousAgent:
                 if planning:
                     print(f"[VERBOSE] Extracted {len(planning)} planning blocks")
 
-            # Process the response with the tool manager to handle all tool calls
+
             tool_response = await self.tool_manager.process_message(response)
 
-            # If tools were executed, update metrics
+
             if tool_response:
                 self.agent_state['tools_executed'] += 1
 
@@ -257,13 +253,13 @@ class AutonomousAgent:
                     print(f"\n[TOOLS] Executed tools and received response")
 
                 if self.config.get("agent", {}).get("autonomous_mode", True):
-                    # Add the tool results to the conversation history
+
                     self.local_conversation_history.append({
                         "role": "user",
                         "content": tool_response
                     })
 
-                    # Generate a new response based on the tool results
+
                     new_response = await self._generate_response(None, tool_response)
 
                     return {
@@ -271,7 +267,7 @@ class AutonomousAgent:
                         "next_response": new_response
                     }
 
-            # Save conversation to memory if applicable
+
             if self.memory_manager and self.current_conversation_id:
                 self.memory_manager.save_conversation(
                     self.current_conversation_id,

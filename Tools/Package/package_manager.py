@@ -8,11 +8,6 @@ from typing import Tuple, Dict, Any, List, Optional
 logger = logging.getLogger(__name__)
 
 class PackageManager:
-    """
-    Provides functionality for managing software packages.
-    Supports multiple package managers (pip, npm, apt, etc.)
-    and provides a unified interface for installing and managing packages.
-    """
 
     def __init__(self):
         self.pip_executable = self._find_pip_executable()
@@ -22,7 +17,6 @@ class PackageManager:
         self.pacman_executable = self._find_executable("pacman")
 
     def _find_pip_executable(self) -> str:
-        """Find the appropriate pip executable for the current Python environment"""
         pip_candidates = [
             "pip",
             f"pip{sys.version_info.major}",
@@ -41,11 +35,10 @@ class PackageManager:
             except:
                 pass
 
-        # Default to basic pip if nothing else works
+
         return "pip"
 
     def _find_executable(self, name: str) -> Optional[str]:
-        """Find a system executable by name"""
         try:
             cmd = f"command -v {name}"
             result = os.system(f"{cmd} > /dev/null 2>&1")
@@ -57,18 +50,6 @@ class PackageManager:
 
     async def install_python_package(self, package_name: str, version: Optional[str] = None, 
                                      upgrade: bool = False, requirements_file: Optional[str] = None) -> str:
-        """
-        Install a Python package using pip.
-
-        Args:
-            package_name: The name of the package to install
-            version: Optional version specification
-            upgrade: Whether to upgrade the package if already installed
-            requirements_file: Path to a requirements.txt file
-
-        Returns:
-            Installation result message
-        """
         try:
             cmd_parts = [self.pip_executable, "install"]
 
@@ -106,18 +87,6 @@ class PackageManager:
 
     async def install_npm_package(self, package_name: str, version: Optional[str] = None,
                                   global_install: bool = False, upgrade: bool = False) -> str:
-        """
-        Install a Node.js package using npm.
-
-        Args:
-            package_name: The name of the package to install
-            version: Optional version specification
-            global_install: Whether to install the package globally
-            upgrade: Whether to upgrade the package if already installed
-
-        Returns:
-            Installation result message
-        """
         if not self.npm_executable:
             return "Error: npm is not installed or not found in PATH"
 
@@ -155,20 +124,11 @@ class PackageManager:
             return f"Error installing npm package: {str(e)}"
 
     async def install_system_package(self, package_name: str) -> str:
-        """
-        Install a system package using apt-get on Ubuntu/Debian systems.
-
-        Args:
-            package_name: The name of the package to install
-
-        Returns:
-            Installation result message
-        """
         if not self.apt_executable:
             return "Error: apt-get is not installed or not found in PATH"
 
         try:
-            # First update package list
+
             update_cmd = f"{self.apt_executable} update"
             process = await asyncio.create_subprocess_shell(
                 update_cmd,
@@ -177,7 +137,7 @@ class PackageManager:
             )
             await process.communicate()
 
-            # Then install the package
+
             install_cmd = f"{self.apt_executable} install -y {package_name}"
             logger.info(f"Installing system package with command: {install_cmd}")
 
@@ -199,18 +159,6 @@ class PackageManager:
 
     async def install_pacman_package(self, package_name: str, noconfirm: bool = True, 
                                  refresh: bool = True, needed: bool = False) -> str:
-        """
-        Install a system package using pacman on Arch Linux and derivatives.
-
-        Args:
-            package_name: The name of the package to install
-            noconfirm: Whether to skip confirmation prompts
-            refresh: Whether to refresh package databases before installing
-            needed: Whether to not reinstall already up-to-date packages
-
-        Returns:
-            Installation result message
-        """
         if not self.pacman_executable:
             return "Error: pacman is not installed or not found in PATH"
 
@@ -248,15 +196,6 @@ class PackageManager:
             return f"Error installing package: {str(e)}"
 
     async def check_pacman_package(self, package_name: str) -> Dict[str, Any]:
-        """
-        Check if a package is installed and get its version using pacman.
-
-        Args:
-            package_name: The name of the package to check
-
-        Returns:
-            Dictionary with package information
-        """
         if not self.pacman_executable:
             return {
                 "installed": False,
@@ -265,7 +204,7 @@ class PackageManager:
             }
 
         try:
-            # Query for the package information
+
             cmd = f"{self.pacman_executable} -Qi {package_name}"
 
             process = await asyncio.create_subprocess_shell(
@@ -278,7 +217,7 @@ class PackageManager:
             if process.returncode == 0:
                 output = stdout.decode('utf-8', errors='replace')
 
-                # Parse the output to extract package information
+
                 info = {}
                 for line in output.split('\n'):
                     if ':' in line:
@@ -287,7 +226,7 @@ class PackageManager:
                             key, value = parts
                             info[key.strip().lower()] = value.strip()
 
-                # Parse dependencies if available
+
                 dependencies = []
                 if 'depends on' in info:
                     deps = info.get('depends on', '')
@@ -310,7 +249,7 @@ class PackageManager:
                     "size": info.get("installed size", "")
                 }
             else:
-                # Check if the package exists in repositories
+
                 cmd = f"{self.pacman_executable} -Si {package_name}"
                 process = await asyncio.create_subprocess_shell(
                     cmd,
@@ -320,14 +259,14 @@ class PackageManager:
 
                 stdout, stderr = await process.communicate()
                 if process.returncode == 0:
-                    # Package exists in repos but not installed
+
                     return {
                         "installed": False,
                         "available": True,
                         "name": package_name
                     }
                 else:
-                    # Package not found
+
                     return {
                         "installed": False,
                         "available": False,
@@ -344,15 +283,6 @@ class PackageManager:
             }
 
     async def check_python_package(self, package_name: str) -> Dict[str, Any]:
-        """
-        Check if a Python package is installed and get its version.
-
-        Args:
-            package_name: The name of the package to check
-
-        Returns:
-            Dictionary with package information
-        """
         try:
             cmd = f"{self.pip_executable} show {package_name}"
 
@@ -366,7 +296,7 @@ class PackageManager:
             if process.returncode == 0:
                 output = stdout.decode('utf-8', errors='replace')
 
-                # Parse the output to extract package information
+
                 info = {}
                 for line in output.split('\n'):
                     if ':' in line:

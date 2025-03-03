@@ -6,7 +6,7 @@ import os
 import logging
 from typing import Dict, Any, Optional
 
-# Tool metadata
+
 TOOL_NAME = "sample"
 TOOL_DESCRIPTION = "A sample tool to demonstrate the metadata pattern"
 TOOL_HELP = """
@@ -33,7 +33,6 @@ TOOL_EXAMPLES = [
 logger = logging.getLogger(__name__)
 
 def _get_help() -> Dict[str, Any]:
-    """Return help information for this tool."""
     example_text = "\nExamples:\n" + "\n".join(
         [f"  {example[0]}\n    {example[1]}" for example in TOOL_EXAMPLES]
     )
@@ -46,30 +45,17 @@ def _get_help() -> Dict[str, Any]:
     }
 
 async def tool_sample(message: str = None, repeat: int = 1, help: bool = False, value: str = None, **kwargs) -> Dict[str, Any]:
-    """
-    A sample tool that demonstrates the metadata pattern.
 
-    Args:
-        message: The message to echo
-        repeat: Number of times to repeat the message
-        help: Whether to return help information
-        value: Alternative way to specify message as positional parameter
-        **kwargs: Additional parameters
-
-    Returns:
-        Dict with keys: output, error, success, exit_code
-    """
-    # Return help information if requested
     if help:
         return _get_help()
 
-    # Handle positional parameter
+
     if message is None and value is not None:
         message = value
 
-    # Check for missing required parameters
+
     if message is None:
-        # Look for positional parameters in kwargs
+
         for k in kwargs:
             if k.isdigit():
                 message = kwargs[k]
@@ -84,7 +70,7 @@ async def tool_sample(message: str = None, repeat: int = 1, help: bool = False, 
         }
 
     try:
-        # Validate repeat parameter
+
         try:
             repeat = int(repeat)
             if repeat <= 0:
@@ -102,7 +88,7 @@ async def tool_sample(message: str = None, repeat: int = 1, help: bool = False, 
                 "exit_code": 1
             }
 
-        # Generate the output
+
         output = "\n".join([message] * repeat)
 
         return {

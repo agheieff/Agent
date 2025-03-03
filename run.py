@@ -121,14 +121,9 @@ def get_model_choice() -> Dict[str, str]:
     return {"provider": selected_provider, "model": selected_model}
 
 def get_initial_prompt() -> str:
-    """
-    Get initial prompt by reading until the user enters
-    a blank line (press Enter on an empty line to finish).
-    Uses readline for command history support if available.
-    """
     try:
         import readline
-        # Use the initial prompt specific history file
+
         history_file = os.path.expanduser(INITIAL_PROMPT_HISTORY_FILE)
         try:
             readline.read_history_file(history_file)
@@ -201,17 +196,12 @@ current_agent = None
 paused_for_context = False
 
 def handle_pause_signal(signum, frame):
-    """Handle SIGTSTP (Ctrl+Z) to pause the agent for adding context"""
     global current_agent, paused_for_context
     if current_agent and not paused_for_context:
         paused_for_context = True
         asyncio.create_task(pause_for_context_input())
 
 async def pause_for_context_input():
-    """
-    Pause the agent and collect additional context from the user.
-    Uses a separate history file for context inputs.
-    """
     global current_agent, paused_for_context
 
     print("\n" + "=" * 60)
@@ -220,7 +210,7 @@ async def pause_for_context_input():
 
     try:
         import readline
-        # Use the context-specific history file
+
         history_file = os.path.expanduser(CONTEXT_HISTORY_FILE)
         try:
             readline.read_history_file(history_file)
@@ -362,7 +352,6 @@ async def main():
             f.write("**Hostname**: **{HOSTNAME}**\n")
             f.write("**Memory directory**: **{MEMORY_DIRECTORY}**\n")
             f.write("**Projects directory**: **{PROJECTS_DIRECTORY}**\n\n")
-            f.write("ce from argument, config, or interactive prompt
     available_providers = get_available_model_providers()
 
     if not available_providers:

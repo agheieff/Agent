@@ -4,7 +4,7 @@ Tool for handling confirmations of operations.
 import os
 from typing import Dict, Any, Union, Optional
 
-# Tool metadata
+
 TOOL_NAME = "confirm"
 TOOL_DESCRIPTION = "Confirm or list pending operations that require verification"
 TOOL_HELP = """
@@ -31,22 +31,19 @@ TOOL_EXAMPLES = [
     ("/confirm list", "List all pending operations requiring confirmation")
 ]
 
-# Store pending confirmations globally
+
 _pending_confirmations = {}
 
 def get_pending_confirmations() -> Dict[int, Dict[str, Any]]:
-    """Get a copy of pending confirmations."""
     return _pending_confirmations.copy()
 
 def register_confirmation(id: int, operation_type: str, **params) -> None:
-    """Register a new pending confirmation."""
     _pending_confirmations[id] = {
         "type": operation_type,
         **params
     }
 
 def _get_help() -> Dict[str, Any]:
-    """Return help information for this tool."""
     example_text = "\nExamples:\n" + "\n".join(
         [f"  {example[0]}\n    {example[1]}" for example in TOOL_EXAMPLES]
     )
@@ -59,7 +56,6 @@ def _get_help() -> Dict[str, Any]:
     }
 
 def list_pending() -> Dict[str, Any]:
-    """List all pending operations requiring confirmation."""
     try:
         if not _pending_confirmations:
             return {
@@ -114,39 +110,26 @@ def list_pending() -> Dict[str, Any]:
         }
 
 def tool_confirm(id: Union[str, int] = None, list: bool = False, help: bool = False, value: str = None, **kwargs) -> Dict[str, Any]:
-    """
-    Confirm a pending operation or list all pending operations.
 
-    Args:
-        id: ID of the operation to confirm
-        list: Flag to list all pending operations
-        help: Whether to return help information
-        value: Alternative way to specify ID as positional parameter
-        **kwargs: Additional parameters
-
-    Returns:
-        Dict with keys: output, error, success, exit_code
-    """
-    # Return help information if requested
     if help:
         return _get_help()
 
-    # Check if we should list pending operations
+
     if list:
         return list_pending()
 
-    # Handle positional parameter for ID
+
     if id is None and value is not None:
         try:
             id = int(value)
         except (ValueError, TypeError):
-            # Check if the value is "list"
+
             if value.lower() == "list":
                 return list_pending()
 
-    # Check for missing ID in named or positional parameters
+
     if id is None:
-        # Look for positional parameters in kwargs
+
         for k in kwargs:
             if k.isdigit():
                 try:
@@ -155,12 +138,12 @@ def tool_confirm(id: Union[str, int] = None, list: bool = False, help: bool = Fa
                 except (ValueError, TypeError):
                     pass
 
-    # If still no ID, display pending operations
+
     if id is None:
         return list_pending()
 
     try:
-        # Convert ID to integer
+
         try:
             id_num = int(id)
         except ValueError:
@@ -171,7 +154,7 @@ def tool_confirm(id: Union[str, int] = None, list: bool = False, help: bool = Fa
                 "exit_code": 1
             }
 
-        # Check if confirmation exists
+
         if id_num not in _pending_confirmations:
             return {
                 "output": "",
@@ -180,23 +163,23 @@ def tool_confirm(id: Union[str, int] = None, list: bool = False, help: bool = Fa
                 "exit_code": 1
             }
 
-        # Get operation details
+
         operation = _pending_confirmations.pop(id_num)
         operation_type = operation.get("type")
 
         if operation_type == "edit":
-            # Run the edit operation
+
             from Tools.File.edit import tool_edit, _viewed_files
 
             file_path = operation.get("file_path")
             old_string = operation.get("old_string", "")
             new_string = operation.get("new_string", "")
 
-            # Mark file as viewed to bypass confirmation
+
             if hasattr(_viewed_files, "add"):
                 _viewed_files.add(file_path)
 
-            # Execute the edit
+
             result = tool_edit(
                 file_path=file_path, 
                 old=old_string,
@@ -219,17 +202,17 @@ def tool_confirm(id: Union[str, int] = None, list: bool = False, help: bool = Fa
                 }
 
         elif operation_type == "replace":
-            # Run the replace operation
+
             from Tools.File.replace import tool_replace, _viewed_files
 
             file_path = operation.get("file_path")
             content = operation.get("content", "")
 
-            # Mark file as viewed to bypass confirmation
+
             if hasattr(_viewed_files, "add"):
                 _viewed_files.add(file_path)
 
-            # Execute the replace
+
             result = tool_replace(
                 file_path=file_path,
                 content=content

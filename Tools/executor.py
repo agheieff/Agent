@@ -56,16 +56,6 @@ def _init_tools():
     logger.info(f"Initialized {len(_TOOLS)} tools")
 
 async def execute_tool(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Execute a tool with the given parameters.
-    
-    Args:
-        tool_name: Name of the tool to execute
-        params: Parameters to pass to the tool
-        
-    Returns:
-        Dictionary containing the result of the tool execution
-    """
     if not _INITIALIZED:
         _init_tools()
 
@@ -81,22 +71,22 @@ async def execute_tool(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]
     logger.debug(f"Executing tool: {tool_name} with params: {params}")
 
     try:
-        # If handler is a method of a ToolHandler instance, use its run method if available
+
         if hasattr(handler, '__self__') and hasattr(handler.__self__, 'run'):
             result = await handler.__self__.run(**params)
-        # Otherwise, call the function directly
+
         elif inspect.iscoroutinefunction(handler):
             result = await handler(**params)
         else:
-            # Run synchronous functions in thread pool
+
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, lambda: handler(**params))
-            
-        # Each tool should handle its own errors and return appropriate result dictionaries
 
-        # Standardize result format
+
+
+
         if isinstance(result, dict) and "success" in result:
-            # Already in standard format
+
             return {
                 "output": result.get("output", ""),
                 "error": result.get("error", ""),
@@ -105,7 +95,7 @@ async def execute_tool(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]
                 "tool_name": tool_name
             }
         elif isinstance(result, str):
-            # String result assumed to be successful output
+
             return {
                 "output": result,
                 "error": "",
@@ -133,7 +123,7 @@ async def execute_tool(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]
                     "tool_name": tool_name
                 }
         else:
-            # Any other result converted to string and assumed successful
+
             return {
                 "output": str(result),
                 "error": "",
@@ -153,27 +143,18 @@ async def execute_tool(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]
         }
 
 def get_tool_metadata(tool_name: str) -> Dict[str, Any]:
-    """
-    Get metadata for a tool.
-    
-    Args:
-        tool_name: Name of the tool
-        
-    Returns:
-        Dictionary containing the tool's metadata
-    """
     if not _INITIALIZED:
         _init_tools()
-        
+
     if tool_name not in _TOOLS:
         return {
             "name": tool_name,
             "exists": False
         }
-        
+
     handler = _TOOLS[tool_name]
     module = inspect.getmodule(handler)
-    
+
     metadata = {
         "name": tool_name,
         "exists": True,
@@ -181,36 +162,30 @@ def get_tool_metadata(tool_name: str) -> Dict[str, Any]:
         "usage": "",
         "examples": []
     }
-    
+
     if module:
-        # Extract metadata from module constants
+
         for attr in ["TOOL_DESCRIPTION", "TOOL_HELP", "TOOL_EXAMPLES"]:
             if hasattr(module, attr):
-                key = attr.lower()[5:]  # remove TOOL_ prefix
+                key = attr.lower()[5:]                       
                 metadata[key] = getattr(module, attr)
-                
-    # Extract from docstring if available
+
+
     if handler.__doc__:
         metadata["docstring"] = handler.__doc__.strip()
         if not metadata["description"]:
-            # Use first line of docstring as description
+
             metadata["description"] = handler.__doc__.strip().split('\n')[0]
-            
+
     return metadata
 
 def list_available_tools() -> Dict[str, Dict[str, Any]]:
-    """
-    List all available tools with their metadata.
-    
-    Returns:
-        Dictionary mapping tool names to their metadata
-    """
     if not _INITIALIZED:
         _init_tools()
-        
+
     result = {}
-    
+
     for tool_name in _TOOLS:
         result[tool_name] = get_tool_metadata(tool_name)
-        
+
     return result

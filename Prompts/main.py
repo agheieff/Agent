@@ -66,12 +66,6 @@ Your goal is to work as independently as possible towards your goals. You can pa
 
 
 def generate_reasoning_protocol() -> str:
-    """
-    Generate the section describing the structured reasoning protocol.
-
-    Returns:
-        Formatted reasoning protocol string
-    """
     return """
 ## Structured Reasoning Protocol
 1. **Initial Analysis** - Always begin with careful thinking:
@@ -112,12 +106,6 @@ Create tables for users, sessions, password reset tokens with appropriate fields
 
 
 def generate_command_execution_guide() -> str:
-    """
-    Generate the section describing command execution methods.
-
-    Returns:
-        Formatted command execution guide string
-    """
     return """
 ## Command Execution
 Use these XML tags for all system interactions:
@@ -271,12 +259,6 @@ def generate_tools_section(config: Dict[str, Any]) -> str:
 
 
 def generate_best_practices() -> str:
-    """
-    Generate the section describing best practices.
-
-    Returns:
-        Formatted best practices string
-    """
     return """
 ## Best Practices
 
@@ -341,7 +323,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         with open(config_path, 'r') as f:
             return yaml.safe_load(f) or {}
 
-    # Try standard locations
+
     standard_paths = [
         os.path.join(os.getcwd(), "Config", "config.yaml"),
         os.path.join(os.getcwd(), "config.yaml"),
@@ -353,7 +335,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             with open(path, 'r') as f:
                 return yaml.safe_load(f) or {}
 
-    # Fallback to minimal config
+
     return {"agent": {"test_mode": False}}
 
 

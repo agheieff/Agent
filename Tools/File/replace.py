@@ -4,26 +4,16 @@ Tool for replacing entire file contents.
 import os
 from typing import Dict, Any, Set
 
-# Import from edit_file_tool to share state
+
 from Tools.File.edit_file_tool import _viewed_files, _pending_confirmations, _next_confirmation_id, _ensure_absolute_path
 
 def tool_replace(file_path: str, content: str) -> Dict[str, Any]:
-    """
-    Replace the entire content of a file.
-
-    Args:
-        file_path: Path to the file
-        content: New content for the file
-
-    Returns:
-        Dict with keys: output, error, success, exit_code
-    """
     global _next_confirmation_id
 
     try:
         abs_path = _ensure_absolute_path(file_path)
 
-        # If file exists and not viewed, require confirmation
+
         if os.path.exists(abs_path) and abs_path not in _viewed_files:
             confirmation_id = _next_confirmation_id
             _next_confirmation_id += 1
@@ -43,7 +33,7 @@ def tool_replace(file_path: str, content: str) -> Dict[str, Any]:
                 "confirmation_id": confirmation_id
             }
 
-        # Create parent directory if needed
+
         parent_dir = os.path.dirname(abs_path)
         if parent_dir and not os.path.exists(parent_dir):
             os.makedirs(parent_dir, exist_ok=True)

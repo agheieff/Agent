@@ -6,7 +6,7 @@ import os
 import logging
 from typing import Dict, Any, Optional
 
-# Tool metadata
+
 TOOL_NAME = "view"
 TOOL_DESCRIPTION = "View the contents of a file with optional offset and limit"
 TOOL_HELP = """
@@ -37,13 +37,11 @@ TOOL_NOTES = """
 logger = logging.getLogger(__name__)
 
 def _ensure_absolute_path(path: str) -> str:
-    """Convert a potentially relative path to an absolute path."""
     if not os.path.isabs(path):
         return os.path.abspath(os.path.join(os.getcwd(), path))
     return path
 
 def _is_binary_file(file_path: str) -> bool:
-    """Check if a file is binary by looking for null bytes."""
     try:
         with open(file_path, 'rb') as f:
             return b'\0' in f.read(4096)
@@ -52,7 +50,6 @@ def _is_binary_file(file_path: str) -> bool:
         return False
 
 def _get_help() -> Dict[str, Any]:
-    """Return help information for this tool."""
     example_text = "\nExamples:\n" + "\n".join(
         [f"  {example[0]}\n    {example[1]}" for example in TOOL_EXAMPLES]
     )
@@ -66,31 +63,17 @@ def _get_help() -> Dict[str, Any]:
     }
 
 async def tool_view(file_path: str = None, offset: int = 0, limit: int = 2000, help: bool = False, value: str = None, **kwargs) -> Dict[str, Any]:
-    """
-    View the contents of a file with optional offset and limit.
 
-    Args:
-        file_path: Path to the file to view
-        offset: Number of lines to skip from the beginning
-        limit: Maximum number of lines to return
-        help: Whether to return help information
-        value: Alternative way to specify file_path as positional parameter
-        **kwargs: Additional parameters
-
-    Returns:
-        Dict with keys: output, error, success, exit_code
-    """
-    # Return help information if requested
     if help:
         return _get_help()
 
-    # Handle positional parameter
+
     if file_path is None and value is not None:
         file_path = value
 
-    # Check for missing required parameters
+
     if file_path is None:
-        # Look for positional parameters in kwargs
+
         for k in kwargs:
             if k.isdigit():
                 file_path = kwargs[k]
@@ -123,7 +106,7 @@ async def tool_view(file_path: str = None, offset: int = 0, limit: int = 2000, h
                 "exit_code": 1
             }
 
-        # Validate and convert offset and limit parameters
+
         try:
             offset = int(offset)
             if offset < 0:
@@ -166,32 +149,32 @@ async def tool_view(file_path: str = None, offset: int = 0, limit: int = 2000, h
                 "exit_code": 0
             }
 
-        # Track if we've actually hit the limit
+
         truncated = False
         try:
             with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
-                # Skip 'offset' lines
+
                 for _ in range(offset):
                     if next(f, None) is None:
-                        break  # Reached end of file
+                        break                       
 
-                # Read 'limit' lines
+
                 lines = []
                 for i in range(limit):
                     line = next(f, None)
                     if line is None:
-                        break  # Reached end of file
+                        break                       
                     lines.append(line)
 
-                # Check if there's more content
+
                 truncated = next(f, None) is not None
                 content = ''.join(lines)
 
-                # Add indicator if content was truncated
+
                 if truncated:
                     content += "\n[...file content truncated...]\n"
         except UnicodeDecodeError:
-            # If we get a decode error, treat it as a binary file
+
             return {
                 "output": f"[Binary or non-text file: {abs_path}]",
                 "error": "",
@@ -206,9 +189,9 @@ async def tool_view(file_path: str = None, offset: int = 0, limit: int = 2000, h
             info += f"Showing {len(lines)} lines (truncated)\n"
         else:
             info += f"Showing {len(lines)} lines (complete file)\n"
-        
+
         info += "---\n"
-        
+
         return {
             "output": info + content,
             "error": "",

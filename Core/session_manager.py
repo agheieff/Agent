@@ -18,7 +18,7 @@ class CommandSkill:
     fail_count: int = 0
     last_used: float = field(default_factory=time.time)
     contexts: Set[str] = field(default_factory=set)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             'command_pattern': self.command_pattern,
@@ -29,7 +29,7 @@ class CommandSkill:
             'last_used': self.last_used,
             'contexts': list(self.contexts)
         }
-    
+
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> 'CommandSkill':
         return CommandSkill(
@@ -52,7 +52,7 @@ class SessionBranch:
     command_history: List[Dict] = field(default_factory=list)
     context_inheritance: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             'id': self.id,
@@ -64,7 +64,7 @@ class SessionBranch:
             'context_inheritance': self.context_inheritance,
             'metadata': self.metadata
         }
-    
+
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> 'SessionBranch':
         return SessionBranch(**data)
@@ -80,7 +80,7 @@ class SessionState:
     active_contexts: Set[str] = field(default_factory=set)
     metadata: Dict[str, Any] = field(default_factory=dict)
     active_branch_id: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             'id': self.id,
@@ -93,7 +93,7 @@ class SessionState:
             'metadata': self.metadata,
             'active_branch_id': self.active_branch_id
         }
-    
+
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> 'SessionState':
         data['active_contexts'] = set(data['active_contexts'])
@@ -101,19 +101,19 @@ class SessionState:
 
 class SessionManager:
     """Manages session continuity, branching, and command learning"""
-    
+
     def __init__(self, storage_path: Path, memory_manager=None):
         self.storage_path = storage_path
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.memory_manager = memory_manager
-        
+
         self.current_session: Optional[SessionState] = None
         self.command_skills: Dict[str, CommandSkill] = {}
         self.context_transitions: Dict[str, Counter] = {}
         self.session_tree = nx.DiGraph()
-        
+
         self._load_state()
-        
+
     def _load_state(self):
         try:
             session_file = self.storage_path / "last_session.json"
@@ -147,7 +147,7 @@ class SessionManager:
                 }
         except Exception as e:
             logger.error(f"Error loading session state: {e}")
-            
+
     def _save_state(self):
         try:
             if self.current_session:
@@ -172,7 +172,7 @@ class SessionManager:
                 }, f, indent=2)
         except Exception as e:
             logger.error(f"Error saving session state: {e}")
-            
+
     def start_session(self, shell_preference: str, working_directory: str,
                       environment: Dict[str, str], session_id: str = None) -> SessionState:
         """Start a new session with the given parameters"""
@@ -187,7 +187,7 @@ class SessionManager:
         self.current_session = session
         self._save_state()
         return session
-        
+
     def update_session(self, **updates) -> bool:
         if not self.current_session:
             return False
@@ -196,7 +196,7 @@ class SessionManager:
                 setattr(self.current_session, k, v)
         self._save_state()
         return True
-        
+
     def add_command(self, command: str, shell_type: str, success: bool, context: Optional[str] = None):
         if not self.current_session:
             return
@@ -235,7 +235,7 @@ class SessionManager:
             if command not in skill.examples:
                 skill.examples.append(command)
         self._save_state()
-        
+
     def get_command_suggestions(self, context: Optional[str] = None, k: int = 5) -> List[Dict]:
         suggestions = []
         for pattern, skill in self.command_skills.items():
@@ -255,7 +255,7 @@ class SessionManager:
             })
         suggestions.sort(key=lambda x: x['score'], reverse=True)
         return suggestions[:k]
-        
+
     def predict_next_context(self) -> Optional[str]:
         if not self.current_session or not self.current_session.active_contexts:
             return None
@@ -266,7 +266,7 @@ class SessionManager:
         if not transitions:
             return None
         return transitions.most_common(1)[0][0]
-        
+
     def _extract_command_pattern(self, command: str) -> Optional[str]:
         try:
             parts = command.split()
@@ -286,7 +286,7 @@ class SessionManager:
         except Exception as e:
             logger.error(f"Error extracting command pattern: {e}")
             return None
-            
+
     def _generate_description(self, command: str) -> str:
         try:
             if self.memory_manager:
@@ -300,7 +300,7 @@ class SessionManager:
         except Exception as e:
             logger.error(f"Error generating command description: {e}")
             return ""
-            
+
     def get_session_stats(self) -> Dict[str, Any]:
         if not self.current_session:
             return {}
@@ -319,7 +319,7 @@ class SessionManager:
             'contexts': list(self.current_session.active_contexts),
             'most_used_commands': Counter(c['command'].split()[0] for c in self.current_session.command_history).most_common(5)
         }
-        
+
     def create_branch(self, name: str, description: str,
                      parent_id: Optional[str] = None,
                      inherit_context: bool = True) -> Optional[str]:
@@ -349,12 +349,12 @@ class SessionManager:
         except Exception as e:
             logger.error(f"Error creating branch: {e}")
             return None
-            
+
     def get_branch(self, branch_id: str) -> Optional[SessionBranch]:
         if branch_id in self.session_tree:
             return self.session_tree.nodes[branch_id]['branch']
         return None
-        
+
     def get_branch_path(self, branch_id: str) -> List[SessionBranch]:
         if branch_id not in self.session_tree:
             return []
@@ -367,7 +367,7 @@ class SessionManager:
             path.append(branch)
             current = branch.parent_id
         return list(reversed(path))
-        
+
     def switch_branch(self, branch_id: str) -> bool:
         if not self.current_session or branch_id not in self.session_tree:
             return False
@@ -381,7 +381,7 @@ class SessionManager:
         except Exception as e:
             logger.error(f"Error switching branch: {e}")
             return False
-            
+
     def get_branch_context(self, branch_id: str) -> Dict[str, Any]:
         try:
             context = {}
@@ -401,7 +401,7 @@ class SessionManager:
         except Exception as e:
             logger.error(f"Error getting branch context: {e}")
             return {}
-            
+
     def add_command_to_branch(self, branch_id: str, command: str,
                               shell_type: str, success: bool = True):
         try:
@@ -418,7 +418,7 @@ class SessionManager:
             self._save_state()
         except Exception as e:
             logger.error(f"Error adding command to branch: {e}")
-            
+
     def merge_branches(self, source_id: str, target_id: str) -> bool:
         try:
             source = self.get_branch(source_id)

@@ -13,7 +13,7 @@ from Output.config import OutputConfig
 def list_settings(config: OutputConfig):
     """
     Display the current configuration settings.
-    
+
     Args:
         config: The output configuration
     """
@@ -26,7 +26,7 @@ def list_settings(config: OutputConfig):
 def update_setting(config: OutputConfig, key: str, value: str):
     """
     Update a configuration setting.
-    
+
     Args:
         config: The output configuration
         key: The setting key to update
@@ -38,7 +38,7 @@ def update_setting(config: OutputConfig, key: str, value: str):
         for k in config.settings:
             print(f"  - {k}")
         return
-    
+
     # Try to parse the value as JSON
     try:
         parsed_value = json.loads(value)
@@ -52,7 +52,7 @@ def update_setting(config: OutputConfig, key: str, value: str):
 def reset_to_defaults(config: OutputConfig):
     """
     Reset all settings to defaults.
-    
+
     Args:
         config: The output configuration
     """
@@ -64,25 +64,25 @@ def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(description="Configure output display settings")
     parser.add_argument("--config", help="Path to config file (default: ~/.agent_output_config.json)")
-    
+
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
-    
+
     # List settings command
     list_parser = subparsers.add_parser("list", help="List current settings")
-    
+
     # Update setting command
     update_parser = subparsers.add_parser("set", help="Update a setting")
     update_parser.add_argument("key", help="Setting key to update")
     update_parser.add_argument("value", help="Value to set (will be parsed as JSON if possible)")
-    
+
     # Reset command
     reset_parser = subparsers.add_parser("reset", help="Reset to default settings")
-    
+
     args = parser.parse_args()
-    
+
     # Load config
     config = OutputConfig(args.config)
-    
+
     if args.command == "list" or not args.command:
         list_settings(config)
     elif args.command == "set":

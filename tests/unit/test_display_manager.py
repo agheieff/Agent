@@ -17,11 +17,11 @@ def test_display_manager():
     """Test the display manager functionality"""
     print("\n=== Testing DisplayManager ===")
     display = DisplayManager()
-    
+
     # Set verbosity level
     display._config.set("verbose_level", 2)
     display._config.set("verbose_output", True)
-    
+
     # Test command result display
     print("\nTesting command result display:")
     test_result = {
@@ -31,7 +31,7 @@ def test_display_manager():
         "success": True
     }
     display.display_command_result("ls -la", test_result)
-    
+
     # Test error display
     print("\nTesting error display:")
     error_result = {
@@ -41,7 +41,7 @@ def test_display_manager():
         "success": False
     }
     display.display_command_result("cat nonexistent.txt", error_result)
-    
+
     return True
 
 if __name__ == "__main__":

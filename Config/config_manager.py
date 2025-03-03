@@ -15,28 +15,28 @@ logger = logging.getLogger(__name__)
 class ConfigManager:
     """
     Manages configuration for the Arcadia Agent.
-    
+
     This class handles loading configuration from various sources with the following priority:
     1. Environment variables (prefixed with ARCADIA_)
     2. User config.yaml
     3. Default configuration values
     """
-    
+
     def __init__(self, config_path: Optional[Path] = None):
         """
         Initialize the configuration manager.
-        
+
         Args:
             config_path: Path to the configuration file. If None, will search in standard locations.
         """
         self.config: Dict[str, Any] = {}
         self.config_path = config_path or self._find_config_file()
         self.load_config()
-        
+
     def _find_config_file(self) -> Path:
         """
         Find the configuration file in standard locations.
-        
+
         Returns:
             Path to the configuration file.
         """
@@ -45,7 +45,7 @@ class ConfigManager:
             env_path = Path(os.environ.get("ARCADIA_CONFIG_PATH"))
             if env_path.exists():
                 return env_path
-        
+
         # Standard locations to check
         search_paths = [
             Path.cwd() / "Config" / "config.yaml",
@@ -53,19 +53,19 @@ class ConfigManager:
             Path.home() / ".arcadia" / "config.yaml",
             Path(__file__).parent / "config.yaml"
         ]
-        
+
         for path in search_paths:
             if path.exists():
                 return path
-                
+
         # Return default path - will create default config there if it doesn't exist
         return Path(__file__).parent / "config.yaml"
-        
+
     def load_config(self):
         """Load configuration from file and override with environment variables."""
         # Start with default config
         self.config = self._load_default_config()
-        
+
         # Load from file if it exists
         if self.config_path.exists():
             try:
@@ -78,24 +78,24 @@ class ConfigManager:
         else:
             # Create default config file
             self._save_default_config()
-            
+
         # Process variable interpolation
         self._process_variable_interpolation()
-            
+
         # Override with environment variables
         self._apply_environment_variables()
-        
+
     def _load_default_config(self) -> Dict[str, Any]:
         """Load the default configuration."""
         default_config_path = Path(__file__).parent / "defaults" / "default_config.yaml"
-        
+
         if default_config_path.exists():
             try:
                 with open(default_config_path, 'r') as f:
                     return yaml.safe_load(f)
             except Exception as e:
                 logger.error(f"Error loading default config: {e}")
-        
+
         # Minimal default config if file doesn't exist
         return {
             "paths": {
@@ -143,7 +143,7 @@ class ConfigManager:
                 "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
             }
         }
-    
+
     def _save_default_config(self):
         """Save the default configuration to file."""
         try:
@@ -153,11 +153,11 @@ class ConfigManager:
             logger.info(f"Created default configuration at {self.config_path}")
         except Exception as e:
             logger.error(f"Error creating default config: {e}")
-            
+
     def _update_dict_recursive(self, target: Dict, source: Dict):
         """
         Update target dictionary recursively with values from source.
-        
+
         Args:
             target: Target dictionary to update
             source: Source dictionary with new values
@@ -167,26 +167,26 @@ class ConfigManager:
                 self._update_dict_recursive(target[key], value)
             else:
                 target[key] = value
-                
+
     def _apply_environment_variables(self):
         """Override configuration values with environment variables."""
         env_prefix = "ARCADIA_"
-        
+
         for env_var, value in os.environ.items():
             if env_var.startswith(env_prefix):
                 # Convert ARCADIA_PATHS_MEMORY_DIR to paths.memory_dir
                 config_path = env_var[len(env_prefix):].lower().replace("_", ".")
                 self.set_value(config_path, value)
-                
+
     def _process_variable_interpolation(self):
         """Process variable interpolation in configuration values."""
         # Convert the config to string
         config_str = yaml.dump(self.config)
-        
+
         # Find all ${...} patterns
         var_pattern = r'\${([^}]+)}'
         matches = re.findall(var_pattern, config_str)
-        
+
         # Process each variable
         for variable in matches:
             # Get the current value
@@ -197,60 +197,60 @@ class ConfigManager:
             except:
                 # Keep the original variable if it can't be resolved
                 pass
-                
+
         # Load back the processed config
         self.config = yaml.safe_load(config_str)
-    
+
     def get_value(self, path: str, default: Any = None) -> Any:
         """
         Get a configuration value by path.
-        
+
         Args:
             path: Dot-separated path to the configuration value (e.g., "paths.memory_dir")
             default: Default value to return if the path doesn't exist
-            
+
         Returns:
             The configuration value at the specified path or the default value
         """
         parts = path.split('.')
         current = self.config
-        
+
         try:
             for part in parts:
                 current = current[part]
             return current
         except (KeyError, TypeError):
             return default
-            
+
     def set_value(self, path: str, value: Any):
         """
         Set a configuration value by path.
-        
+
         Args:
             path: Dot-separated path to the configuration value (e.g., "paths.memory_dir")
             value: The value to set
         """
         parts = path.split('.')
         current = self.config
-        
+
         # Navigate to the parent object
         for part in parts[:-1]:
             if part not in current:
                 current[part] = {}
             current = current[part]
-            
+
         # Set the value
         current[parts[-1]] = value
-        
+
     def save_config(self, path: Optional[Path] = None):
         """
         Save the current configuration to file.
-        
+
         Args:
             path: Path to save the configuration to. If None, uses the current config_path.
         """
         save_path = path or self.config_path
-        
+
         try:
             save_path.parent.mkdir(parents=True, exist_ok=True)
             with open(save_path, 'w') as f:
@@ -258,52 +258,52 @@ class ConfigManager:
             logger.info(f"Configuration saved to {save_path}")
         except Exception as e:
             logger.error(f"Error saving configuration: {e}")
-            
+
     def get_memory_path(self) -> Path:
         """Get the memory directory path."""
         memory_path = self.get_value("paths.memory_dir")
         return Path(memory_path)
-        
+
     def get_projects_path(self) -> Path:
         """Get the projects directory path."""
         projects_path = self.get_value("paths.projects_dir")
         return Path(projects_path)
-        
+
     def get_context_keys(self) -> List[str]:
         """Get the context keys for memory."""
         return self.get_value("memory.context_keys", [])
-        
+
     def get_llm_config(self, model: Optional[str] = None) -> Dict[str, Any]:
         """
         Get the configuration for a specific LLM model.
-        
+
         Args:
             model: The model name. If None, uses the default model.
-            
+
         Returns:
             Dictionary with model configuration
         """
         if model is None:
             model = self.get_value("llm.default_model", "deepseek")
-            
+
         return self.get_value(f"llm.{model}", {})
-        
+
     def is_test_mode(self) -> bool:
         """Check if the agent is running in test mode."""
         return self.get_value("agent.test_mode", False)
-        
+
     def is_headless(self) -> bool:
         """Check if the agent is running in headless mode."""
         return self.get_value("agent.headless", False)
-        
+
     def to_dict(self) -> Dict[str, Any]:
         """Return the entire configuration as a dictionary."""
         return self.config.copy()
-        
+
     def get_config_summary(self) -> str:
         """
         Get a human-readable summary of the configuration.
-        
+
         Returns:
             A string summarizing the key configuration settings
         """
@@ -315,7 +315,7 @@ class ConfigManager:
         summary += f"- Headless mode: {self.get_value('agent.headless')}\n"
         summary += f"- Internet access: {self.get_value('agent.allow_internet')}\n"
         summary += f"- Log level: {self.get_value('logging.level')}\n"
-        
+
         return summary
 
 # Singleton instance
@@ -324,7 +324,7 @@ _config_manager: Optional[ConfigManager] = None
 def get_config() -> ConfigManager:
     """
     Get the singleton ConfigManager instance.
-    
+
     Returns:
         The ConfigManager instance
     """

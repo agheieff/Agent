@@ -135,12 +135,12 @@ def get_initial_prompt() -> str:
             readline.set_history_length(1000)
         except FileNotFoundError:
             pass
-        
+
         import atexit
         atexit.register(readline.write_history_file, history_file)
     except (ImportError, ModuleNotFoundError):
         pass
-        
+
     print("\nEnter your prompt (press Enter on a blank line to finish):")
     lines = []
     while True:
@@ -227,7 +227,7 @@ async def pause_for_context_input():
             readline.set_history_length(1000)
         except FileNotFoundError:
             pass
-        
+
         import atexit
         if not hasattr(pause_for_context_input, "_readline_initialized"):
             atexit.register(readline.write_history_file, history_file)

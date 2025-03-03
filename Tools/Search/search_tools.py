@@ -11,10 +11,10 @@ class SearchTools:
     Implements file system search capabilities for the agent.
     Includes glob pattern matching and content searching (grep).
     """
-    
+
     def __init__(self):
         self.current_dir = os.getcwd()
-    
+
     def glob_tool(self, pattern: str, path: Optional[str] = None) -> List[str]:
         """
         Finds files that match a 'pattern' under the given directory ('path'),
@@ -97,7 +97,7 @@ class SearchTools:
     def ls(self, path: str, hide_hidden: bool = False) -> Dict[str, Any]:
         """
         Lists directories and files at the given path.
-        
+
         Args:
             path: Path to list
             hide_hidden: If True, hide files/directories that start with '.'
@@ -111,11 +111,11 @@ class SearchTools:
                 return {"error": f"Not a directory: {abs_path}"}
 
             entries = os.listdir(abs_path)
-            
+
             # Filter out hidden files if requested
             if hide_hidden:
                 entries = [entry for entry in entries if not entry.startswith('.')]
-                
+
             directories = []
             files = []
             hidden_dirs = []
@@ -124,14 +124,14 @@ class SearchTools:
             for entry in sorted(entries):
                 entry_path = os.path.join(abs_path, entry)
                 is_hidden = entry.startswith('.')
-                
+
                 # Create an entry with metadata
                 entry_info = {
                     "name": entry, 
                     "is_hidden": is_hidden,
                     "is_dir": os.path.isdir(entry_path)
                 }
-                
+
                 # Add to the appropriate list
                 if entry_info["is_dir"]:
                     if is_hidden:
@@ -148,11 +148,11 @@ class SearchTools:
                         hidden_files.append({"name": entry, "size": st.st_size, "modified": st.st_mtime})
                     else:
                         files.append({"name": entry, "size": st.st_size, "modified": st.st_mtime})
-                        
+
                 # Add the entire entry to the entries list
                 if 'entries_list' not in locals():
                     entries_list = []
-                    
+
                 entries_list.append(entry_info)
 
             return {
@@ -168,7 +168,7 @@ class SearchTools:
         except Exception as e:
             logger.error(f"Error listing directory {path}: {e}")
             return {"error": f"{str(e)}"}
-    
+
     def _ensure_absolute_path(self, path: str) -> str:
         """
         Converts a potentially relative path to an absolute path 
@@ -177,7 +177,7 @@ class SearchTools:
         if not os.path.isabs(path):
             return os.path.abspath(os.path.join(self.current_dir, path))
         return path
-    
+
     def _is_binary_file(self, file_path: str) -> bool:
         """
         Basic detection if a file is binary by reading its first chunk 

@@ -21,7 +21,7 @@ class SecurityCapability:
 
 class SecurityManager:
     """Manages command execution safety and resource limits"""
-    
+
     DEFAULT_LIMITS = {
         'MAX_CPU_TIME': 30,
         'MAX_MEMORY': 512 * 1024 * 1024,
@@ -29,7 +29,7 @@ class SecurityManager:
         'MAX_PROCESSES': 50,
         'MAX_OPEN_FILES': 1024
     }
-    
+
     SHELL_PATTERNS = {
         'bash': {
             'SYSTEM_WIPE': [
@@ -47,17 +47,17 @@ class SecurityManager:
             ]
         }
     }
-    
+
     def __init__(self, config_path: Optional[Path] = None):
         self.config_path = config_path or Path("config/security")
         self.config_path.mkdir(parents=True, exist_ok=True)
         self.capabilities: Dict[str, SecurityCapability] = {}
         self.cgroup_name = "agent_restricted"
         self._load_capabilities()
-        
+
         # For AMD-based systems or CPU-based systems, cgroups are still relevant but no GPU specifics
         self._setup_cgroup()
-        
+
     def _setup_cgroup(self):
         """Setup cgroup for resource limiting if needed"""
         try:
@@ -72,7 +72,7 @@ class SecurityManager:
                 f.write(str(self.DEFAULT_LIMITS['MAX_PROCESSES']))
         except Exception as e:
             logger.error(f"Error setting up cgroup: {e}")
-            
+
     def _load_capabilities(self):
         try:
             cap_file = self.config_path / "capabilities.json"
@@ -92,7 +92,7 @@ class SecurityManager:
         except Exception as e:
             logger.error(f"Error loading capabilities: {e}")
             self._create_default_capabilities()
-            
+
     def _create_default_capabilities(self):
         defaults = {
             'basic_execution': {
@@ -131,7 +131,7 @@ class SecurityManager:
                 **data
             )
         self._save_capabilities()
-        
+
     def _save_capabilities(self):
         try:
             data = []
@@ -147,7 +147,7 @@ class SecurityManager:
                 json.dump(data, f, indent=2)
         except Exception as e:
             logger.error(f"Error saving capabilities: {e}")
-            
+
     def validate_command(self, command: str, shell_type: str) -> Dict:
         # Unrestricted - always return safe with no warnings
         results = {
@@ -157,11 +157,11 @@ class SecurityManager:
             'required_capabilities': set(),
             'resource_requirements': {}
         }
-        
+
         # Still estimate resources for logging purposes, but don't block anything
         results['resource_requirements'] = self._estimate_resources(command)
         results['required_capabilities'] = self._determine_capabilities(command, shell_type)
-        
+
         # Log potentially dangerous commands but allow them
         patterns = self.SHELL_PATTERNS.get(shell_type, {})
         for danger_type, danger_patterns in patterns.items():
@@ -169,16 +169,16 @@ class SecurityManager:
                 if re.search(pattern, command, re.IGNORECASE):
                     logger.warning(f"Executing potentially dangerous command: {danger_type}: {command}")
                     # Don't set is_safe to False, we want to allow all commands
-        
+
         return results
-        
+
     def _estimate_resources(self, command: str) -> Dict:
         resources = {'cpu': 'low', 'memory': 'low', 'disk': 'low', 'network': 'none'}
         cpu_patterns = [r'find', r'grep\s+-r', r'sort', r'compress', r'tar', r'zip']
         memory_patterns = [r'sort\s+-S', r'convert', r'ffmpeg']
         disk_patterns = [r'dd', r'rsync', r'cp\s+-r', r'mv\s+.*\s+/']
         network_patterns = [r'curl', r'wget', r'ssh', r'scp', r'rsync\s+.*:', r'git\s+clone']
-        
+
         if any(re.search(p, command) for p in cpu_patterns):
             resources['cpu'] = 'medium'
         if any(re.search(p, command) for p in memory_patterns):
@@ -188,7 +188,7 @@ class SecurityManager:
         if any(re.search(p, command) for p in network_patterns):
             resources['network'] = 'active'
         return resources
-        
+
     def _determine_capabilities(self, command: str, shell_type: str) -> Set[str]:
         capabilities = set()
         capabilities.add('basic_execution')
@@ -201,11 +201,11 @@ class SecurityManager:
         if any(p in command for p in ['systemctl', 'service']):
             capabilities.add('service_management')
         return capabilities
-        
+
     def apply_resource_limits(self, requirements: Dict):
         # No resource limits applied in unrestricted mode
         logger.info("Resource limits disabled in unrestricted mode")
-            
+
     def track_resource_usage(self, pid: int) -> Dict:
         try:
             with open(f"/proc/{pid}/status") as f:
@@ -225,15 +225,15 @@ class SecurityManager:
         except Exception as e:
             logger.error(f"Error tracking resource usage: {e}")
             return {}
-        
+
     def validate_binary(self, command: str) -> bool:
         # Always validate as true, no binary validation
         return True
-            
+
     def create_restricted_environment(self) -> Dict[str, str]:
         # No restriction - return the full environment
         return os.environ.copy()
-        
+
     def check_command_capability(self, command: str, required_capability: str) -> bool:
         # Always return True - no capability restrictions
         return True

@@ -33,21 +33,8 @@ ENV/
 *.swp
 *.swo
 
-# Project specific
-# Memory and conversation data - never commit these
-memory/
-/AgentMemory/
-../AgentMemory/
-
-# Temporary directories
 temp/
 tmp/
-
-# Project directories that may contain user data
-/Projects/
-../Projects/
-Projects/
-Project_*/
 
 # Logs and debug files
 *.log
@@ -70,3 +57,5 @@ debug_agent.py
 .env*
 .secrets
 secrets/
+
+clean.sh

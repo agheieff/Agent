@@ -1,7 +1,3 @@
-"""
-Output Manager for handling tool outputs and user interactions.
-"""
-
 import sys
 import asyncio
 from typing import Dict, Any, List, Optional, Tuple
@@ -10,46 +6,31 @@ import logging
 logger = logging.getLogger(__name__)
 
 class OutputManager:
-    """
-    Manages the output from tools and user interactions.
-
-    Responsibilities:
-    1. Receive output from tool executions
-    2. Format outputs according to tool-specific formatters
-    3. Display formatted output to the user
-    4. Handle user input when needed
-    """
-
     def __init__(self):
         self.tool_formatters = {}
         self._register_default_formatters()
 
     def _register_default_formatters(self):
-        """Register default formatters for common output types."""
-        # Default formatter just returns the output as is
         self.register_formatter("default", self._default_formatter)
 
-        # These will be defined by tool handlers later
-        # Just placeholders for now
         self.register_formatter("error", self._error_formatter)
         self.register_formatter("command", self._command_formatter)
 
     def register_formatter(self, tool_name: str, formatter_func):
-        """
-        Register a custom formatter for a specific tool.
-
-        Args:
-            tool_name: The name of the tool
-            formatter_func: Function that formats the tool output
-        """
         self.tool_formatters[tool_name] = formatter_func
 
     async def handle_tool_output(self, tool_name: str, output: Dict[str, Any]) -> str:
+        formatter = self.tool_formatters.get(tool_name, self.tool_formatters["default"])
+        
+        formatted_output = await formatter(output)
+        
         self.display_output(formatted_output)
 
         return formatted_output
 
     async def handle_tool_outputs(self, tool_outputs: List[Tuple[str, Dict[str, Any]]]) -> List[str]:
+        formatted_outputs = []
+        
         for tool_name, output in tool_outputs:
             formatted_output = await self.handle_tool_output(tool_name, output)
             formatted_outputs.append(formatted_output)
@@ -58,7 +39,6 @@ class OutputManager:
 
     def display_output(self, output: str):
         print(output)
-
         sys.stdout.flush()
 
     async def get_user_input(self, prompt: str = "> ") -> str:

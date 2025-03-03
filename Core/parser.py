@@ -1,159 +1,140 @@
 """
-Tool Parser for extracting and parsing tool invocations from messages.
-
-This module is responsible for:
-1. Extracting tool invocations from complete messages
-2. Parsing each tool invocation into a tool name and parameters
-3. Formatting tool execution results
+Parser for extracting tool calls from agent messages.
 """
 
-import logging
 import re
-from typing import Dict, Tuple, Optional, List, Any, Generator
+import logging
+from typing import List, Dict, Any, Tuple, Optional
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("tool_parser")
+logger = logging.getLogger(__name__)
 
 class ToolParser:
     """
-    Parser for extracting and processing tool invocations from messages.
+    Parser that extracts tool calls from agent messages.
+    Tool format: /tool_name [params]
+    Help format: /tool_name -h
+    
+    Supports heredoc-style multiline parameters using triple quotes:
+    /tool_name param="""multiline
+    content"""
     """
 
-    # Regex pattern to match tool invocations in a message
-    # Matches either:
-    # 1. Lines starting with / followed by a word (e.g., /bash ls -la)
-    # 2. Blocks of text between ``` or ```tool markers
-    TOOL_PATTERN = r'(^/\w+(?:\s+.*)?$|```(?:tool)?\s*\n([\s\S]*?)\n```)'
-
     @staticmethod
-    def extract_tools(message: str) -> List[str]:
+    def extract_tool_calls(message: str) -> List[Tuple[str, Dict[str, Any], bool]]:
         """
-        Extract all tool invocations from a message.
+        Extract tool calls from an agent message.
 
         Args:
-            message: The complete message to parse
+            message: The message to parse
 
         Returns:
-            List of extracted tool invocation texts
+            List of tuples containing (tool_name, params_dict, is_help_request)
         """
-        if not message:
-            return []
+        tool_calls = []
 
-        # Find all matches of the tool pattern
-        matches = re.finditer(ToolParser.TOOL_PATTERN, message, re.MULTILINE)
-        tool_texts = []
+        # Pattern for tool call with parameters:
+        # /tool_name param1=value1 param2="value with spaces" param3='another value'
+        tool_pattern = r'/(\w+)(?:\s+((?:[^-]|\-[^h]|(?:\-h\S)).*?))?(?:\s*$|\n)'
+        matches = re.finditer(tool_pattern, message, re.MULTILINE | re.DOTALL)
 
         for match in matches:
-            if match.group(1).startswith('/'):
-                # Single line command (e.g., /bash ls -la)
-                tool_texts.append(match.group(1))
-            else:
-                # Code block
-                tool_texts.append(match.group(2))
+            tool_name = match.group(1)
+            args_text = match.group(2) if match.group(2) else ""
 
-        return tool_texts
-
-    @staticmethod
-    def parse_tool(tool_text: str) -> Tuple[str, Dict[str, Any]]:
-        """
-        Parse a tool invocation into a tool name and parameters.
-
-        Args:
-            tool_text: The text of a single tool invocation
-
-        Returns:
-            Tuple of (tool_name, parameters_dict)
-
-        Raises:
-            ValueError: If the tool text is empty or malformed
-        """
-        if not tool_text:
-            raise ValueError("Empty tool text")
-
-        lines = tool_text.strip().split('\n')
-        first_line = lines[0].strip()
-
-        # Handle /command style
-        if first_line.startswith('/'):
-            first_line = first_line[1:]  # Remove the leading /
-            parts = first_line.split(' ', 1)
-            tool_name = parts[0].strip()
-
-            params = {}
-            if len(parts) > 1 and parts[1].strip():
-                # For simple command invocation, put the rest in the 'value' parameter
-                params['value'] = parts[1].strip()
-
-        # Handle multi-line format
-        else:
-            tool_name = first_line
-            params = {}
-
-        # Parse additional parameters from subsequent lines
-        for line in lines[1:]:
-            line = line.strip()
-            if not line:
+            # Check if this is a help request
+            if args_text.strip() == "-h" or args_text.strip() == "--help":
+                tool_calls.append((tool_name, {}, True))
                 continue
 
-            if ':' in line:
-                key, value = line.split(':', 1)
-                params[key.strip()] = value.strip()
-            elif '=' in line:
-                key, value = line.split('=', 1)
-                params[key.strip()] = value.strip()
-            else:
-                # Consider the line as an additional argument
-                if 'args' not in params:
-                    params['args'] = []
-                params['args'].append(line)
+            # Parse the parameters
+            params = {}
 
-        return tool_name, params
+            # Handle heredoc-style multiline parameters with triple quotes
+            # Look for param="""...""" or param='''...''' patterns
+            heredoc_pattern = r'(\w+)=("""|\'\'\')(.*?)\2'
+            
+            # Process args_text to handle heredoc with placeholders
+            processed_args = args_text
+            heredoc_matches = list(re.finditer(heredoc_pattern, args_text, re.DOTALL))
+            
+            for h_match in heredoc_matches:
+                param_name = h_match.group(1)
+                param_value = h_match.group(3)
+                params[param_name] = param_value
+                
+                # Replace the heredoc in args_text with a placeholder to avoid parsing issues
+                start, end = h_match.span()
+                processed_args = processed_args[:start] + f"{param_name}=HEREDOC_PLACEHOLDER" + processed_args[end:]
 
-    @staticmethod
-    def format_result(tool_name: str, success: bool, output: Optional[str] = None, 
-                      error: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Format the result of a tool execution.
+            # Handle quoted strings and preserve spaces within quotes
+            placeholder_map = {}
+            placeholder_pattern = "__PLACEHOLDER_{}__"
+            placeholder_counter = 0
 
-        Args:
-            tool_name: The name of the tool
-            success: Whether the tool execution was successful
-            output: The output of the tool execution
-            error: The error message if the tool execution failed
+            # Replace quoted strings with placeholders to make parsing easier
+            def replace_quoted(match):
+                nonlocal placeholder_counter
+                placeholder = placeholder_pattern.format(placeholder_counter)
+                placeholder_counter += 1
+                # Store the quoted value (without quotes) in the map
+                placeholder_map[placeholder] = match.group(1) or match.group(2)
+                return f" {placeholder} "
 
-        Returns:
-            Formatted result dictionary
-        """
-        result = {
-            "tool": tool_name,
-            "success": success
-        }
+            # Replace quoted strings (that aren't already heredoc) with placeholders
+            processed_args = re.sub(r'(["\'])(.*?)\1', replace_quoted, processed_args)
 
-        if success and output is not None:
-            result["output"] = output
-        elif not success and error is not None:
-            result["error"] = error
+            # Process named parameters (key=value)
+            param_pattern = r'(\w+)=(\S+)'
+            param_matches = re.finditer(param_pattern, processed_args)
 
-        return result
+            positional_values = []
+            named_params_found = False
 
-    @staticmethod
-    def process_message(message: str) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
-        """
-        Process a complete message and yield all tool invocations.
+            for param_match in param_matches:
+                # Skip if we already processed this parameter as heredoc
+                param_name = param_match.group(1)
+                if param_name in params and param_match.group(2) == "HEREDOC_PLACEHOLDER":
+                    continue
+                    
+                named_params_found = True
+                key = param_name
+                value = param_match.group(2)
 
-        Args:
-            message: The complete message to process
+                # Replace placeholder with original quoted value if present
+                if value in placeholder_map:
+                    value = placeholder_map[value]
 
-        Yields:
-            Tuples of (tool_name, parameters_dict) for each valid tool invocation
-        """
-        tool_texts = ToolParser.extract_tools(message)
+                params[key] = value
 
-        for tool_text in tool_texts:
-            try:
-                tool_name, params = ToolParser.parse_tool(tool_text)
-                yield tool_name, params
-            except ValueError as e:
-                logger.warning(f"Failed to parse tool invocation: {e}")
-                continue
+                # Remove this parameter from processed_args so we can handle positional params
+                processed_args = processed_args.replace(param_match.group(0), "", 1)
+
+            # If any part of args_text wasn't consumed by named parameters, treat as positional
+            remaining_args = processed_args.strip().split()
+
+            # Process remaining positional parameters
+            for i, arg in enumerate(remaining_args):
+                if arg in placeholder_map:
+                    positional_values.append(placeholder_map[arg])
+                else:
+                    positional_values.append(arg)
+
+            # Add positional parameters to the params dictionary
+            if positional_values:
+                # Only use numeric keys for positional params if we also have named params
+                # Otherwise, assume the first positional param is the primary argument
+                if named_params_found:
+                    for i, value in enumerate(positional_values):
+                        params[str(i)] = value
+                else:
+                    # If no named params and just one positional value, use a more semantic key
+                    if len(positional_values) == 1:
+                        params["value"] = positional_values[0]
+                    else:
+                        # If multiple positional values, use numeric keys
+                        for i, value in enumerate(positional_values):
+                            params[str(i)] = value
+
+            tool_calls.append((tool_name, params, False))
+
+        return tool_calls

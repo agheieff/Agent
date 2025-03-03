@@ -76,12 +76,75 @@ class DeepSeekClient(BaseLLMClient):
             if msg["role"] == "user":
                 prompt = msg["content"]
                 break
+                
+        # DeepSeek models require alternating user and assistant messages
+        # Fix the conversation history to ensure this pattern
+        fixed_messages = []
         
-        # Get the response using the conversation history
+        # Always include system message first if it exists
+        if conversation_history and conversation_history[0]["role"] == "system":
+            fixed_messages.append(conversation_history[0])
+            conversation_history = conversation_history[1:]
+            
+        # Ensure messages alternate properly with stricter validation
+        last_role = None
+        for msg in conversation_history:
+            role = msg["role"]
+            
+            # System messages can only appear at the start
+            if role == "system" and fixed_messages:
+                logger.warning(f"Skipping system message that's not at the start")
+                continue
+                
+            # Skip consecutive messages with the same role
+            if role == last_role:
+                logger.warning(f"Skipping consecutive {role} message to maintain proper alternation")
+                continue
+                
+            # Enforce strict alternation between user and assistant
+            if last_role == "user" and role != "assistant":
+                logger.warning(f"Expected assistant message after user, got {role}. Skipping.")
+                continue
+                
+            if last_role == "assistant" and role != "user":
+                logger.warning(f"Expected user message after assistant, got {role}. Skipping.")
+                continue
+                
+            # If this is the first non-system message, it must be from the user
+            if last_role is None and fixed_messages and role != "user":
+                logger.warning(f"First message after system must be from user, got {role}. Skipping.")
+                continue
+                
+            fixed_messages.append(msg)
+            last_role = role
+            
+        # Ensure the last message is from the user
+        if fixed_messages and fixed_messages[-1]["role"] != "user":
+            logger.warning("Last message must be from user - removing trailing assistant message")
+            fixed_messages = fixed_messages[:-1]
+            
+        # If we still have no messages, use the prompt directly
+        if not fixed_messages or (len(fixed_messages) == 1 and fixed_messages[0]["role"] == "system"):
+            if system_prompt:
+                fixed_messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt or "Hello, please respond."}
+                ]
+            else:
+                fixed_messages = [
+                    {"role": "user", "content": prompt or "Hello, please respond."}
+                ]
+                
+        logger.info(f"Using {len(fixed_messages)} fixed messages for DeepSeek request")
+        # Log message structure for debugging
+        roles_sequence = [msg["role"] for msg in fixed_messages]
+        logger.info(f"Message roles sequence: {roles_sequence}")
+        
+        # Get the response using the fixed conversation history
         response = await self.get_response(
             prompt=None,  # We're using conversation_history instead
             system=None,  # We're using conversation_history instead
-            conversation_history=conversation_history,
+            conversation_history=fixed_messages,
             temperature=0.6,
             max_tokens=4000
         )

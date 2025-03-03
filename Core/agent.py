@@ -560,11 +560,30 @@ class AutonomousAgent:
                         # Auto-continue by creating a synthetic user message to keep the conversation going
                         auto_message = "Continue with the next steps based on the results of the previous commands."
                         
-                        # Add as user message to maintain conversation structure
-                        self.local_conversation_history.append({
-                            "role": "user",
-                            "content": auto_message
-                        })
+                        # For DeepSeek, we need to be more careful about conversation history
+                        # Only add new user message if the last message was from the assistant
+                        if self.provider == "deepseek":
+                            if self.local_conversation_history and self.local_conversation_history[-1]["role"] == "assistant":
+                                self.local_conversation_history.append({
+                                    "role": "user",
+                                    "content": auto_message
+                                })
+                            else:
+                                # If the last message was already from the user, replace it
+                                if self.local_conversation_history and self.local_conversation_history[-1]["role"] == "user":
+                                    self.local_conversation_history[-1]["content"] = auto_message
+                                else:
+                                    # This shouldn't happen, but just in case
+                                    self.local_conversation_history.append({
+                                        "role": "user",
+                                        "content": auto_message
+                                    })
+                        else:
+                            # For other models, just append normally
+                            self.local_conversation_history.append({
+                                "role": "user",
+                                "content": auto_message
+                            })
                         
                         # Generate next response
                         response = await self._generate_response(None, auto_message)
@@ -957,10 +976,33 @@ class AutonomousAgent:
                 results_summary += "\nPlease continue with the next steps based on these results."
                 
                 # Add as user message and generate response
-                self.local_conversation_history.append({
-                    "role": "user",
-                    "content": results_summary
-                })
+                # For DeepSeek, check the conversation history structure
+                if self.provider == "deepseek":
+                    if self.local_conversation_history and self.local_conversation_history[-1]["role"] == "assistant":
+                        # Last message was from assistant, we can safely add user message
+                        self.local_conversation_history.append({
+                            "role": "user",
+                            "content": results_summary
+                        })
+                    else:
+                        # If last message was user, replace it to maintain alternating pattern
+                        if self.local_conversation_history and self.local_conversation_history[-1]["role"] == "user":
+                            self.local_conversation_history[-1] = {
+                                "role": "user",
+                                "content": results_summary
+                            }
+                        else:
+                            # Fallback case, just append
+                            self.local_conversation_history.append({
+                                "role": "user",
+                                "content": results_summary
+                            })
+                else:
+                    # For other models, just append normally
+                    self.local_conversation_history.append({
+                        "role": "user",
+                        "content": results_summary
+                    })
                 
                 # Generate new response with the command results
                 new_response = await self._generate_response(None, results_summary)

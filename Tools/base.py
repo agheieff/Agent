@@ -1,13 +1,75 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Tuple, List
+import logging
+
+# Import output manager - we use a try/except to handle circular imports
+# or cases where OutputManager hasn't been initialized yet
+try:
+    from Output import output_manager
+except (ImportError, ModuleNotFoundError):
+    output_manager = None
+
+logger = logging.getLogger(__name__)
 
 class ToolHandler(ABC):
     name: str = ""
     description: str = ""
 
+    # Optional formatter name for this tool's output
+    formatter: str = "default"
+
     @abstractmethod
     async def execute(self, **kwargs) -> Any:
+        """
+        Execute the tool with the given parameters.
+
+        This method should be implemented by subclasses.
+
+        Args:
+            **kwargs: Tool-specific parameters
+
+        Returns:
+            Dict with at least the following keys:
+            - success: bool indicating if the tool execution was successful
+            - output: str or object containing the tool output
+            - error: str containing any error message (if success is False)
+        """
         pass
+
+    async def run(self, **kwargs) -> Dict[str, Any]:
+        """
+        Run the tool and send its output to the output manager.
+
+        This method wraps the execute method, adding output management.
+
+        Args:
+            **kwargs: Tool-specific parameters
+
+        Returns:
+            The result from execute()
+        """
+        try:
+            # Execute the tool
+            result = await self.execute(**kwargs)
+
+            # Send result to output manager if available
+            if output_manager is not None:
+                await output_manager.handle_tool_output(self.name, result)
+
+            return result
+        except Exception as e:
+            logger.exception(f"Error executing tool {self.name}: {str(e)}")
+            error_result = {
+                "success": False,
+                "output": "",
+                "error": str(e)
+            }
+
+            # Send error to output manager if available
+            if output_manager is not None:
+                await output_manager.handle_tool_output("error", error_result)
+
+            return error_result
 
 class FileTool(ToolHandler):
     async def validate_file_path(self, file_path: str) -> Tuple[bool, Optional[str]]:

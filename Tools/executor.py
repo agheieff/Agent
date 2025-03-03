@@ -65,7 +65,11 @@ async def execute_tool(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]
     handler = _TOOLS[tool_name]
 
     try:
-        if inspect.iscoroutinefunction(handler):
+        # If handler is a method of a ToolHandler instance, use its run method
+        if hasattr(handler, '__self__') and isinstance(handler.__self__, object) and hasattr(handler.__self__, 'run'):
+            result = await handler.__self__.run(**params)
+        # Otherwise, directly call the function
+        elif inspect.iscoroutinefunction(handler):
             result = await handler(**params)
         else:
             loop = asyncio.get_event_loop()

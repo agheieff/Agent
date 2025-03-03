@@ -2,144 +2,64 @@
 Tool for handling confirmations of operations.
 """
 import os
-from typing import Dict, Any, Union
+from typing import Dict, Any, Union, Optional
 
-# Import from edit_file_tool to share state
-from Tools.File.edit_file_tool import _pending_confirmations, _viewed_files
+# Tool metadata
+TOOL_NAME = "confirm"
+TOOL_DESCRIPTION = "Confirm or list pending operations that require verification"
+TOOL_HELP = """
+Confirm a pending operation that requires verification.
 
-def tool_confirm(confirmation_id: Union[str, int]) -> Dict[str, Any]:
-    """
-    Confirm a pending operation.
+Usage:
+  /confirm <confirmation_id>
+  /confirm id=<confirmation_id>
+  /confirm list
 
-    Args:
-        confirmation_id: ID of the operation to confirm
+Arguments:
+  confirmation_id    ID of the operation to confirm
+  list               Flag to list all pending operations requiring confirmation
 
-    Returns:
-        Dict with keys: output, error, success, exit_code
-    """
-    try:
-        # Convert confirmation_id to integer
-        try:
-            id_num = int(confirmation_id)
-        except ValueError:
-            return {
-                "output": "",
-                "error": f"Invalid confirmation ID: {confirmation_id}",
-                "success": False,
-                "exit_code": 1
-            }
+Examples:
+  /confirm 1
+  /confirm id=2
+  /confirm list
+"""
 
-        # Check if confirmation exists
-        if id_num not in _pending_confirmations:
-            return {
-                "output": "",
-                "error": f"No pending operation with confirmation ID: {id_num}",
-                "success": False,
-                "exit_code": 1
-            }
+TOOL_EXAMPLES = [
+    ("/confirm 1", "Confirm the operation with ID 1"),
+    ("/confirm id=2", "Confirm the operation with ID 2"),
+    ("/confirm list", "List all pending operations requiring confirmation")
+]
 
-        # Get operation details
-        operation = _pending_confirmations.pop(id_num)
-        operation_type = operation.get("type")
+# Store pending confirmations globally
+_pending_confirmations = {}
 
-        # Perform the confirmed operation
-        if operation_type == "edit":
-            # Run the edit operation
-            file_path = operation.get("file_path")
-            old_string = operation.get("old_string")
-            new_string = operation.get("new_string")
+def get_pending_confirmations() -> Dict[int, Dict[str, Any]]:
+    """Get a copy of pending confirmations."""
+    return _pending_confirmations.copy()
 
-            # Mark as viewed to bypass confirmation
-            _viewed_files.add(file_path)
+def register_confirmation(id: int, operation_type: str, **params) -> None:
+    """Register a new pending confirmation."""
+    _pending_confirmations[id] = {
+        "type": operation_type,
+        **params
+    }
 
-            # Read file content
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                content = f.read()
+def _get_help() -> Dict[str, Any]:
+    """Return help information for this tool."""
+    example_text = "\nExamples:\n" + "\n".join(
+        [f"  {example[0]}\n    {example[1]}" for example in TOOL_EXAMPLES]
+    )
 
-            # Check for old_string
-            if old_string and old_string not in content:
-                return {
-                    "output": "",
-                    "error": f"Target string not found in {file_path}",
-                    "success": False,
-                    "exit_code": 1
-                }
+    return {
+        "output": f"{TOOL_DESCRIPTION}\n\n{TOOL_HELP}\n{example_text}",
+        "error": "",
+        "success": True,
+        "exit_code": 0
+    }
 
-            # Check uniqueness
-            if old_string:
-                occurrences = content.count(old_string)
-                if occurrences > 1:
-                    return {
-                        "output": "",
-                        "error": f"The target string appears {occurrences} times in {file_path}. It must uniquely identify a single instance.",
-                        "success": False,
-                        "exit_code": 1
-                    }
-
-                # Replace exactly one occurrence
-                new_content = content.replace(old_string, new_string, 1)
-            else:
-                # If old_string is empty, replace entire content
-                new_content = new_string
-
-            # Write the new content
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(new_content)
-
-            return {
-                "output": f"Confirmed edit: Successfully edited file {file_path}",
-                "error": "",
-                "success": True,
-                "exit_code": 0
-            }
-
-        elif operation_type == "replace":
-            # Run the replace operation
-            file_path = operation.get("file_path")
-            content = operation.get("content")
-
-            # Mark as viewed to bypass confirmation
-            _viewed_files.add(file_path)
-
-            # Create parent directory if needed
-            parent_dir = os.path.dirname(file_path)
-            if parent_dir and not os.path.exists(parent_dir):
-                os.makedirs(parent_dir, exist_ok=True)
-
-            # Write the new content
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-
-            return {
-                "output": f"Confirmed replace: Successfully updated file {file_path}",
-                "error": "",
-                "success": True,
-                "exit_code": 0
-            }
-
-        else:
-            return {
-                "output": "",
-                "error": f"Unknown operation type: {operation_type}",
-                "success": False,
-                "exit_code": 1
-            }
-
-    except Exception as e:
-        return {
-            "output": "",
-            "error": f"Error confirming operation: {str(e)}",
-            "success": False,
-            "exit_code": 1
-        }
-
-def tool_pending() -> Dict[str, Any]:
-    """
-    List all pending operations that require confirmation.
-
-    Returns:
-        Dict with keys: output, error, success, exit_code
-    """
+def list_pending() -> Dict[str, Any]:
+    """List all pending operations requiring confirmation."""
     try:
         if not _pending_confirmations:
             return {
@@ -189,6 +109,159 @@ def tool_pending() -> Dict[str, Any]:
         return {
             "output": "",
             "error": f"Error listing pending operations: {str(e)}",
+            "success": False,
+            "exit_code": 1
+        }
+
+def tool_confirm(id: Union[str, int] = None, list: bool = False, help: bool = False, value: str = None, **kwargs) -> Dict[str, Any]:
+    """
+    Confirm a pending operation or list all pending operations.
+
+    Args:
+        id: ID of the operation to confirm
+        list: Flag to list all pending operations
+        help: Whether to return help information
+        value: Alternative way to specify ID as positional parameter
+        **kwargs: Additional parameters
+
+    Returns:
+        Dict with keys: output, error, success, exit_code
+    """
+    # Return help information if requested
+    if help:
+        return _get_help()
+
+    # Check if we should list pending operations
+    if list:
+        return list_pending()
+
+    # Handle positional parameter for ID
+    if id is None and value is not None:
+        try:
+            id = int(value)
+        except (ValueError, TypeError):
+            # Check if the value is "list"
+            if value.lower() == "list":
+                return list_pending()
+
+    # Check for missing ID in named or positional parameters
+    if id is None:
+        # Look for positional parameters in kwargs
+        for k in kwargs:
+            if k.isdigit():
+                try:
+                    id = int(kwargs[k])
+                    break
+                except (ValueError, TypeError):
+                    pass
+
+    # If still no ID, display pending operations
+    if id is None:
+        return list_pending()
+
+    try:
+        # Convert ID to integer
+        try:
+            id_num = int(id)
+        except ValueError:
+            return {
+                "output": "",
+                "error": f"Invalid confirmation ID: {id}",
+                "success": False,
+                "exit_code": 1
+            }
+
+        # Check if confirmation exists
+        if id_num not in _pending_confirmations:
+            return {
+                "output": "",
+                "error": f"No pending operation with confirmation ID: {id_num}",
+                "success": False,
+                "exit_code": 1
+            }
+
+        # Get operation details
+        operation = _pending_confirmations.pop(id_num)
+        operation_type = operation.get("type")
+
+        if operation_type == "edit":
+            # Run the edit operation
+            from Tools.File.edit import tool_edit, _viewed_files
+
+            file_path = operation.get("file_path")
+            old_string = operation.get("old_string", "")
+            new_string = operation.get("new_string", "")
+
+            # Mark file as viewed to bypass confirmation
+            if hasattr(_viewed_files, "add"):
+                _viewed_files.add(file_path)
+
+            # Execute the edit
+            result = tool_edit(
+                file_path=file_path, 
+                old=old_string,
+                new=new_string
+            )
+
+            if result.get("success", False):
+                return {
+                    "output": f"Confirmed edit: {result.get('output', '')}",
+                    "error": "",
+                    "success": True,
+                    "exit_code": 0
+                }
+            else:
+                return {
+                    "output": "",
+                    "error": f"Error executing confirmed edit: {result.get('error', 'Unknown error')}",
+                    "success": False,
+                    "exit_code": 1
+                }
+
+        elif operation_type == "replace":
+            # Run the replace operation
+            from Tools.File.replace import tool_replace, _viewed_files
+
+            file_path = operation.get("file_path")
+            content = operation.get("content", "")
+
+            # Mark file as viewed to bypass confirmation
+            if hasattr(_viewed_files, "add"):
+                _viewed_files.add(file_path)
+
+            # Execute the replace
+            result = tool_replace(
+                file_path=file_path,
+                content=content
+            )
+
+            if result.get("success", False):
+                return {
+                    "output": f"Confirmed replace: {result.get('output', '')}",
+                    "error": "",
+                    "success": True,
+                    "exit_code": 0
+                }
+            else:
+                return {
+                    "output": "",
+                    "error": f"Error executing confirmed replace: {result.get('error', 'Unknown error')}",
+                    "success": False,
+                    "exit_code": 1
+                }
+
+        else:
+            return {
+                "output": "",
+                "error": f"Unknown operation type: {operation_type}",
+                "success": False,
+                "exit_code": 1
+            }
+
+    except Exception as e:
+        return {
+            "output": "",
+            "error": f"Error confirming operation: {str(e)}",
             "success": False,
             "exit_code": 1
         }

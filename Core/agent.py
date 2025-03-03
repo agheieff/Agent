@@ -14,10 +14,7 @@ from Memory.Manager.memory_manager import MemoryManager
 from Memory.Cache.memory_cache import MemoryCache
 from Memory.Hierarchy.memory_hierarchy import MemoryHierarchy
 from Memory.Preloader.memory_preloader import MemoryPreloader
-from Tools.System.shell_adapter import ShellAdapter
-from Tools.File.file_operations import FileOperations
-from Tools.Search.search_tools import SearchTools
-from Tools.Package.package_manager import PackageManager
+# Tool imports handled by Tools.executor
 from Core.task_manager import TaskManager
 from Core.session_manager import SessionManager
 from Output.display_manager import DisplayManager
@@ -87,142 +84,7 @@ class ToolExtractor:
                 return True
         return False
 
-class ToolRegistry:
-    """Manages available tools and their execution"""
-    def __init__(self):
-        self.tools = {}
-        self.file_ops = FileOperations()
-        self.search_tools = SearchTools()
-        self.package_manager = PackageManager()
-
-    def register_tool(self, name: str, handler_func):
-        self.tools[name] = handler_func
-
-    def setup_default_tools(self):
-        self.register_tool("view_file", self.view_file)
-        self.register_tool("edit_file", self.edit_file)
-        self.register_tool("replace_file", self.replace_file)
-        self.register_tool("search_files", self.search_files)
-        self.register_tool("find_text", self.find_text)
-        self.register_tool("list_dir", self.list_dir)
-        self.register_tool("install_package", self.install_package)
-
-    async def execute_tool(self, tool_name: str, params: Dict[str, str]) -> ToolResult:
-        if tool_name not in self.tools:
-            return ToolResult(
-                output="",
-                success=False,
-                error=f"Unknown tool: {tool_name}"
-            )
-
-        try:
-            return await self.tools[tool_name](params)
-        except Exception as e:
-            return ToolResult(
-                output="",
-                success=False,
-                error=f"Error executing {tool_name}: {str(e)}"
-            )
-
-    async def view_file(self, params: Dict[str, str]) -> ToolResult:
-        file_path = params.get("path")
-        if not file_path:
-            return ToolResult("", False, "Missing 'path' parameter")
-
-        offset = int(params.get("offset", "0"))
-        limit = int(params.get("limit", "2000"))
-
-        try:
-            content = self.file_ops.view(file_path, offset, limit)
-            return ToolResult(content, True)
-        except Exception as e:
-            return ToolResult("", False, str(e))
-
-    async def edit_file(self, params: Dict[str, str]) -> ToolResult:
-        file_path = params.get("path")
-        old_string = params.get("old")
-        new_string = params.get("new")
-
-        if not all([file_path, old_string, new_string]):
-            return ToolResult("", False, "Missing required parameters (path, old, new)")
-
-        try:
-            result = self.file_ops.edit(file_path, old_string, new_string)
-            return ToolResult(result, True)
-        except Exception as e:
-            return ToolResult("", False, str(e))
-
-    async def replace_file(self, params: Dict[str, str]) -> ToolResult:
-        file_path = params.get("path")
-        content = params.get("content")
-
-        if not all([file_path, content]):
-            return ToolResult("", False, "Missing required parameters (path, content)")
-
-        try:
-            result = self.file_ops.replace(file_path, content)
-            return ToolResult(result, True)
-        except Exception as e:
-            return ToolResult("", False, str(e))
-
-    async def search_files(self, params: Dict[str, str]) -> ToolResult:
-        pattern = params.get("pattern")
-        path = params.get("path", ".")
-
-        if not pattern:
-            return ToolResult("", False, "Missing 'pattern' parameter")
-
-        try:
-            results = self.search_tools.glob_tool(pattern, path)
-            return ToolResult(json.dumps(results, indent=2), True)
-        except Exception as e:
-            return ToolResult("", False, str(e))
-
-    async def find_text(self, params: Dict[str, str]) -> ToolResult:
-        pattern = params.get("pattern")
-        include = params.get("include")
-        path = params.get("path", ".")
-
-        if not pattern:
-            return ToolResult("", False, "Missing 'pattern' parameter")
-
-        try:
-            results = self.search_tools.grep_tool(pattern, include, path)
-            return ToolResult(json.dumps(results, indent=2), True)
-        except Exception as e:
-            return ToolResult("", False, str(e))
-
-    async def list_dir(self, params: Dict[str, str]) -> ToolResult:
-        path = params.get("path", ".")
-        hide_hidden = params.get("hide_hidden", "false").lower() in ["true", "yes", "1"]
-
-        try:
-            results = self.search_tools.ls(path, hide_hidden)
-            return ToolResult(json.dumps(results, indent=2), True)
-        except Exception as e:
-            return ToolResult("", False, str(e))
-
-    async def install_package(self, params: Dict[str, str]) -> ToolResult:
-        package = params.get("name")
-        package_type = params.get("type", "python")
-        version = params.get("version")
-
-        if not package:
-            return ToolResult("", False, "Missing 'name' parameter")
-
-        try:
-            if package_type == "python":
-                result = await self.package_manager.install_python_package(package, version)
-            elif package_type == "npm":
-                result = await self.package_manager.install_npm_package(package, version)
-            elif package_type == "system":
-                result = await self.package_manager.install_system_package(package)
-            else:
-                return ToolResult("", False, f"Unsupported package type: {package_type}")
-
-            return ToolResult(result, True)
-        except Exception as e:
-            return ToolResult("", False, str(e))
+from Tools.manager import ToolManager
 
 class AutonomousAgent:
     def __init__(
@@ -250,9 +112,8 @@ class AutonomousAgent:
         self.display_manager = DisplayManager()
 
         self._setup_storage()
-        self.tool_registry = ToolRegistry()
-        self.tool_registry.setup_default_tools()
         self.tool_extractor = ToolExtractor()
+        self.tool_manager = ToolManager()
 
     def _setup_storage(self):
         for directory in ["tasks", "reflections", "notes", "working_memory", "temporal"]:
@@ -370,80 +231,47 @@ class AutonomousAgent:
         try:
             verbose_level = self.config.get("output", {}).get("verbose_level", 0)
 
-            tools = self.tool_extractor.extract_tools(response)
-
+            # Check for exit requests
             if self.tool_extractor.is_exit_request(response):
                 self.should_exit = True
                 return False
 
+            # Extract thinking and planning blocks for debugging/logging
             thinking = self.tool_extractor.extract_thinking(response)
             planning = self.tool_extractor.extract_planning(response)
 
             if verbose_level >= 2:
-                if tools:
-                    print(f"\n[VERBOSE] Extracted {len(tools)} tools")
                 if thinking:
                     print(f"[VERBOSE] Extracted {len(thinking)} thinking blocks")
                 if planning:
                     print(f"[VERBOSE] Extracted {len(planning)} planning blocks")
 
-            tool_results = []
+            # Process the response with the tool manager to handle all tool calls
+            tool_response = await self.tool_manager.process_message(response)
 
-            for tool_name, params in tools:
-                if verbose_level >= 1:
-                    param_preview = ", ".join([f"{k}: {v[:20]}..." if len(v) > 20 else f"{k}: {v}" 
-                                             for k, v in params.items()])
-                    print(f"> Tool: {tool_name}({param_preview})")
-
-                result = await self.tool_registry.execute_tool(tool_name, params)
-
-                if result.success:
-                    print(f"✅ Tool {tool_name} executed successfully")
-                    if verbose_level >= 2:
-                        print(f"  Result: {result.output[:100]}{'...' if len(result.output) > 100 else ''}")
-                else:
-                    print(f"❌ Tool {tool_name} failed: {result.error}")
-
-                tool_results.append({
-                    "tool": tool_name,
-                    "params": params,
-                    "result": result.to_dict()
-                })
-
+            # If tools were executed, update metrics
+            if tool_response:
                 self.agent_state['tools_executed'] += 1
 
-            if tool_results and self.config.get("agent", {}).get("autonomous_mode", True):
-                results_summary = "\n\nI've executed these tools with the following results:\n"
+                if verbose_level >= 1:
+                    print(f"\n[TOOLS] Executed tools and received response")
 
-                for result in tool_results:
-                    tool_name = result["tool"]
-                    success = result["result"]["success"]
-                    output_preview = result["result"]["output"]
-                    if len(output_preview) > 100:
-                        output_preview = output_preview[:97] + "..."
+                if self.config.get("agent", {}).get("autonomous_mode", True):
+                    # Add the tool results to the conversation history
+                    self.local_conversation_history.append({
+                        "role": "user",
+                        "content": tool_response
+                    })
 
-                    status = "✓" if success else "✗"
-                    error = result["result"].get("error", "")
+                    # Generate a new response based on the tool results
+                    new_response = await self._generate_response(None, tool_response)
 
-                    if success:
-                        results_summary += f"- {tool_name}: {status} {output_preview}\n"
-                    else:
-                        results_summary += f"- {tool_name}: {status} Error: {error}\n"
+                    return {
+                        "auto_continue": True,
+                        "next_response": new_response
+                    }
 
-                results_summary += "\nPlease continue with your plan based on these results."
-
-                self.local_conversation_history.append({
-                    "role": "user",
-                    "content": results_summary
-                })
-
-                new_response = await self._generate_response(None, results_summary)
-
-                return {
-                    "auto_continue": True,
-                    "next_response": new_response
-                }
-
+            # Save conversation to memory if applicable
             if self.memory_manager and self.current_conversation_id:
                 self.memory_manager.save_conversation(
                     self.current_conversation_id,

@@ -18,28 +18,19 @@ class ToolManager:
     def __init__(self):
         self.parser = ToolParser()
         self.composer = ToolResponseComposer()
-        # We'll hold a reference to the agent's config or LLM (if needed)
-        # so we can block internet when not allowed, or do /compact with LLM.
+
+
         self.agent_config = None
         self.agent_llm = None
         self.agent_conversation_history = None
 
     def set_agent_context(self, config: Dict[str, Any], llm, conversation_ref: List[Dict]):
-        """
-        Allow the manager to know about the agent config, LLM, and
-        conversation history. This is optional but helps with /compact
-        and for allow_internet checks.
-        """
         self.agent_config = config
         self.agent_llm = llm
         self.agent_conversation_history = conversation_ref
 
     async def process_message(self, message: str) -> str:
-        """
-        Parse the user's message for tool calls and handle them.
-        If there's a /compact command, handle that specially.
-        """
-        # Check for /compact command
+
         if "/compact" in message.lower():
             return await self._handle_compact_command()
 
@@ -49,16 +40,16 @@ class ToolManager:
 
         results = []
 
-        # For each tool call, see if we allow internet or not.
+
         for tool_name, params, is_help in tool_calls:
             logger.info(f"Executing tool: {tool_name} with params: {params}, help={is_help}")
 
-            # Check if agent has allow_internet = False and if the tool is "curl" or search.
-            # We'll block those if not allowed.
+
+
             if self.agent_config:
                 allow_inet = self.agent_config.get("agent", {}).get("allow_internet", True)
                 if not allow_inet:
-                    # If user tries /curl, /search, or other net tools, block them.
+
                     net_tools = {"curl", "search_engine", "internet_tool", "web_client"}
                     if tool_name.lower() in net_tools or "url" in params or "internet" in tool_name.lower():
                         logger.warning("Internet access is disabled; blocking this tool call.")
@@ -68,7 +59,7 @@ class ToolManager:
                             "success": False,
                             "exit_code": 1
                         }
-                        # Store partial result
+
                         results.append((tool_name, params, result))
                         continue
 
@@ -77,8 +68,8 @@ class ToolManager:
             else:
                 tool_result = await execute_tool(tool_name, params)
 
-            # Add the datetime + usage stats:
-            # We'll do a small summary of total tokens used so far vs max.
+
+
             usage_str = ""
             if self.agent_llm and hasattr(self.agent_llm, "total_tokens"):
                 used_tokens = self.agent_llm.total_tokens
@@ -102,7 +93,7 @@ class ToolManager:
     async def execute_single_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         result = await execute_tool(tool_name, params)
 
-        # Optionally apply the usage status stamping
+
         if self.agent_llm and hasattr(self.agent_llm, "total_tokens"):
             used_tokens = self.agent_llm.total_tokens
             max_tokens = getattr(self.agent_llm, "max_model_tokens", 128000)
@@ -125,7 +116,7 @@ class ToolManager:
         tasks = [_execute_tool(name, params) for name, params in tool_requests]
         results_raw = await asyncio.gather(*tasks)
 
-        # Combine each with the (tool_name, params)
+
         results = []
         for (tool_name, params), tool_result in zip(tool_requests, results_raw):
             results.append((tool_name, params, tool_result))
@@ -133,15 +124,11 @@ class ToolManager:
         return results
 
     async def _handle_compact_command(self) -> str:
-        """
-        Summarize the conversation so far, then replace conversation
-        with that summary (plus system prompt).
-        """
         if not self.agent_llm or not self.agent_conversation_history:
-            # We can't do summarization if we lack references.
+
             return "Unable to compact; no LLM or conversation reference."
 
-        # Gather conversation minus system messages
+
         user_and_assistant = []
         system_msg = None
         for msg in self.agent_conversation_history:
@@ -151,13 +138,13 @@ class ToolManager:
                 user_and_assistant.append(msg["content"])
 
         conversation_text = "\n".join(user_and_assistant)
-        # We'll ask the LLM: "Please summarize..."
+
         prompt_for_summary = (
             "Please summarize the important details, decisions, actions, and next steps from the conversation. "
             "Keep it concise but mention key points. Then end with an outline of next steps."
         )
 
-        # Make an LLM call
+
         summary_resp = await self.agent_llm.get_response(
             prompt=prompt_for_summary,
             system=None,
@@ -166,7 +153,7 @@ class ToolManager:
             max_tokens=1024
         )
 
-        # Replace conversation with system + summary
+
         if system_msg:
             self.agent_conversation_history.clear()
             self.agent_conversation_history.append({"role": "system", "content": system_msg})

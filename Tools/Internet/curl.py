@@ -47,7 +47,7 @@ def tool_curl(
         }
 
     if not url and value:
-        # If user wrote: /curl "https://example.com"
+
         url = value
 
     if not url:
@@ -58,18 +58,18 @@ def tool_curl(
             "exit_code": 1
         }
 
-    # Handle headers
+
     parsed_headers = {}
     if headers:
-        # Split by commas, then by colon
+
         for kv in headers.split(","):
             kv = kv.strip()
             if ":" in kv:
                 k, v = kv.split(":", 1)
                 parsed_headers[k.strip()] = v.strip()
 
-    # We'll let the Manager or config check the "allow_internet" setting.
-    # This function just does the request if authorized.
+
+
     try:
         method = method.upper()
         verify_ssl = not allow_insecure
@@ -83,7 +83,7 @@ def tool_curl(
             }
 
         if data and (method in ["POST","PUT","PATCH"]):
-            # Attempt JSON parse? We'll just do raw data for simplicity
+
             resp = req_func(url, data=data, headers=parsed_headers, timeout=timeout, verify=verify_ssl)
         else:
             resp = req_func(url, headers=parsed_headers, timeout=timeout, verify=verify_ssl)

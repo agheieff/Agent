@@ -43,11 +43,11 @@ class BaseLLMClient(ABC):
         self.total_tokens = 0
         self.total_cost = 0.0
 
-        # ----------------------------
-        # New line for default max tokens:
+
+
         self.max_model_tokens = 128000
-        # If a subclass sets it differently, they can override.
-        # ----------------------------
+
+
 
     def add_usage(self, usage: TokenUsage):
         self.usage_history.append(usage)

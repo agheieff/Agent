@@ -26,7 +26,6 @@ def tool_telegram_view(
     value: str = None,
     **kwargs
 ) -> Dict[str, Any]:
-    """Retrieve recent messages sent to the bot."""
 
     if help:
         return {
@@ -52,7 +51,7 @@ def tool_telegram_view(
             "exit_code": 1
         }
 
-    # For a positional param like /telegram_view 5
+
     if not isinstance(limit, int) and value:
         try:
             limit = int(value)
@@ -89,7 +88,7 @@ def tool_telegram_view(
                 "exit_code": 0
             }
 
-        # Show the last `limit` messages
+
         messages = messages[-limit:]
         formatted = []
         for m in messages:

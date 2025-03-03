@@ -22,7 +22,6 @@ def tool_telegram_send(
     value: str = None,
     **kwargs
 ) -> Dict[str, Any]:
-    """Send a text message via Telegram bot."""
 
     if help:
         return {
@@ -39,12 +38,12 @@ def tool_telegram_send(
             "exit_code": 0
         }
 
-    # If the user just wrote /telegram_send "Something"
-    # interpret that as message
+
+
     if not message and value:
         message = value
 
-    # Fall back to environment
+
     bot_token = token or os.getenv("TELEGRAM_BOT_TOKEN", "")
     default_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
     if not chat_id:

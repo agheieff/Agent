@@ -58,4 +58,4 @@ debug_agent.py
 .secrets
 secrets/
 
-clean.sh
+clean.py

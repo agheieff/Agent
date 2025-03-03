@@ -52,18 +52,14 @@ class DeepSeekClient(BaseLLMClient):
 
     def get_model_pricing(self, model: str) -> Dict[str, float]:
         pricing = DEEPSEEK_PRICING.get(model, DEEPSEEK_PRICING["default"])
-
         if "discount_hours" in pricing and "discount_rate" in pricing:
             current_time = datetime.datetime.now(datetime.timezone.utc)
             current_hour = current_time.hour
             current_minute = current_time.minute
-
             start_hour, start_minute, end_hour, end_minute = pricing["discount_hours"]
-
             current_time_mins = current_hour * 60 + current_minute
             start_time_mins = start_hour * 60 + start_minute
             end_time_mins = end_hour * 60 + end_minute
-
             discount_applied = False
             if end_time_mins < start_time_mins:
                 if current_time_mins >= start_time_mins or current_time_mins <= end_time_mins:
@@ -71,7 +67,6 @@ class DeepSeekClient(BaseLLMClient):
             else:
                 if start_time_mins <= current_time_mins <= end_time_mins:
                     discount_applied = True
-
             if discount_applied:
                 discount_multiplier = 1.0 - pricing["discount_rate"]
                 pricing_copy = pricing.copy()
@@ -79,66 +74,26 @@ class DeepSeekClient(BaseLLMClient):
                     if key in pricing_copy:
                         pricing_copy[key] = pricing_copy[key] * discount_multiplier
                 return pricing_copy
-
         return pricing
-
-
-
-
 
     def adjust_prompts(self, system_prompt: Optional[str], user_prompt: str) -> Tuple[Optional[str], str]:
         if system_prompt:
             combined = system_prompt + "\n\n" + user_prompt
             return None, combined
         else:
-
             return None, user_prompt
 
     async def generate_response(self, conversation_history: List[Dict]) -> str:
-        system_content = ""
-        user_messages = []
-        other_messages = []
-
-        if conversation_history and conversation_history[0]["role"] == "system":
-            system_content = conversation_history[0]["content"]
-            conversation_history = conversation_history[1:]
-
+        # --- FIX: Flatten the conversation history so that the very first message is sent as a user message.
+        # DeepSeek requires that the first (non‑system) message is from a user.
+        combined_content = ""
         for msg in conversation_history:
-            if msg["role"] == "user":
-                user_messages.append(msg)
-            else:
-                other_messages.append(msg)
-
-        fixed_messages = []
-
-        if not user_messages:
-            if system_content:
-                fixed_messages = [{"role": "user", "content": system_content}]
-            else:
-                fixed_messages = [{"role": "user", "content": "Hello, please respond."}]
-        else:
-            if system_content and user_messages:
-                first_user_msg = user_messages[0].copy()
-                first_user_msg["content"] = f"{system_content}\n\n{first_user_msg['content']}"
-                fixed_messages.append(first_user_msg)
-                user_messages = user_messages[1:]
-
-            last_role = "user"
-            messages_to_process = []
-
-            if fixed_messages:
-                messages_to_process = other_messages + user_messages[1:]
-            else:
-                messages_to_process = other_messages + user_messages
-
-            for msg in messages_to_process:
-                role = msg["role"]
-                if role != last_role:
-                    fixed_messages.append(msg)
-                    last_role = role
-
-            if fixed_messages and fixed_messages[-1]["role"] != "user" and user_messages:
-                fixed_messages.append(user_messages[-1])
+            if msg.get("content"):
+                combined_content += msg["content"] + "\n"
+        if not combined_content.strip():
+            combined_content = "Hello, please respond."
+        fixed_messages = [{"role": "user", "content": combined_content.strip()}]
+        # --- END FIX
 
         response = await self.get_response(
             prompt=None,
@@ -149,7 +104,7 @@ class DeepSeekClient(BaseLLMClient):
         )
 
         if response is None:
-            return "I apologize, but I'm having trouble generating a response right now. Please try again."
+            return "I apologize, but I'm having trouble generating a response. Please try again."
 
         return response
 
@@ -163,7 +118,6 @@ class DeepSeekClient(BaseLLMClient):
         tool_usage: bool = False,
         model: Optional[str] = None
     ) -> Optional[str]:
-
         try:
             if conversation_history:
                 messages = conversation_history
@@ -171,11 +125,8 @@ class DeepSeekClient(BaseLLMClient):
                 messages = []
                 if prompt:
                     messages.append({"role": "user", "content": prompt})
-
             logger.debug(f"Sending request to DeepSeek with {len(messages)} messages")
-
             model_name = model or ("deepseek-reasoner-tools" if tool_usage else self.default_model)
-
             if tool_usage:
                 response = self.client.chat.completions.create(
                     model=model_name,
@@ -196,21 +147,17 @@ class DeepSeekClient(BaseLLMClient):
                     max_tokens=max_tokens,
                     temperature=temperature
                 )
-
             if hasattr(response, "usage"):
                 usage_data = {
                     "prompt_tokens": response.usage.prompt_tokens,
                     "completion_tokens": response.usage.completion_tokens,
                     "total_tokens": response.usage.total_tokens
                 }
-
                 cache_hit = False
                 if hasattr(response, "cached") and response.cached:
                     cache_hit = True
-
                 model_pricing = self.get_model_pricing(model_name)
                 costs = self.calculate_token_cost(usage_data, model_pricing, cache_hit=cache_hit)
-
                 token_usage = TokenUsage(
                     prompt_tokens=usage_data["prompt_tokens"],
                     completion_tokens=usage_data["completion_tokens"],
@@ -222,14 +169,11 @@ class DeepSeekClient(BaseLLMClient):
                     cache_hit=cache_hit
                 )
                 self.add_usage(token_usage)
-
             if response.choices and len(response.choices) > 0:
                 message = response.choices[0].message
                 content = message.content
                 return content
-
             return None
-
         except Exception as e:
             logger.error(f"DeepSeek API call failed: {str(e)}", exc_info=True)
             return None

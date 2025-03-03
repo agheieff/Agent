@@ -1,25 +1,34 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Tuple, List
 import logging
+import inspect
 
-# Import output manager - we use a try/except to handle circular imports
-# or cases where OutputManager hasn't been initialized yet
+# Try to import output manager - we use a try/except to handle circular imports
 try:
-    from Output import output_manager
+    from Output.output_manager import output_manager
 except (ImportError, ModuleNotFoundError):
     output_manager = None
 
 logger = logging.getLogger(__name__)
 
 class ToolHandler(ABC):
-    name: str = ""
-    description: str = ""
-
+    """
+    Base class for tool handlers.
+    
+    All tools should either:
+    1. Inherit from this class and implement the execute method, or
+    2. Use the tool_* function pattern with appropriate metadata
+    """
+    name: str = ""  # Name of the tool
+    description: str = ""  # Short description of the tool
+    usage: str = ""  # Usage instructions
+    examples: List[Tuple[str, str]] = []  # List of (example, description) tuples
+    
     # Optional formatter name for this tool's output
     formatter: str = "default"
 
     @abstractmethod
-    async def execute(self, **kwargs) -> Any:
+    async def execute(self, **kwargs) -> Dict[str, Any]:
         """
         Execute the tool with the given parameters.
 
@@ -38,7 +47,7 @@ class ToolHandler(ABC):
 
     async def run(self, **kwargs) -> Dict[str, Any]:
         """
-        Run the tool and send its output to the output manager.
+        Run the tool and handle its output.
 
         This method wraps the execute method, adding output management.
 
@@ -49,8 +58,26 @@ class ToolHandler(ABC):
             The result from execute()
         """
         try:
+            # Log the tool execution
+            param_str = ", ".join(f"{k}={repr(v)}" for k, v in kwargs.items())
+            logger.info(f"Executing tool {self.name} with parameters: {param_str}")
+            
             # Execute the tool
             result = await self.execute(**kwargs)
+            
+            # Add tool name to result if not present
+            if "tool_name" not in result:
+                result["tool_name"] = self.name
+                
+            # Ensure required fields are present
+            if "success" not in result:
+                result["success"] = True if "error" not in result or not result.get("error") else False
+            if "output" not in result:
+                result["output"] = ""
+            if "error" not in result:
+                result["error"] = ""
+            if "exit_code" not in result:
+                result["exit_code"] = 0 if result["success"] else 1
 
             # Send result to output manager if available
             if output_manager is not None:
@@ -60,61 +87,45 @@ class ToolHandler(ABC):
         except Exception as e:
             logger.exception(f"Error executing tool {self.name}: {str(e)}")
             error_result = {
+                "tool_name": self.name,
                 "success": False,
                 "output": "",
-                "error": str(e)
+                "error": str(e),
+                "exit_code": 1
             }
 
             # Send error to output manager if available
             if output_manager is not None:
-                await output_manager.handle_tool_output("error", error_result)
+                await output_manager.handle_tool_output(self.name, error_result)
 
             return error_result
+            
+    @classmethod
+    def get_metadata(cls) -> Dict[str, Any]:
+        """
+        Get metadata for this tool.
+        
+        Returns:
+            Dictionary containing tool metadata
+        """
+        return {
+            "name": cls.name or cls.__name__.lower(),
+            "description": cls.description,
+            "usage": cls.usage,
+            "examples": cls.examples,
+            "formatter": cls.formatter,
+            "docstring": cls.__doc__ or ""
+        }
 
+# Simplified base class types without validators
 class FileTool(ToolHandler):
-    async def validate_file_path(self, file_path: str) -> Tuple[bool, Optional[str]]:
-        import os
-
-        if not file_path:
-            return False, "No file path provided"
-
-        parent_dir = os.path.dirname(os.path.abspath(file_path))
-        if not os.path.exists(parent_dir):
-            return False, f"Directory does not exist: {parent_dir}"
-
-        return True, None
+    """Base class for tools that operate on files."""
+    pass
 
 class NetworkTool(ToolHandler):
-    async def validate_url(self, url: str) -> Tuple[bool, Optional[str]]:
-        import re
-
-        if not url:
-            return False, "No URL provided"
-
-        url_pattern = re.compile(
-            r'^(?:http|ftp)s?://'
-            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'
-            r'localhost|'
-            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
-            r'(?::\d+)?'
-            r'(?:/?|[/?]\S+)$', re.IGNORECASE)
-
-        if not url_pattern.match(url):
-            return False, f"Invalid URL format: {url}"
-
-        return True, None
+    """Base class for tools that perform network operations."""
+    pass
 
 class SystemTool(ToolHandler):
-    async def validate_command(self, command: str) -> Tuple[bool, Optional[str]]:
-        if not command:
-            return False, "No command provided"
-
-        dangerous_patterns = [
-            "rm -rf /", "mkfs", "> /dev/", "dd if=/dev/zero of=/dev/sda"
-        ]
-
-        for pattern in dangerous_patterns:
-            if pattern in command:
-                return False, f"Potentially dangerous command detected: {pattern}"
-
-        return True, None
+    """Base class for tools that interact with the system."""
+    pass

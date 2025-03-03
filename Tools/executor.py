@@ -36,21 +36,36 @@ def _init_tools():
                     if inspect.isfunction(obj) and name.startswith('tool_'):
                         tool_name = name[5:]
                         _TOOLS[tool_name] = obj
+                        logger.debug(f"Registered tool function: {tool_name}")
 
-                    elif inspect.isclass(obj) and hasattr(obj, 'execute'):
+                    elif inspect.isclass(obj) and hasattr(obj, 'execute') and hasattr(obj, 'name'):
                         try:
                             instance = obj()
                             tool_name = getattr(instance, 'name', name.lower())
                             _TOOLS[tool_name] = instance.execute
-                        except:
-                            pass
+                            logger.debug(f"Registered tool class: {tool_name}")
+                        except Exception as e:
+                            logger.warning(f"Failed to instantiate tool class {name}: {e}")
 
-            except ImportError:
-                pass
+            except ImportError as e:
+                logger.warning(f"Error importing module {module_path}: {e}")
+            except Exception as e:
+                logger.warning(f"Unexpected error registering tools from {py_file}: {e}")
 
     _INITIALIZED = True
+    logger.info(f"Initialized {len(_TOOLS)} tools")
 
 async def execute_tool(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Execute a tool with the given parameters.
+    
+    Args:
+        tool_name: Name of the tool to execute
+        params: Parameters to pass to the tool
+        
+    Returns:
+        Dictionary containing the result of the tool execution
+    """
     if not _INITIALIZED:
         _init_tools()
 
@@ -63,31 +78,40 @@ async def execute_tool(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]
         }
 
     handler = _TOOLS[tool_name]
+    logger.debug(f"Executing tool: {tool_name} with params: {params}")
 
     try:
-        # If handler is a method of a ToolHandler instance, use its run method
-        if hasattr(handler, '__self__') and isinstance(handler.__self__, object) and hasattr(handler.__self__, 'run'):
+        # If handler is a method of a ToolHandler instance, use its run method if available
+        if hasattr(handler, '__self__') and hasattr(handler.__self__, 'run'):
             result = await handler.__self__.run(**params)
-        # Otherwise, directly call the function
+        # Otherwise, call the function directly
         elif inspect.iscoroutinefunction(handler):
             result = await handler(**params)
         else:
+            # Run synchronous functions in thread pool
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, lambda: handler(**params))
+            
+        # Each tool should handle its own errors and return appropriate result dictionaries
 
+        # Standardize result format
         if isinstance(result, dict) and "success" in result:
+            # Already in standard format
             return {
                 "output": result.get("output", ""),
                 "error": result.get("error", ""),
                 "success": result.get("success", True),
-                "exit_code": result.get("exit_code", 0 if result.get("success", True) else 1)
+                "exit_code": result.get("exit_code", 0 if result.get("success", True) else 1),
+                "tool_name": tool_name
             }
         elif isinstance(result, str):
+            # String result assumed to be successful output
             return {
                 "output": result,
                 "error": "",
                 "success": True,
-                "exit_code": 0
+                "exit_code": 0,
+                "tool_name": tool_name
             }
         elif isinstance(result, tuple):
             if len(result) == 2:
@@ -96,7 +120,8 @@ async def execute_tool(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]
                     "output": output,
                     "error": "" if success else "Tool execution failed",
                     "success": success,
-                    "exit_code": 0 if success else 1
+                    "exit_code": 0 if success else 1,
+                    "tool_name": tool_name
                 }
             elif len(result) >= 3:
                 output, error, exit_code = result[:3]
@@ -104,20 +129,88 @@ async def execute_tool(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]
                     "output": output,
                     "error": error,
                     "success": exit_code == 0,
-                    "exit_code": exit_code
+                    "exit_code": exit_code,
+                    "tool_name": tool_name
                 }
         else:
+            # Any other result converted to string and assumed successful
             return {
                 "output": str(result),
                 "error": "",
                 "success": True,
-                "exit_code": 0
+                "exit_code": 0,
+                "tool_name": tool_name
             }
 
     except Exception as e:
+        logger.error(f"Error executing tool {tool_name}: {str(e)}", exc_info=True)
         return {
             "output": "",
             "error": str(e),
             "success": False,
-            "exit_code": 1
+            "exit_code": 1,
+            "tool_name": tool_name
         }
+
+def get_tool_metadata(tool_name: str) -> Dict[str, Any]:
+    """
+    Get metadata for a tool.
+    
+    Args:
+        tool_name: Name of the tool
+        
+    Returns:
+        Dictionary containing the tool's metadata
+    """
+    if not _INITIALIZED:
+        _init_tools()
+        
+    if tool_name not in _TOOLS:
+        return {
+            "name": tool_name,
+            "exists": False
+        }
+        
+    handler = _TOOLS[tool_name]
+    module = inspect.getmodule(handler)
+    
+    metadata = {
+        "name": tool_name,
+        "exists": True,
+        "description": "",
+        "usage": "",
+        "examples": []
+    }
+    
+    if module:
+        # Extract metadata from module constants
+        for attr in ["TOOL_DESCRIPTION", "TOOL_HELP", "TOOL_EXAMPLES"]:
+            if hasattr(module, attr):
+                key = attr.lower()[5:]  # remove TOOL_ prefix
+                metadata[key] = getattr(module, attr)
+                
+    # Extract from docstring if available
+    if handler.__doc__:
+        metadata["docstring"] = handler.__doc__.strip()
+        if not metadata["description"]:
+            # Use first line of docstring as description
+            metadata["description"] = handler.__doc__.strip().split('\n')[0]
+            
+    return metadata
+
+def list_available_tools() -> Dict[str, Dict[str, Any]]:
+    """
+    List all available tools with their metadata.
+    
+    Returns:
+        Dictionary mapping tool names to their metadata
+    """
+    if not _INITIALIZED:
+        _init_tools()
+        
+    result = {}
+    
+    for tool_name in _TOOLS:
+        result[tool_name] = get_tool_metadata(tool_name)
+        
+    return result

@@ -85,7 +85,10 @@ def generate_command_execution_guide() -> str:
     return """
 ## Command Execution
 
-TODO add later
+You can request the agent to run any available tools by prefixing them with a slash (e.g. `/view`, `/write`, `/replace`, etc.).  
+Provide arguments either by direct listing (`/tool_name arg1 arg2 ...`) or key-value pairs (`/tool_name param=value`), 
+enclosing multi-line or special characters in triple quotes as needed. 
+If you need to review usage, you can type `/tool_name -h` or `/tool_name --help`. 
 
 IMPORTANT: Each parameter MUST be on its own line with no parameters on the same line as opening or closing tags.
 """

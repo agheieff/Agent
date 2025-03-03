@@ -29,9 +29,7 @@ class ToolManager:
         self.agent_conversation_history = conversation_ref
 
     async def process_message(self, message: str) -> str:
-        if "/compact" in message.lower():
-            return await self._handle_compact_command()
-
+        # Let the parser find any tool calls in the message
         tool_calls = self.parser.extract_tool_calls(message)
         if not tool_calls:
             return ""
@@ -41,7 +39,7 @@ class ToolManager:
         for tool_name, params, is_help in tool_calls:
             logger.info(f"Executing tool: {tool_name} with params: {params}, help={is_help}")
 
-
+            # If the config disallows internet, block net tools
             if self.agent_config:
                 allow_inet = self.agent_config.get("agent", {}).get("allow_internet", True)
                 if not allow_inet:
@@ -57,13 +55,18 @@ class ToolManager:
                         results.append((tool_name, params, result))
                         continue
 
+            # If it's /compact, we want to pass the entire conversation + LLM
+            if tool_name.lower() == "compact":
+                params["conversation_history"] = self.agent_conversation_history
+                params["llm"] = self.agent_llm
 
+            # If the user specified help
             if is_help:
                 tool_result = await execute_tool(tool_name, {"help": True})
             else:
                 tool_result = await execute_tool(tool_name, params)
 
-
+            # If we have an LLM, append usage status
             if self.agent_llm and hasattr(self.agent_llm, "total_tokens"):
                 used_tokens = self.agent_llm.total_tokens
                 max_tokens = getattr(self.agent_llm, "max_model_tokens", 128000)
@@ -113,37 +116,3 @@ class ToolManager:
             results.append((tool_name, params, tool_result))
 
         return results
-
-    async def _handle_compact_command(self) -> str:
-        if not self.agent_llm or not self.agent_conversation_history:
-            return "Unable to compact; no LLM or conversation reference."
-
-        from Prompts.compact import get_compact_prompt
-        user_and_assistant = []
-        system_msg = None
-
-        for msg in self.agent_conversation_history:
-            if msg["role"] == "system" and system_msg is None:
-                system_msg = msg["content"]
-            else:
-                user_and_assistant.append(msg["content"])
-
-        conversation_text = "\n".join(user_and_assistant)
-
-        prompt_for_summary = get_compact_prompt()
-
-        summary_resp = await self.agent_llm.get_response(
-            prompt=prompt_for_summary,
-            system=None,
-            conversation_history=[{"role": "user", "content": conversation_text}],
-            temperature=0.5,
-            max_tokens=1024
-        )
-
-        if system_msg:
-            self.agent_conversation_history.clear()
-            self.agent_conversation_history.append({"role": "system", "content": system_msg})
-            self.agent_conversation_history.append({"role": "assistant", "content": summary_resp or ""})
-            return "Conversation has been compacted into a summary."
-        else:
-            return "No system prompt found. Summarization done, but system prompt was missing."

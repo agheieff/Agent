@@ -150,9 +150,9 @@ class SearchTools:
                         files.append({"name": entry, "size": st.st_size, "modified": st.st_mtime})
                         
                 # Add the entire entry to the entries list
-                if not "entries_list" in locals():
+                if 'entries_list' not in locals():
                     entries_list = []
-                
+                    
                 entries_list.append(entry_info)
 
             return {

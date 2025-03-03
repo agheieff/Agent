@@ -308,6 +308,13 @@ async def main():
     parser.add_argument('--aot', action='store_true', help="Enable Atom of Thoughts reasoning")
     parser.add_argument('--aot-config', type=str, help="Path to Atom of Thoughts configuration file")
     
+    # Operation mode options
+    mode_group = parser.add_argument_group('Operation Mode Options')
+    mode_group.add_argument('--non-autonomous', action='store_true',
+                        help="Disable autonomous mode - ask for user input after each step")
+    mode_group.add_argument('--autonomous', action='store_true',
+                        help="Enable autonomous mode (default) - run without asking for input between steps")
+    
     # Verbosity options
     verbosity_group = parser.add_argument_group('Verbosity Options')
     verbosity_group.add_argument('--verbose', '-v', action='count', default=0, 
@@ -338,6 +345,17 @@ async def main():
         
     if args.no_internet:
         config.set_value("agent.allow_internet", False)
+    
+    # Handle operation mode
+    if args.non_autonomous:
+        config.set_value("agent.autonomous_mode", False)
+        print(f"Non-autonomous mode enabled (will ask for input after each step)")
+    elif args.autonomous:
+        config.set_value("agent.autonomous_mode", True)
+        print(f"Autonomous mode enabled (default)")
+    else:
+        # Set autonomous mode as default if not specified
+        config.set_value("agent.autonomous_mode", True)
     
     # Handle verbosity settings
     if args.verbose > 0:
@@ -468,10 +486,14 @@ async def main():
         if initial_prompt.strip().startswith('/'):
             cmd = initial_prompt.strip().lower()
             if cmd == '/help':
-                print("\nAvailable slash commands:")
+                print("\nAvailable Slash Commands:")
                 print("  /help     - Show this help message")
                 print("  /compact  - Compact conversation history to save context space")
                 print("  /pause    - Pause to add additional context to the conversation")
+                print("  /auto     - Toggle autonomous mode on/off")
+                print("\nKeyboard Shortcuts:")
+                print("  Ctrl+Z    - Pause to add context (equivalent to /pause)")
+                print("  Ctrl+C    - Exit the agent")
                 print("\nExample usage: Just type '/compact' as your input to compress the conversation")
                 sys.exit(0)
 
@@ -490,16 +512,29 @@ async def main():
         print(f"  (Note: For DeepSeek models, system prompt is combined with the user prompt)")
     print(f"- Initial Prompt Length: {len(initial_prompt)} characters")
     print(f"- Test Mode: {'Enabled - commands will NOT actually execute' if test_mode else 'Disabled'}")
+    print(f"- Autonomous Mode: {'Enabled - will operate without asking for user input' if config.get_value('agent.autonomous_mode', True) else 'Disabled - will ask for input after each step'}")
     print(f"- Atom of Thoughts: {'Enabled' if config.get_value('aot.enabled', False) or config.get_value('agent.enable_aot', False) else 'Disabled'}")
 
     # Display feature information
     print("\nAvailable Features:")
-    print("- User Input Requests: The agent can pause and ask for additional information")
+    print("- Autonomous Operation: Agent runs continuously without requiring user input")
+    print("- Command Auto-handling: Results of commands are automatically processed")
+    print("- Fallback Mechanisms: Automatically tries alternative methods when tools fail")
+    print("- User Input Requests: The agent can pause and ask for additional information when critical")
     print("- Human Context Pause: Press Ctrl+Z to pause and add context to the conversation")
     print("- Task Planning: The agent can create and track long-term tasks")
     print("- System Detection: The agent will automatically detect and adapt to your OS environment")
     print("- File Operations: Enhanced file manipulation capabilities")
     print("- API Cost Tracking: Monitors and reports token usage and costs")
+    
+    # Display available commands
+    print("\nAvailable Commands:")
+    print("- /help     - Show available slash commands")
+    print("- /compact  - Compact conversation history to save context space")
+    print("- /pause    - Pause to add additional context to the conversation")
+    print("- /auto     - Toggle autonomous mode on/off")
+    print("- Ctrl+Z    - Pause to add context (keyboard shortcut)")
+    print("- Ctrl+C    - Exit the agent")
 
     agent = None
     try:

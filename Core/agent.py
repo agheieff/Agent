@@ -539,32 +539,68 @@ class AutonomousAgent:
             while should_continue and not self.should_exit:
                 self.memory_manager.update_conversation_metrics(increment_turns=True)
                 
-                # Extract commands and plan steps from the response
-                should_continue = await self._process_response(response)
+                # Extract commands and plan steps from the response and determine next action
+                response_state = await self._process_response(response)
+                
+                # Check if this is a result from auto-handling (type will be a dict with auto_continue flag)
+                if isinstance(response_state, dict) and response_state.get("auto_continue"):
+                    # We're auto-continuing with command results
+                    response = response_state.get("next_response", "")
+                    should_continue = True
+                else:
+                    # Standard boolean result
+                    should_continue = response_state
                 
                 if should_continue and not self.should_exit:
-                    # Get user input for the next turn
-                    user_input = await self._get_user_input()
+                    # If agent is in autonomous mode and we processed commands successfully, 
+                    # continue executing without waiting for user input
+                    auto_continue = self.config.get("agent", {}).get("autonomous_mode", True) and not self.config.get("agent", {}).get("require_input", False)
                     
-                    if user_input.strip().lower() in ["exit", "quit", "bye"]:
-                        should_continue = False
-                        break
-                    
-                    # Process special commands
-                    if user_input.strip().startswith('/'):
-                        cmd = user_input.strip().lower()
-                        if cmd == '/compact':
-                            await self._compact_conversation()
-                            user_input = "Continue where you left off. The conversation has been compacted to save context space."
-                        elif cmd == '/help':
-                            print("\nAvailable slash commands:")
-                            print("  /help     - Show this help message")
-                            print("  /compact  - Compact conversation history to save context space")
-                            print("  /pause    - Same as pressing Ctrl+Z, pause to add context")
-                            user_input = "The user requested help with slash commands. I showed them the available commands. Please continue."
-                    
-                    # Generate the next response
-                    response = await self._generate_response(None, user_input)
+                    if auto_continue:
+                        # Auto-continue by creating a synthetic user message to keep the conversation going
+                        auto_message = "Continue with the next steps based on the results of the previous commands."
+                        
+                        # Add as user message to maintain conversation structure
+                        self.local_conversation_history.append({
+                            "role": "user",
+                            "content": auto_message
+                        })
+                        
+                        # Generate next response
+                        response = await self._generate_response(None, auto_message)
+                    else:
+                        # Non-autonomous mode: get user input for the next turn
+                        user_input = await self._get_user_input()
+                        
+                        if user_input.strip().lower() in ["exit", "quit", "bye"]:
+                            should_continue = False
+                            break
+                        
+                        # Process special commands
+                        if user_input.strip().startswith('/'):
+                            cmd = user_input.strip().lower()
+                            if cmd == '/compact':
+                                await self._compact_conversation()
+                                user_input = "Continue where you left off. The conversation has been compacted to save context space."
+                            elif cmd == '/help':
+                                print("\nAvailable Slash Commands:")
+                                print("  /help     - Show this help message")
+                                print("  /compact  - Compact conversation history to save context space")
+                                print("  /pause    - Pause to add additional context to the conversation")
+                                print("  /auto     - Toggle autonomous mode on/off")
+                                print("\nKeyboard Shortcuts:")
+                                print("  Ctrl+Z    - Pause to add context (equivalent to /pause)")
+                                print("  Ctrl+C    - Exit the agent")
+                                user_input = "The user requested help with slash commands. I showed them the available commands. Please continue."
+                            elif cmd == '/auto':
+                                # Toggle autonomous mode
+                                current_mode = self.config.get("agent", {}).get("autonomous_mode", True)
+                                self.config.setdefault("agent", {})["autonomous_mode"] = not current_mode
+                                print(f"\nAutonomous mode {'disabled' if current_mode else 'enabled'}.")
+                                user_input = f"The user has {'disabled' if current_mode else 'enabled'} autonomous mode. Please {'wait for explicit user input after each step' if current_mode else 'continue autonomously without requiring user input between steps'}."
+                        
+                        # Generate the next response with user input
+                        response = await self._generate_response(None, user_input)
             
             # Save session summary
             await self._save_session_summary()
@@ -721,18 +757,25 @@ class AutonomousAgent:
                 
                 # Analyze the request - only request input for truly critical things
                 critical_terms = ["confirm", "choose", "select", "password", "must", "required", 
-                                 "need your", "your preference", "permission", "authorize"]
+                                 "need your", "your preference", "permission", "authorize", "authentication", 
+                                 "credentials", "token", "key", "secret", "decide", "choice", "options"]
                 
                 # Check if the request contains critical terms indicating user input is essential
                 is_critical = any(term in input_text for term in critical_terms)
                 
                 # In autonomous mode, only ask for input if it seems critical
                 # The more verbose the mode, the more likely we'll ask for input
-                if is_critical or verbose_level >= 2:
+                if is_critical:
                     should_ask_for_input = True
                     
-                    if verbose_level >= 2:
-                        print(f"[VERBOSE] Input request considered {'critical' if is_critical else 'non-critical'}")
+                    if verbose_level >= 1:
+                        print(f"[VERBOSE] Input request considered critical")
+                        print(f"[VERBOSE] Will ask for input: {should_ask_for_input}")
+                elif verbose_level >= 3:
+                    # Only ask for input in the highest verbosity mode for non-critical items
+                    should_ask_for_input = True
+                    if verbose_level >= 1:
+                        print(f"[VERBOSE] Input request considered non-critical but asking due to high verbosity")
                         print(f"[VERBOSE] Will ask for input: {should_ask_for_input}")
                 
                 # If we're not asking for input, log this in verbose mode
@@ -768,8 +811,11 @@ class AutonomousAgent:
                     # Generate new response with the input
                     new_response = await self._generate_response(None, user_input)
                     
-                    # Process the new response
-                    return await self._process_response(new_response)
+                    # Return a dictionary indicating we're auto-continuing with user input results
+                    return {
+                        "auto_continue": True,
+                        "next_response": new_response
+                    }
                 else:
                     # This shouldn't happen, but handle it just in case
                     print("Warning: Conversation history is in an unexpected state")
@@ -781,8 +827,11 @@ class AutonomousAgent:
                     # Generate new response with the input
                     new_response = await self._generate_response(None, user_input)
                     
-                    # Process the new response
-                    return await self._process_response(new_response)
+                    # Return a dictionary indicating we're auto-continuing with user input results
+                    return {
+                        "auto_continue": True,
+                        "next_response": new_response
+                    }
             
             # Get verbosity details
             auto_handle_output = verbose_level <= 1  # Only automatically handle output in less verbose modes
@@ -832,13 +881,14 @@ class AutonomousAgent:
                         "success": code == 0
                     })
                     
-                    # Display result on the same line or just below
+                    # Display result with nicer formatting
+                    command_type_emoji = "🔄" if cmd_type == "bash" else "🐍" if cmd_type == "python" else "⚙️"
                     if code == 0:
-                        print(f" ✓")  # Success indicator
+                        print(f" {command_type_emoji} ✅")  # Success indicator with emoji
                     else:
-                        print(f" ✗ (exit code: {code})")  # Error indicator
+                        print(f" {command_type_emoji} ❌ (exit code: {code})")  # Error indicator with emoji
                         
-                    # Show output based on verbosity
+                    # Show output based on verbosity with nicer formatting
                     if stdout or stderr:
                         output = stdout if stdout else stderr
                         
@@ -851,15 +901,17 @@ class AutonomousAgent:
                             max_preview_lines = 5
                         else:
                             max_preview_lines = 3
-                            
-                        # Show preview lines
+                        
+                        # Show preview lines with nice formatting
+                        print("  ┌─────────────────────────────────────────────────────")
                         lines = output.splitlines()
                         preview_lines = lines[:max_preview_lines]
                         for line in preview_lines:
-                            print(f"  {line}")
+                            print(f"  │ {line}")
                         if len(lines) > max_preview_lines:
                             remaining = len(lines) - max_preview_lines
-                            print(f"  ... {remaining} more line{'s' if remaining != 1 else ''} ...")
+                            print(f"  │ ... {remaining} more line{'s' if remaining != 1 else ''} ...")
+                        print("  └─────────────────────────────────────────────────────")
                     
                     self.agent_state['commands_executed'] += 1
                     self.agent_state['last_active'] = datetime.now().isoformat()
@@ -913,8 +965,11 @@ class AutonomousAgent:
                 # Generate new response with the command results
                 new_response = await self._generate_response(None, results_summary)
                 
-                # Process the new response
-                return await self._process_response(new_response)
+                # Return a dictionary indicating we're auto-continuing with command results
+                return {
+                    "auto_continue": True,
+                    "next_response": new_response
+                }
             
             # Extract other structured elements like thinking, plan, etc.
             thinking = self.command_extractor.extract_thinking(response)
@@ -986,34 +1041,71 @@ class AutonomousAgent:
             # First, normalize line endings
             command = command.replace('\r\n', '\n').strip()
             
-            # Parse command parameters, supporting multi-line values
+            # More robust parameter parsing that handles multi-line values
+            # and correctly processes parameters with special characters
             params = {}
+            
+            # Parse parameters using safer line-by-line parsing with better handling of indentation
+            # This works well with the recommended XML format:
+            # <edit>
+            # file_path: /path/to/file.txt
+            # old_string: multi-line
+            #   text to
+            #   replace
+            # new_string: replacement
+            #   text
+            # </edit>
+            
+            lines = command.split('\n')
             current_key = None
             current_value = []
             
-            # Split by lines and process
-            lines = command.split('\n')
             for i, line in enumerate(lines):
                 line = line.rstrip()
                 
-                # Check if this line starts a new parameter
-                if ":" in line and (current_key is None or i == 0 or line.split(":", 1)[0].strip() not in line[:10]):
-                    # If we were building a previous parameter, save it
-                    if current_key is not None:
+                # Check if this is a new parameter line (contains a colon and isn't indented)
+                if ":" in line and not line.startswith(" ") and not line.startswith("\t"):
+                    # Save previous parameter if there was one
+                    if current_key:
                         params[current_key] = '\n'.join(current_value).strip()
-                        current_value = []
-                        
-                    # Start a new parameter
-                    key, value = line.split(":", 1)
-                    current_key = key.strip()
-                    current_value.append(value)
-                elif current_key is not None:
-                    # Continue previous parameter
+                        logger.debug(f"Extracted parameter: {current_key} = {params[current_key][:30]}{'...' if len(params[current_key]) > 30 else ''}")
+                    
+                    # Start new parameter
+                    parts = line.split(":", 1)
+                    current_key = parts[0].strip()
+                    current_value = [parts[1].strip()]
+                elif current_key:
+                    # This is a continuation line (part of the current parameter value)
                     current_value.append(line)
             
-            # Save the last parameter being processed
-            if current_key is not None and current_value:
+            # Save the last parameter
+            if current_key and current_value:
                 params[current_key] = '\n'.join(current_value).strip()
+                logger.debug(f"Extracted parameter: {current_key} = {params[current_key][:30]}{'...' if len(params[current_key]) > 30 else ''}")
+            
+            # For backward compatibility, make sure we have at least empty parameters
+            file_op_tags = ['view', 'edit', 'replace', 'glob', 'grep', 'ls']
+            if op_type in file_op_tags:
+                # Make sure we have at least the required parameters with default values
+                if op_type == 'view' and 'file_path' not in params:
+                    logger.error("Missing required file_path parameter for view operation")
+                elif op_type == 'edit' and ('file_path' not in params or 'old_string' not in params or 'new_string' not in params):
+                    logger.error(f"Missing required parameters for edit operation: {params.keys()}")
+                elif op_type == 'replace' and ('file_path' not in params or 'content' not in params):
+                    logger.error(f"Missing required parameters for replace operation: {params.keys()}")
+                elif op_type == 'glob' and 'pattern' not in params:
+                    logger.error("Missing required pattern parameter for glob operation")
+                elif op_type == 'grep' and 'pattern' not in params:
+                    logger.error("Missing required pattern parameter for grep operation")
+                elif op_type == 'ls' and 'path' not in params:
+                    logger.error("Missing required path parameter for ls operation")
+            
+            # Clean up parameter values - ensure no unwanted escape sequences
+            for key in params:
+                params[key] = params[key].strip()
+                # Remove any \n escape sequences that may have been included literally in the string
+                if '\\n' in params[key]:
+                    params[key] = params[key].replace('\\n', '\n')
             
             # Log the parsed parameters for debugging
             logger.debug(f"Parsed file operation parameters: {params}")
@@ -1047,22 +1139,57 @@ class AutonomousAgent:
                     print(f"Error: Invalid offset or limit value: {e}")
                     return
                 
-                result = await self.system_control.view_file(file_path, offset, limit)
-                line_count = len(result.splitlines())
-                print(f"📄 Viewed {file_path} ({line_count} lines)")
-                
-                # For large files, only show a preview
-                if line_count > 5 and limit > 10:
-                    print("  First 3 lines:")
-                    for line in result.splitlines()[:3]:
-                        truncated = line[:80] + "..." if len(line) > 80 else line
-                        print(f"  {truncated}")
-                    print("  ...")
-                else:
-                    print(result)
+                try:
+                    result = await self.system_control.view_file(file_path, offset, limit)
+                    line_count = len(result.splitlines())
+                    print(f"📄 Viewed {file_path} ({line_count} lines)")
                     
-                # Return summary for auto-handling
-                return f"Viewed {file_path} ({line_count} lines)"
+                    # For large files, only show a preview
+                    if line_count > 5 and limit > 10:
+                        print("  ┌─────────────────────────────────────────────────────")
+                        print(f"  │ First 3 lines of {file_path}:")
+                        for line in result.splitlines()[:3]:
+                            truncated = line[:80] + "..." if len(line) > 80 else line
+                            print(f"  │ {truncated}")
+                        print(f"  │ ... and {line_count - 3} more lines")
+                        print("  └─────────────────────────────────────────────────────")
+                    else:
+                        print("  ┌─────────────────────────────────────────────────────")
+                        for line in result.splitlines():
+                            print(f"  │ {line}")
+                        print("  └─────────────────────────────────────────────────────")
+                    
+                    # Return summary for auto-handling
+                    return f"Viewed {file_path} ({line_count} lines)"
+                except Exception as e:
+                    error_msg = f"Error viewing file: {str(e)}"
+                    print(f"❌ {error_msg}")
+                    
+                    # Try fallback to bash cat command
+                    try:
+                        print(f"🔄 Falling back to bash cat command...")
+                        offset_arg = f"| tail -n +{offset+1}" if offset > 0 else ""
+                        limit_arg = f"| head -n {limit}" if limit > 0 else ""
+                        cmd = f"cat {file_path} {offset_arg} {limit_arg}"
+                        stdout, stderr, code = await self.system_control.execute_command("bash", cmd)
+                        if code == 0:
+                            print(f"✅ Fallback successful using: {cmd}")
+                            line_count = len(stdout.splitlines())
+                            print("  ┌─────────────────────────────────────────────────────")
+                            if line_count > 5:
+                                for line in stdout.splitlines()[:5]:
+                                    truncated = line[:80] + "..." if len(line) > 80 else line
+                                    print(f"  │ {truncated}")
+                                print(f"  │ ... and {line_count - 5} more lines")
+                            else:
+                                for line in stdout.splitlines():
+                                    print(f"  │ {line}")
+                            print("  └─────────────────────────────────────────────────────")
+                            return f"Viewed {file_path} using fallback bash command ({line_count} lines)"
+                        else:
+                            return f"Error: {error_msg} (fallback also failed: {stderr})"
+                    except Exception as fallback_error:
+                        return f"Error: {error_msg} (fallback also failed: {str(fallback_error)})"
                 
             elif op_type == "edit":
                 file_path = params.get("file_path")
@@ -1072,21 +1199,78 @@ class AutonomousAgent:
                 
                 # Handle tilde expansion
                 file_path = expand_path(file_path)
-                    
+                
+                # Get old_string and new_string parameters, ensuring we handle them carefully
                 old_string = params.get("old_string", "")
                 new_string = params.get("new_string", "")
                 
-                result = await self.system_control.edit_file(file_path, old_string, new_string)
+                # Debug information to help diagnose issues
+                logger.debug(f"Edit operation - File: {file_path}")
+                logger.debug(f"Old string length: {len(old_string)}")
+                logger.debug(f"New string length: {len(new_string)}")
                 
-                # Show a compact summary of the edit
-                if "successfully" in result.lower():
-                    old_lines = old_string.count('\n') + 1
-                    new_lines = new_string.count('\n') + 1
-                    summary = f"Edited {file_path}: replaced {old_lines} line(s) with {new_lines} line(s)"
-                    print(f"✏️ {summary}")
-                    return summary
-                else:
-                    error_msg = f"Edit failed: {result}"
+                # Check that we're not processing file_path with & or other indicators of parsing issues
+                if '&' in file_path or '\n' in file_path:
+                    logger.error(f"Invalid file path detected: {file_path}")
+                    return f"Error: Invalid file path - path contains special characters that suggest a parsing issue"
+                
+                try:
+                    result = await self.system_control.edit_file(file_path, old_string, new_string)
+                    
+                    # Show a compact summary of the edit
+                    if "successfully" in result.lower():
+                        old_lines = old_string.count('\n') + 1
+                        new_lines = new_string.count('\n') + 1
+                        summary = f"Edited {file_path}: replaced {old_lines} line(s) with {new_lines} line(s)"
+                        print(f"✏️ {summary}")
+                        return summary
+                    else:
+                        error_msg = f"Edit failed: {result}"
+                        print(f"❌ {error_msg}")
+                        
+                        # Try a fallback using temp file and sed if possible
+                        try:
+                            print(f"🔄 Falling back to bash commands for editing...")
+                            
+                            # Create a temp file for the edit
+                            temp_file = f"/tmp/agent_edit_{os.path.basename(file_path)}.tmp"
+                            
+                            # Use different approaches based on whether file exists and old_string content
+                            if not os.path.exists(file_path) and not old_string:
+                                # Create new file directly
+                                cmd = f"cat > {file_path} << 'EOF'\n{new_string}\nEOF"
+                            elif not old_string:
+                                # Replace entire file
+                                cmd = f"cat > {file_path} << 'EOF'\n{new_string}\nEOF"
+                            else:
+                                # Create a sed script for the replacement
+                                # We need to escape the strings for sed
+                                escaped_old = old_string.replace("'", "'\\''").replace("/", "\\/")
+                                escaped_new = new_string.replace("'", "'\\''").replace("/", "\\/")
+                                
+                                # Create a sed script that uses a different delimiter (|) to avoid issues
+                                sed_script = f"s|{escaped_old}|{escaped_new}|"
+                                cmd = f"sed -i '{sed_script}' {file_path}"
+                            
+                            stdout, stderr, code = await self.system_control.execute_command("bash", cmd)
+                            
+                            if code == 0:
+                                print(f"✅ Fallback file edit successful")
+                                
+                                # Verify the change was made
+                                if os.path.exists(file_path):
+                                    # Check if the file now contains the new string
+                                    file_content = await self.system_control.view_file(file_path)
+                                    if new_string in file_content or not old_string:
+                                        return f"Edited {file_path} using fallback bash commands"
+                                return f"File edited using fallback bash commands, but verification was inconclusive"
+                            else:
+                                return f"Error: {error_msg} (fallback also failed: {stderr})"
+                        except Exception as fallback_error:
+                            logger.error(f"Error in fallback edit: {fallback_error}")
+                            return f"Error: {error_msg} (fallback also failed: {str(fallback_error)})"
+                except Exception as e:
+                    error_msg = f"Error editing file: {str(e)}"
                     print(f"❌ {error_msg}")
                     return f"Error: {error_msg}"
                 
@@ -1098,19 +1282,56 @@ class AutonomousAgent:
                 
                 # Handle tilde expansion
                 file_path = expand_path(file_path)
-                    
+                
+                # Get content parameter, ensuring we handle it carefully
                 content = params.get("content", "")
+                
+                # Debug information to help diagnose issues
+                logger.debug(f"Replace operation - File: {file_path}")
+                logger.debug(f"Content length: {len(content)}")
+                
+                # Check for invalid file paths
+                if '&' in file_path or '\n' in file_path:
+                    logger.error(f"Invalid file path detected: {file_path}")
+                    return f"Error: Invalid file path - path contains special characters that suggest a parsing issue"
                 line_count = content.count('\n') + 1
                 
-                result = await self.system_control.replace_file(file_path, content)
-                
-                # Show a compact summary of the replacement
-                if "successfully" in result.lower():
-                    summary = f"Replaced {file_path} with {line_count} lines of content"
-                    print(f"💾 {summary}")
-                    return summary
-                else:
-                    error_msg = f"Replace failed: {result}"
+                try:
+                    result = await self.system_control.replace_file(file_path, content)
+                    
+                    # Show a compact summary of the replacement
+                    if "successfully" in result.lower():
+                        summary = f"Replaced {file_path} with {line_count} lines of content"
+                        print(f"💾 {summary}")
+                        return summary
+                    else:
+                        error_msg = f"Replace failed: {result}"
+                        print(f"❌ {error_msg}")
+                        
+                        # Try a fallback using bash
+                        try:
+                            print(f"🔄 Falling back to bash command for file replacement...")
+                            
+                            # Ensure the directory exists
+                            dir_path = os.path.dirname(file_path)
+                            if dir_path and not os.path.exists(dir_path):
+                                mkdir_cmd = f"mkdir -p {dir_path}"
+                                await self.system_control.execute_command("bash", mkdir_cmd)
+                            
+                            # Use heredoc to write the file content
+                            cmd = f"cat > {file_path} << 'EOF'\n{content}\nEOF"
+                            stdout, stderr, code = await self.system_control.execute_command("bash", cmd)
+                            
+                            if code == 0:
+                                print(f"✅ Fallback file replacement successful")
+                                return f"Replaced {file_path} with {line_count} lines using fallback bash command"
+                            else:
+                                return f"Error: {error_msg} (fallback also failed: {stderr})"
+                        except Exception as fallback_error:
+                            logger.error(f"Error in fallback replace: {fallback_error}")
+                            return f"Error: {error_msg} (fallback also failed: {str(fallback_error)})"
+                except Exception as e:
+                    error_msg = f"Error replacing file: {str(e)}"
                     print(f"❌ {error_msg}")
                     return f"Error: {error_msg}"
                 
@@ -1124,19 +1345,75 @@ class AutonomousAgent:
                 # Handle tilde expansion
                 path = expand_path(path) if path else path
                 
-                results = await self.system_control.glob_search(pattern, path)
-                result_count = len(results)
-                summary = f"Glob search for '{pattern}': found {result_count} file(s)"
-                print(f"🔍 {summary}")
-                
-                # Show compact results
-                if result_count > 0:
-                    # Display up to 10 results, with an indicator if there are more
-                    max_display = min(10, result_count)
-                    for i in range(max_display):
-                        print(f"  {results[i]}")
-                    if result_count > max_display:
-                        print(f"  ...and {result_count - max_display} more files")
+                try:
+                    results = await self.system_control.glob_search(pattern, path)
+                    result_count = len(results)
+                    summary = f"Glob search for '{pattern}': found {result_count} file(s)"
+                    print(f"🔍 {summary}")
+                    
+                    # Show compact results with better formatting
+                    if result_count > 0:
+                        # Display up to 10 results, with an indicator if there are more
+                        print("  ┌─────────────────────────────────────────────────────")
+                        max_display = min(10, result_count)
+                        for i in range(max_display):
+                            print(f"  │ {results[i]}")
+                        if result_count > max_display:
+                            print(f"  │ ...and {result_count - max_display} more files")
+                        print("  └─────────────────────────────────────────────────────")
+                except Exception as e:
+                    error_msg = f"Error in glob search: {str(e)}"
+                    print(f"❌ {error_msg}")
+                    
+                    # Try fallback to bash find or ls command
+                    try:
+                        print(f"🔄 Falling back to bash command...")
+                        search_path = path if path else self.current_dir
+                        search_path = search_path.rstrip('/')
+                        
+                        # Determine the appropriate bash command based on pattern
+                        if '*' in pattern or '?' in pattern:
+                            # Simple glob pattern - use ls
+                            if pattern.startswith('**/'):
+                                # Recursive pattern
+                                cmd = f"find {search_path} -type f -name '{pattern.replace('**/', '')}' | sort"
+                            else:
+                                # Non-recursive pattern
+                                cmd = f"ls -1 {search_path}/{pattern} 2>/dev/null || echo 'No matches found'"
+                        else:
+                            # No wildcards - just check if file exists
+                            cmd = f"ls -1 {search_path}/{pattern} 2>/dev/null || echo 'No matches found'"
+                        
+                        stdout, stderr, code = await self.system_control.execute_command("bash", cmd)
+                        
+                        if code == 0 and stdout and 'No matches found' not in stdout:
+                            print(f"✅ Fallback successful using: {cmd}")
+                            results = stdout.strip().split('\n')
+                            result_count = len(results)
+                            
+                            summary = f"Glob search for '{pattern}' (fallback): found {result_count} file(s)"
+                            print(f"🔍 {summary}")
+                            
+                            if result_count > 0:
+                                print("  ┌─────────────────────────────────────────────────────")
+                                max_display = min(10, result_count)
+                                for i in range(max_display):
+                                    print(f"  │ {results[i]}")
+                                if result_count > max_display:
+                                    print(f"  │ ...and {result_count - max_display} more files")
+                                print("  └─────────────────────────────────────────────────────")
+                                
+                                # Set results for return value
+                                results = results
+                            else:
+                                print("  No files found matching the pattern")
+                                results = []
+                        else:
+                            print(f"❌ Fallback search failed: {stderr}")
+                            results = []
+                    except Exception as fallback_error:
+                        print(f"❌ Fallback error: {str(fallback_error)}")
+                        return f"Error: {error_msg} (fallback also failed: {str(fallback_error)})"
                 
                 # Include first few results in the summary for auto-handling
                 if result_count > 0:
@@ -1307,7 +1584,24 @@ class AutonomousAgent:
                 except Exception as e:
                     error_msg = f"Error listing directory: {str(e)}"
                     print(f"❌ {error_msg}")
-                    return f"Error: {error_msg}"
+                    
+                    # Try fallback to bash ls command
+                    try:
+                        print(f"🔄 Falling back to bash ls command...")
+                        cmd = f"ls -la {abs_path}"
+                        stdout, stderr, code = await self.shell_adapter.execute_command(cmd)
+                        if code == 0:
+                            print(f"✅ Fallback successful using: {cmd}")
+                            return {
+                                "path": abs_path,
+                                "fallback_output": stdout,
+                                "fallback_used": True,
+                                "original_error": str(e)
+                            }
+                        else:
+                            return f"Error: {error_msg} (fallback also failed: {stderr})"
+                    except Exception as fallback_error:
+                        return f"Error: {error_msg} (fallback also failed: {str(fallback_error)})"
                     
         except Exception as e:
             logger.error(f"Error processing file operation {op_type}: {e}")
@@ -1409,8 +1703,17 @@ class AutonomousAgent:
             print("\nConversation is already compact.")
             return
             
-        # Keep system prompt and last few exchanges
+        # Keep system prompt and initial user prompt
         system_prompt = self.local_conversation_history[0]["content"]
+        
+        # Find the first user prompt
+        initial_prompt = ""
+        for msg in self.local_conversation_history:
+            if msg["role"] == "user":
+                initial_prompt = msg["content"]
+                break
+        
+        # Keep the last few exchanges for context
         last_entries = self.local_conversation_history[-4:] if len(self.local_conversation_history) >= 4 else self.local_conversation_history
         
         # Create a summary of what was discussed
@@ -1432,18 +1735,20 @@ class AutonomousAgent:
                 summary += f"\n...and {len(command_summary) - 10} more commands."
             summary += "\n\n"
         
-        # Create new compact history
+        # Create new compact history with only system prompt and initial user prompt
         self.local_conversation_history = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": summary}
+            {"role": "user", "content": initial_prompt},
+            {"role": "assistant", "content": "Initial task completed. Here's a summary of what was done:\n\n" + summary},
+            {"role": "user", "content": "Continue with the next steps based on the previous work."}
         ]
         
-        # Add the last few exchanges
-        for entry in last_entries:
-            if entry["role"] != "system":  # Skip system prompt as we already added it
-                self.local_conversation_history.append(entry)
-                
-        print("\nConversation compacted to save context space.")
+        # Add the last exchange for immediate context
+        if last_entries and len(last_entries) >= 2:
+            self.local_conversation_history.append(last_entries[-2])  # Last user message
+            self.local_conversation_history.append(last_entries[-1])  # Last assistant message
+        
+        print("\nConversation compacted to keep initial prompt and latest context only.")
         
     async def _save_session_summary(self) -> None:
         """Save a summary of the current session"""

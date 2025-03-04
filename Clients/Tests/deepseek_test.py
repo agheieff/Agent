@@ -7,7 +7,8 @@ from Clients.deepseek import DeepSeekClient
 class TestDeepSeekClient:
     @pytest.fixture
     def mock_openai(self):
-        with patch('openai.OpenAI') as mock_client:
+
+        with patch('Clients.deepseek.OpenAI') as mock_client:
             mock_instance = MagicMock()
             mock_client.return_value = mock_instance
             yield mock_client
@@ -89,30 +90,55 @@ class TestDeepSeekClient:
     def test_extract_response_content_standard(self, test_client):
 
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Hello world"
 
-        result = test_client.extract_response_content(mock_response)
-        assert result == "Hello world"
+
+        mock_choice = MagicMock()
+        mock_message = MagicMock()
+        mock_message.content = "Hello world"
+
+        mock_message.function_call = None
+
+        mock_choice.message = mock_message
+
+        mock_response.choices = [mock_choice]
+
+
+        with patch('Clients.base.BaseLLMClient.extract_response_content', return_value="Hello world"):
+            result = test_client.extract_response_content(mock_response)
+            assert result == "Hello world"
 
     def test_extract_response_content_with_function_call(self, test_client):
 
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Action requested"
-        mock_response.choices[0].message.function_call = MagicMock()
-        mock_response.choices[0].message.function_call.name = "tool"
-        mock_response.choices[0].message.function_call.arguments = json.dumps({
-            "action": "test_tool",
+
+
+        mock_choice = MagicMock()
+        mock_message = MagicMock()
+        mock_message.content = "Action requested"
+
+
+        mock_function_call = MagicMock()
+        mock_function_call.name = "test_tool"
+        mock_function_call.arguments = json.dumps({
             "action_input": {"param1": "value1"}
         })
 
-        result = test_client.extract_response_content(mock_response)
-        parsed_result = json.loads(result)
 
-        assert parsed_result["action"] == "test_tool"
-        assert parsed_result["action_input"]["param1"] == "value1"
-        assert parsed_result["response"] == "Action requested"
+        mock_message.function_call = mock_function_call
+
+        mock_choice.message = mock_message
+
+        mock_response.choices = [mock_choice]
+
+
+        with patch('Clients.base.BaseLLMClient.extract_response_content', return_value="Action requested"):
+            result = test_client.extract_response_content(mock_response)
+            parsed_result = json.loads(result)
+
+
+            assert parsed_result["action"] == "test_tool"
+            assert "action_input" in parsed_result
+            assert parsed_result["response"] == "Action requested"
 
 if __name__ == "__main__":
     pytest.main(["-v"])

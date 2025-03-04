@@ -185,11 +185,12 @@ class AnthropicToolsParser(FormatParser):
         try:
             tool_calls = []
 
-            tool_use_pattern = r'tool_use\s*:\s*{(.*?)}'
+
+            tool_use_pattern = r'tool_use\s*:\s*(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})'
             matches = re.finditer(tool_use_pattern, message, re.DOTALL)
 
             for match in matches:
-                tool_json_str = '{' + match.group(1) + '}'
+                tool_json_str = match.group(1)
                 try:
                     tool_data = json.loads(tool_json_str)
                     if "name" in tool_data:

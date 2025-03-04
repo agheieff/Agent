@@ -101,9 +101,15 @@ class DeepSeekClient(BaseLLMClient):
             response_text = super().extract_response_content(message)
 
 
-            if hasattr(message, 'choices') and message.choices and len(message.choices) > 0:
+            if (hasattr(message, 'choices') and message.choices and len(message.choices) > 0 and
+                hasattr(message.choices[0], 'message')):
+
                 choice = message.choices[0]
-                if hasattr(choice, 'message') and hasattr(choice.message, 'function_call'):
+
+
+                if (hasattr(choice.message, 'function_call') and
+                    choice.message.function_call is not None):
+
                     function_call = choice.message.function_call
 
                     function_data = {
@@ -112,6 +118,7 @@ class DeepSeekClient(BaseLLMClient):
                         "response": response_text
                     }
                     return json.dumps(function_data)
+
 
             return response_text
 

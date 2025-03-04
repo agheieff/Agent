@@ -117,6 +117,10 @@ class BaseLLMClient(ABC):
         self.default_model = None
         self.max_model_tokens = 128000
 
+
+        self._initialize_client(api_key)
+        self._register_models()
+
     def get_model_info(self, model_name: str) -> Optional[ModelInfo]:
 
 
@@ -508,10 +512,81 @@ class BaseLLMClient(ABC):
 
 class DummyLLMClient(BaseLLMClient):
     def __init__(self):
-        super().__init__("")
+
+        self.client = type('DummyClient', (), {
+            'messages': type('DummyMessages', (), {
+                'create': self._dummy_message_create
+            }),
+            'beta': type('DummyBeta', (), {
+                'messages': type('DummyBetaMessages', (), {
+                    'create': self._dummy_beta_message_create
+                })
+            }),
+            'chat': type('DummyChat', (), {
+                'completions': type('DummyCompletions', (), {
+                    'create': self._dummy_completion_create
+                })
+            })
+        })
+
+
+        self.usage_history = []
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
+        self.total_tokens = 0
+        self.total_cost = 0.0
+        self.models = {}
+        self.default_model = "dummy"
+        self.max_model_tokens = 128000
+
+
+        self.use_token_efficient_tools = False
+
         self._register_models()
 
+    def _dummy_message_create(self, **kwargs):
+
+        return type('DummyResponse', (), {
+            'content': 'This is a dummy response for testing',
+            'usage': type('DummyUsage', (), {
+                'input_tokens': 10,
+                'output_tokens': 10
+            }),
+            'model': kwargs.get('model', 'dummy'),
+            'type': 'message',
+            'role': 'assistant',
+            'stop_reason': 'end_turn'
+        })
+
+    def _dummy_beta_message_create(self, **kwargs):
+
+        return self._dummy_message_create(**kwargs)
+
+    def _dummy_completion_create(self, **kwargs):
+
+        message = type('DummyMessage', (), {
+            'content': 'This is a dummy response for testing',
+            'role': 'assistant'
+        })
+
+        choice = type('DummyChoice', (), {
+            'message': message,
+            'finish_reason': 'stop',
+            'index': 0
+        })
+
+        return type('DummyResponse', (), {
+            'choices': [choice],
+            'usage': type('DummyUsage', (), {
+                'prompt_tokens': 10,
+                'completion_tokens': 10,
+                'total_tokens': 20
+            }),
+            'model': kwargs.get('model', 'dummy')
+        })
+
     def _initialize_client(self, api_key: str) -> None:
+
         pass
 
     def _register_models(self) -> None:
@@ -524,9 +599,48 @@ class DummyLLMClient(BaseLLMClient):
                 context_window=128000,
                 input_price=0.0,
                 output_price=0.0
+            ),
+            "claude-3-7-sonnet": ModelInfo(
+                name="Claude 3.7 Sonnet",
+                api_name="claude-3-7-sonnet-20250219",
+                supports_reasoning=True,
+                prefers_separate_system_prompt=True,
+                context_window=200000,
+                input_price=3.0,
+                output_price=15.0
+            ),
+            "deepseek-reasoner": ModelInfo(
+                name="DeepSeek Reasoner",
+                api_name="deepseek-reasoner",
+                supports_reasoning=True,
+                prefers_separate_system_prompt=True,
+                context_window=128000,
+                input_price=0.0,
+                output_price=0.0
             )
         }
         self.default_model = "dummy"
+
+
+    def _get_tool_schema(self) -> List[Dict[str, Any]]:
+        return [{
+            "name": "tool_use",
+            "description": "Call a tool with the given input to get a result.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The name of the tool to use."
+                    },
+                    "input": {
+                        "type": "object",
+                        "description": "The input parameters for the tool."
+                    }
+                },
+                "required": ["name"]
+            }
+        }]
 
     async def get_response(self, prompt: Optional[str], system: Optional[str], **kwargs) -> str:
         return "Dummy response."

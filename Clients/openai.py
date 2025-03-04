@@ -1,12 +1,14 @@
 from openai import OpenAI
 import logging
-from typing import Dict, Optional
+import json
+from typing import Dict, Optional, List, Any
 from .base import BaseLLMClient, ModelInfo
 
 logger = logging.getLogger(__name__)
 
 class OpenAIClient(BaseLLMClient):
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: Optional[str] = None):
+        self.requested_model = model
         super().__init__(api_key)
 
     def _initialize_client(self, api_key: str) -> None:
@@ -67,4 +69,93 @@ class OpenAIClient(BaseLLMClient):
             input_cache_write_price=1.1
         )
 
-        self.default_model = "o1"
+
+        if self.requested_model and self.requested_model in self.models:
+            self.default_model = self.requested_model
+        else:
+            self.default_model = "o1"
+
+    async def _make_api_call(
+        self,
+        messages: List[Dict],
+        model_name: str,
+        temperature: float,
+        max_tokens: int,
+        tool_usage: bool,
+        thinking_config: Optional[Dict] = None
+    ) -> Any:
+
+        if not hasattr(self, 'client'):
+            raise ValueError("OpenAI client not initialized")
+
+        params = {
+            "model": model_name,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature
+        }
+
+        if tool_usage:
+
+            tools = [{
+                "type": "function",
+                "function": {
+                    "name": "execute_tool",
+                    "description": "Execute a tool with the given parameters",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "The name of the tool to execute"
+                            },
+                            "input": {
+                                "type": "object",
+                                "description": "The input parameters for the tool"
+                            }
+                        },
+                        "required": ["name", "input"]
+                    }
+                }
+            }]
+
+            params["tools"] = tools
+            params["tool_choice"] = "auto"
+
+        logger.debug(f"Sending request to OpenAI with {len(messages)} messages")
+        return self.client.chat.completions.create(**params)
+
+    def extract_response_content(self, message) -> str:
+
+        try:
+
+            response_text = super().extract_response_content(message)
+
+
+            if (hasattr(message, 'choices') and message.choices and len(message.choices) > 0 and
+                hasattr(message.choices[0], 'message')):
+
+                choice = message.choices[0]
+
+
+                if (hasattr(choice.message, 'tool_calls') and
+                    choice.message.tool_calls and
+                    len(choice.message.tool_calls) > 0):
+
+                    tool_call = choice.message.tool_calls[0]
+
+
+                    if hasattr(tool_call, 'function'):
+                        function_data = {
+                            "name": tool_call.function.name,
+                            "arguments": tool_call.function.arguments,
+                            "response": response_text
+                        }
+                        return json.dumps(function_data)
+
+
+            return response_text
+
+        except Exception as e:
+            logger.error(f"Error extracting OpenAI response content: {e}")
+            return f"Error parsing response: {e}"

@@ -13,7 +13,13 @@ class AnthropicClient(BaseLLMClient):
         super().__init__(api_key)
 
     def _initialize_client(self, api_key: str) -> None:
+
+        if not api_key:
+            logger.error("Empty API key provided for Anthropic client")
+            raise ValueError("API key cannot be empty")
+
         try:
+
             self.client = anthropic.Anthropic(api_key=api_key)
             logger.info("Anthropic client initialized successfully")
         except Exception as e:

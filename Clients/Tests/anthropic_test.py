@@ -6,13 +6,14 @@ from Clients.anthropic import AnthropicClient
 class TestAnthropicClient:
     @pytest.fixture
     def mock_anthropic(self):
+
         with patch('anthropic.Anthropic') as mock_client:
             mock_instance = MagicMock()
             mock_client.return_value = mock_instance
             yield mock_client
 
     @pytest.fixture
-    def test_client(self):
+    def test_client(self, mock_anthropic):
 
         return AnthropicClient(api_key="anthropic-test-key")
 
@@ -69,6 +70,14 @@ class TestAnthropicClient:
         mock_messages_create = MagicMock()
         mock_instance.messages.create = mock_messages_create
 
+
+        mock_beta_instance = MagicMock()
+        mock_instance.beta = mock_beta_instance
+        mock_beta_messages = MagicMock()
+        mock_beta_instance.messages = mock_beta_messages
+        mock_beta_messages_create = MagicMock()
+        mock_beta_messages.create = mock_beta_messages_create
+
         client = AnthropicClient(api_key="test-key")
         messages = [{"role": "user", "content": "Hello"}]
         tools = client._get_tool_schema()
@@ -82,12 +91,13 @@ class TestAnthropicClient:
         )
 
 
-        mock_messages_create.assert_called_once_with(
+        mock_beta_messages_create.assert_called_once_with(
             model="claude-3-7-sonnet-20250219",
             max_tokens=1000,
             temperature=0.7,
             messages=messages,
-            tools=tools
+            tools=tools,
+            betas=["token-efficient-tools-2025-02-19"]
         )
 
     @pytest.mark.asyncio
@@ -123,49 +133,60 @@ class TestAnthropicClient:
         )
 
     @pytest.mark.asyncio
-    async def test_generate_response(self, test_client):
+    async def test_generate_response(self, mock_anthropic):
+
+        mock_instance = mock_anthropic.return_value
+        mock_messages_create = MagicMock()
+        mock_instance.messages.create = mock_messages_create
+
+
+        mock_response = MagicMock()
+        mock_response.content = [{"type": "text", "text": "This is a dummy response for testing"}]
+        mock_response.usage = MagicMock()
+        mock_response.usage.input_tokens = 100
+        mock_response.usage.output_tokens = 50
+        mock_messages_create.return_value = mock_response
+
+        client = AnthropicClient(api_key="test-key")
         conversation_history = [
             {"role": "system", "content": "You are a helpful assistant"},
             {"role": "user", "content": "Tell me about AI"}
         ]
 
-        response = await test_client.generate_response(conversation_history)
+        response = await client.generate_response(conversation_history)
 
         assert "This is a dummy response for testing" in response
 
     @pytest.mark.asyncio
-    async def test_check_for_user_input_request(self, test_client):
-        needs_input, message = await test_client.check_for_user_input_request("Any response text")
+    async def test_check_for_user_input_request(self, mock_anthropic):
+        client = AnthropicClient(api_key="test-key")
+        needs_input, message = await client.check_for_user_input_request("Any response text")
 
         assert needs_input is False
         assert message is None
 
     @pytest.mark.asyncio
-    async def test_get_response_error_handling(self):
-        with patch('anthropic.Anthropic', side_effect=Exception("API Error")):
-
-            client = AnthropicClient(api_key="anthropic-test-key")
+    async def test_get_response_error_handling(self, mock_anthropic):
+        client = AnthropicClient(api_key="test-key")
 
 
-            with patch.object(client, 'client', side_effect=Exception("Forced error")):
-                response = await client.get_response(
-                    prompt="Test prompt",
-                    system="Test system"
-                )
+        with patch.object(client, '_make_api_call', side_effect=Exception("Forced error")):
+            response = await client.get_response(
+                prompt="Test prompt",
+                system="Test system"
+            )
 
-                assert response is None
+            assert response is None
 
     @pytest.mark.asyncio
-    async def test_generate_response_error_handling(self):
-        with patch('anthropic.Anthropic', side_effect=Exception("API Error")):
-
-            client = AnthropicClient(api_key="anthropic-test-key")
+    async def test_generate_response_error_handling(self, mock_anthropic):
+        client = AnthropicClient(api_key="test-key")
 
 
-            with patch.object(client, 'get_response', side_effect=Exception("Forced error")):
-                response = await client.generate_response([])
+        with patch.object(client, 'get_response', side_effect=Exception("Forced error")):
+            response = await client.generate_response([])
 
-                assert "I encountered an error" in response
+            assert "I encountered an error" in response
 
 
 if __name__ == "__main__":

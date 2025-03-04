@@ -34,35 +34,34 @@ class TestReadTool:
     @pytest.mark.asyncio
     async def test_read_file_success(self, text_file):
         result = await tool_read(file_path=text_file, offset=10, limit=5)
-        assert result["success"] is True
-
+        # Expect success indicated by exit_code 0.
+        assert result["exit_code"] == 0
         assert "Read 5 lines from" in result["output"]
-
         assert len(result["content"].splitlines()) == 5
 
     @pytest.mark.asyncio
     async def test_read_missing_file(self):
         result = await tool_read(file_path="/no/such/file")
-        assert result["success"] is False
+        assert result["exit_code"] != 0
         assert "File not found:" in result["error"]
 
     @pytest.mark.asyncio
     async def test_read_directory(self, tmp_path):
         result = await tool_read(file_path=str(tmp_path))
-        assert result["success"] is False
+        assert result["exit_code"] != 0
         assert "Path is a directory" in result["error"]
 
     @pytest.mark.asyncio
     async def test_read_binary_file(self, binary_file):
         result = await tool_read(file_path=binary_file)
-        assert result["success"] is True
+        assert result["exit_code"] == 0
         assert "Binary file:" in result["output"]
         assert result.get("binary") is True
 
     @pytest.mark.asyncio
     async def test_negative_offset(self, text_file):
         result = await tool_read(file_path=text_file, offset=-1)
-        assert result["success"] is False
+        assert result["exit_code"] != 0
         assert "Offset must be" in result["error"]
 
     def test_is_binary_file(self, binary_file, text_file):

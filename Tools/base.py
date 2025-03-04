@@ -17,8 +17,18 @@ class ToolHandler(ABC):
     examples: List[Tuple[str, str]] = []
     formatter: str = "default"
 
+    # New parameters to control execution behavior.
+    test_mode_allowed: bool = False
+    internet_tool: bool = False
+
     @abstractmethod
     async def execute(self, **kwargs) -> Dict[str, Any]:
+        """
+        Execute the tool logic.
+        Expected to return a dict with at least:
+            - "exit_code": int (0 for success, nonzero for failure)
+            - "output": str (the normal output or, in case of error, the error message)
+        """
         pass
 
     async def run(self, **kwargs) -> Dict[str, Any]:
@@ -29,8 +39,10 @@ class ToolHandler(ABC):
             result["tool_name"] = self.name
             exit_code = result.get("exit_code", 0)
             result["exit_code"] = exit_code
+            # Combine output and error based on exit_code.
             combined = result.get("output", "") if exit_code == 0 else result.get("error", "")
             result["result"] = combined
+            # Remove redundant success field if present.
             result.pop("success", None)
             if output_manager is not None:
                 await output_manager.handle_tool_output(self.name, result)
@@ -54,6 +66,8 @@ class ToolHandler(ABC):
             "usage": cls.usage,
             "examples": cls.examples,
             "formatter": cls.formatter,
+            "test_mode_allowed": getattr(cls, "test_mode_allowed", False),
+            "internet_tool": getattr(cls, "internet_tool", False),
             "docstring": cls.__doc__ or ""
         }
 

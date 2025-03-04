@@ -5,6 +5,6 @@ This package provides configuration management for the Arcadia Agent,
 primarily focusing on loading, accessing, and modifying configuration settings.
 """
 
-from Config.config import Config, config
+from .config import Config, config
 
 __all__ = ["Config", "config"]

@@ -4,15 +4,12 @@ from typing import Dict, Any
 
 TOOL_NAME = "read"
 TOOL_DESCRIPTION = "Read the contents of a text file with optional offset and limit."
-
 EXAMPLES = {
     "file_path": "/etc/hosts",
     "offset": 0,
     "limit": 2000
 }
-
 FORMATTER = "file_content"
-
 logger = logging.getLogger(__name__)
 
 def _ensure_absolute_path(path: str) -> str:
@@ -28,39 +25,28 @@ def _is_binary_file(file_path: str) -> bool:
     except:
         return False
 
-async def tool_read(
-    file_path: str,
-    offset: int = 0,
-    limit: int = 2000,
-    **kwargs
-) -> Dict[str, Any]:
+async def tool_read(file_path: str, offset: int = 0, limit: int = 2000, **kwargs) -> Dict[str, Any]:
     if not file_path:
         return {
             "output": "",
             "error": "Missing required parameter: file_path",
-            "success": False,
             "exit_code": 1
         }
-
     abs_path = _ensure_absolute_path(file_path)
     if not os.path.exists(abs_path):
         return {
             "output": "",
             "error": f"File not found: {abs_path}",
-            "success": False,
             "exit_code": 1,
             "file_path": abs_path
         }
-
     if os.path.isdir(abs_path):
         return {
             "output": "",
             "error": f"Path is a directory: {abs_path}",
-            "success": False,
             "exit_code": 1,
             "file_path": abs_path
         }
-
     try:
         offset = int(offset)
         limit = int(limit)
@@ -70,63 +56,45 @@ async def tool_read(
         return {
             "output": "",
             "error": "Offset must be >= 0 and limit must be > 0 (both integers)",
-            "success": False,
             "exit_code": 1
         }
-
     if _is_binary_file(abs_path):
         return {
             "output": f"Binary file: {abs_path}",
             "error": "",
-            "success": True,
             "exit_code": 0,
             "file_path": abs_path,
             "binary": True
         }
-
     content_lines = []
     truncated = False
     try:
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
-
+            # Skip lines up to offset
             for _ in range(offset):
                 if not next(f, None):
                     break
-            for i in range(limit):
+            for _ in range(limit):
                 line = next(f, None)
                 if line is None:
                     break
                 content_lines.append(line)
-
             if next(f, None) is not None:
                 truncated = True
-    except UnicodeDecodeError:
-        return {
-            "output": f"Binary or non-text file: {abs_path}",
-            "error": "",
-            "success": True,
-            "exit_code": 0,
-            "file_path": abs_path,
-            "binary": True
-        }
     except Exception as e:
         return {
             "output": "",
             "error": f"Error reading file: {str(e)}",
-            "success": False,
             "exit_code": 1,
             "file_path": abs_path
         }
-
     read_count = len(content_lines)
     short_info = f"Read {read_count} lines from {abs_path}"
     if truncated:
         short_info += " (truncated)"
-
     return {
         "output": short_info,
         "error": "",
-        "success": True,
         "exit_code": 0,
         "file_path": abs_path,
         "content": "".join(content_lines),
@@ -135,3 +103,12 @@ async def tool_read(
         "line_count": read_count,
         "offset": offset
     }
+
+def display_format(params: Dict[str, Any], result: Dict[str, Any]) -> str:
+    if result.get("exit_code", 1) == 0:
+        info = result.get("output", "")
+        if result.get("truncated", False):
+            info += " [truncated]"
+        return f"[READ] {info}"
+    else:
+        return f"[READ] Error: {result.get('error', 'Unknown error')}"

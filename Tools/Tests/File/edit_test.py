@@ -23,7 +23,8 @@ class TestEditTool:
 
     def test_edit_unique_replacement(self, existing_file):
         result = tool_edit(file_path=existing_file, old="Hello World", new="Hello Universe")
-        assert result["success"] is True
+        # Check that exit_code is 0 (success) and output indicates file was edited.
+        assert result["exit_code"] == 0
         assert "Edited file:" in result["output"]
         with open(existing_file, "r") as f:
             content = f.read()
@@ -31,28 +32,31 @@ class TestEditTool:
 
     def test_edit_no_such_file(self):
         result = tool_edit(file_path="/no/such/file.txt", old="abc", new="def")
-        assert result["success"] is False
+        # Expect nonzero exit_code and error indicating file not found.
+        assert result["exit_code"] != 0
         assert "File not found:" in result["error"]
 
     def test_edit_create_new_file_when_old_empty(self, tmp_path):
         new_file = os.path.join(tmp_path, "myfile.txt")
         result = tool_edit(file_path=new_file, old="", new="New content")
-        assert result["success"] is True
+        assert result["exit_code"] == 0
         assert "Created new file:" in result["output"]
         with open(new_file, "r") as f:
             assert "New content" in f.read()
 
     def test_edit_multiple_occurrences(self, existing_file):
+        # Append an extra occurrence of the target string.
         with open(existing_file, "a") as f:
             f.write("\nHello World")
-
         result = tool_edit(file_path=existing_file, old="Hello World", new="HELLO")
-        assert result["success"] is False
+        # Expect failure due to multiple occurrences.
+        assert result["exit_code"] != 0
         assert "appears 2 times" in result["error"]
 
     def test_edit_old_not_found(self, existing_file):
         result = tool_edit(file_path=existing_file, old="MissingString", new="X")
-        assert result["success"] is False
+        # Expect failure when target string is not found.
+        assert result["exit_code"] != 0
         assert "Target string not found" in result["error"]
 
     def test_ensure_absolute_path(self):

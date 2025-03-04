@@ -118,24 +118,31 @@ class AutonomousAgent:
 
     async def _process_response(self, response) -> bool:
         try:
+            # Convert to string if not already
             p = response if isinstance(response, str) else json.dumps(response)
+            # Parse the response
             d = self.tool_parser.parse_message(p)
+            
+            # Handle thinking, analysis, reasoning sections
             for k in ("thinking", "analysis", "reasoning"):
-                if d.get(k):
-                    o = {"success": True, "output": d[k], "formatter": f"agent_{k}"}
+                if v := d.get(k):
+                    o = {"success": True, "output": v, "formatter": f"agent_{k}"}
                     if output_manager:
                         await output_manager.handle_tool_output(f"agent_{k}", o)
                     else:
-                        print(f"[Agent {k.capitalize()}]: {d[k]}")
-            a = d.get("answer", "") or d.get("response", "")
-            if a and output_manager:
-                await output_manager.handle_tool_output("agent_answer", {"success": True, "output": a, "formatter": "agent_answer"})
-            elif a:
-                print(f"\n[Agent Answer]: {a}\n")
-            # Tool call processing removed since tool manager is removed.
-            if "[EXIT]" in a:
-                self.should_exit = True
-                return False
+                        print(f"[Agent {k.capitalize()}]: {v}")
+            
+            # Handle answer/response
+            if a := (d.get("answer") or d.get("response", "")):
+                if output_manager:
+                    await output_manager.handle_tool_output("agent_answer", {"success": True, "output": a, "formatter": "agent_answer"})
+                else:
+                    print(f"\n[Agent Answer]: {a}\n")
+                    
+                if "[EXIT]" in a:
+                    self.should_exit = True
+                    return False
+                    
             return True
         except Exception as e:
             logger.error(f"Error processing response: {e}", exc_info=True)

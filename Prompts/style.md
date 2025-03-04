@@ -1,4 +1,4 @@
-# Arcadia Agent - Code Style & Architecture Guidelines
+# Agent - Code Style & Architecture Guidelines
 
 ## Core Architecture Principles
 

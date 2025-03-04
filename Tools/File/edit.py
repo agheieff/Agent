@@ -1,123 +1,59 @@
 import os
-from typing import Dict, Any
+from typing import Dict,Any
 
-TOOL_NAME = "edit"
-TOOL_DESCRIPTION = "Edit a file by replacing a unique occurrence of `old` with `new`."
-EXAMPLES = {
-    "file_path": "/tmp/config.txt",
-    "old": "version=1.0",
-    "new": "version=2.0"
-}
-FORMATTER = "file_operation"
+TOOL_NAME="edit"
+TOOL_DESCRIPTION="Edit a file by replacing old with new"
+EXAMPLES={"file_path":"/tmp/file.txt","old":"v1","new":"v2"}
+FORMATTER="file_operation"
 
-def _ensure_absolute_path(path: str) -> str:
+def _ensure_absolute_path(path:str)->str:
     if not os.path.isabs(path):
-        return os.path.abspath(os.path.join(os.getcwd(), path))
+        return os.path.abspath(os.path.join(os.getcwd(),path))
     return path
 
-def tool_edit(file_path: str, old: str, new: str, **kwargs) -> Dict[str, Any]:
+def tool_edit(file_path:str,old:str,new:str,**kwargs)->Dict[str,Any]:
     if not file_path:
-        return {
-            "output": "",
-            "error": "Missing required parameter: file_path",
-            "exit_code": 1
-        }
+        return{"output":"","error":"Missing file_path","exit_code":1}
     if old is None:
-        return {
-            "output": "",
-            "error": "Missing required parameter: old",
-            "exit_code": 1
-        }
+        return{"output":"","error":"Missing old","exit_code":1}
     if new is None:
-        return {
-            "output": "",
-            "error": "Missing required parameter: new",
-            "exit_code": 1
-        }
-    abs_path = _ensure_absolute_path(file_path)
-    if not os.path.exists(abs_path):
-        # If 'old' is empty, create new file.
-        if old == "":
-            parent_dir = os.path.dirname(abs_path)
-            if parent_dir and not os.path.exists(parent_dir):
+        return{"output":"","error":"Missing new","exit_code":1}
+    a=_ensure_absolute_path(file_path)
+    if not os.path.exists(a):
+        if old=="":
+            d=os.path.dirname(a)
+            if d and not os.path.exists(d):
                 try:
-                    os.makedirs(parent_dir, exist_ok=True)
+                    os.makedirs(d,exist_ok=True)
                 except Exception as e:
-                    return {
-                        "output": "",
-                        "error": f"Error creating parent directory: {str(e)}",
-                        "exit_code": 1,
-                        "file_path": abs_path
-                    }
+                    return{"output":"","error":f"Error creating dir: {str(e)}","exit_code":1,"file_path":a}
             try:
-                with open(abs_path, 'w', encoding='utf-8') as f:
+                with open(a,"w",encoding="utf-8")as f:
                     f.write(new)
-                return {
-                    "output": f"Created new file: {abs_path}",
-                    "error": "",
-                    "exit_code": 0,
-                    "file_path": abs_path
-                }
+                return{"output":f"Created new file: {a}","error":"","exit_code":0,"file_path":a}
             except Exception as e:
-                return {
-                    "output": "",
-                    "error": f"Error creating new file: {str(e)}",
-                    "exit_code": 1,
-                    "file_path": abs_path
-                }
-        else:
-            return {
-                "output": "",
-                "error": f"File not found: {abs_path}",
-                "exit_code": 1,
-                "file_path": abs_path
-            }
+                return{"output":"","error":f"Error creating file: {str(e)}","exit_code":1,"file_path":a}
+        return{"output":"","error":f"File not found: {a}","exit_code":1,"file_path":a}
     try:
-        with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
-            content = f.read()
+        with open(a,"r",encoding="utf-8",errors="replace")as f:
+            c=f.read()
     except Exception as e:
-        return {
-            "output": "",
-            "error": f"Error reading file: {str(e)}",
-            "exit_code": 1,
-            "file_path": abs_path
-        }
-    occurrences = content.count(old)
-    if occurrences == 0:
-        return {
-            "output": "",
-            "error": f"Target string not found in {abs_path}",
-            "exit_code": 1,
-            "file_path": abs_path
-        }
-    if occurrences > 1:
-        return {
-            "output": "",
-            "error": f"Target string appears {occurrences} times in {abs_path}. Must be unique.",
-            "exit_code": 1,
-            "file_path": abs_path
-        }
-    new_content = content.replace(old, new, 1)
+        return{"output":"","error":f"Error reading file: {str(e)}","exit_code":1,"file_path":a}
+    o=c.count(old)
+    if o==0:
+        return{"output":"","error":f"Target string not found in {a}","exit_code":1,"file_path":a}
+    if o>1:
+        return{"output":"","error":f"Target string appears {o} times in {a}. Must be unique.","exit_code":1,"file_path":a}
+    n=c.replace(old,new,1)
     try:
-        with open(abs_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
-        return {
-            "output": f"Edited file: {abs_path}",
-            "error": "",
-            "exit_code": 0,
-            "file_path": abs_path
-        }
+        with open(a,"w",encoding="utf-8")as f:
+            f.write(n)
+        return{"output":f"Edited file: {a}","error":"","exit_code":0,"file_path":a}
     except Exception as e:
-        return {
-            "output": "",
-            "error": f"Error writing updated file: {str(e)}",
-            "exit_code": 1,
-            "file_path": abs_path
-        }
+        return{"output":"","error":f"Error writing file: {str(e)}","exit_code":1,"file_path":a}
 
-def display_format(params: Dict[str, Any], result: Dict[str, Any]) -> str:
-    file_path = result.get("file_path", "")
-    if result.get("exit_code", 1) == 0:
-        return f"[EDIT] Success: {file_path}"
-    else:
-        return f"[EDIT] Error: {result.get('error', 'Unknown error')}"
+def display_format(params:Dict[str,Any],result:Dict[str,Any])->str:
+    f=result.get("file_path","")
+    if result.get("exit_code",1)==0:
+        return f"[EDIT] Success: {f}"
+    return f"[EDIT] Error: {result.get('error','Unknown error')}"

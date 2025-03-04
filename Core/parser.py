@@ -1,19 +1,18 @@
 import json
 import logging
-from typing import Dict, Any
+from typing import Dict,Any
 
-logger = logging.getLogger(__name__)
+logger=logging.getLogger(__name__)
 
 class ToolParser:
-    def parse_message(self, message: str) -> Dict[str, Any]:
+    def parse_message(self,message:str)->Dict[str,Any]:
+        r={"tool_calls":[]}
         try:
-            data = json.loads(message.strip())
-            if not isinstance(data, dict):
-                raise ValueError("Top-level JSON is not an object.")
+            d=json.loads(message.strip())
+            if isinstance(d,dict):
+                if"tool_calls"not in d:
+                    d["tool_calls"]=[]
+                return d
         except Exception as e:
             logger.error(f"Failed to parse JSON: {e}")
-            return {"tool_calls": []}
-        
-        if "tool_calls" not in data:
-            data["tool_calls"] = []
-        return data
+        return r

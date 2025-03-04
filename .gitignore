@@ -1,7 +1,5 @@
 __pycache__/
-
 .env
 .venv
-
 Config/config.yaml
 clean.py

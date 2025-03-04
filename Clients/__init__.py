@@ -1,6 +1,6 @@
 from typing import Optional
 import logging
-from .base import BaseLLMClient, TokenUsage
+from .base import BaseLLMClient
 from .anthropic import AnthropicClient
 from .deepseek import DeepSeekClient
 from .openai import OpenAIClient
@@ -8,19 +8,16 @@ from .openai import OpenAIClient
 logger = logging.getLogger(__name__)
 
 def get_llm_client(model_type: str, api_key: str, model: Optional[str] = None) -> BaseLLMClient:
-    model_type = model_type.lower()
-
+    m = model_type.lower()
     if not api_key:
         raise ValueError("API key is required")
-
-    if model_type == "anthropic" or model_type.startswith("claude"):
+    if m == "anthropic" or m.startswith("claude"):
         logger.info("Initializing Anthropic Claude client")
         return AnthropicClient(api_key)
-    elif model_type == "deepseek" or model_type.startswith("deepseek"):
+    elif m == "deepseek" or m.startswith("deepseek"):
         logger.info("Initializing DeepSeek client")
         return DeepSeekClient(api_key)
-    elif model_type == "openai" or model_type.startswith("openai"):
+    elif m == "openai" or m.startswith("openai"):
         logger.info("Initializing OpenAI client")
         return OpenAIClient(api_key, model=model)
-    else:
-        raise ValueError(f"Unsupported model type: {model_type}")
+    raise ValueError(f"Unsupported model type: {model_type}")

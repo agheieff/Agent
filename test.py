@@ -1,20 +1,9 @@
-
-"""
-test.py
-
-Runs all tests (located in any 'Tests/' subdirectory at any level).
-"""
-
 import sys
 import pytest
 
 def main():
-    args = [
-        "--maxfail=1",
-        "-v",
-    ]
-    sys.exit(pytest.main(args))
+    a=["--maxfail=1","-v"]
+    sys.exit(pytest.main(a))
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
-

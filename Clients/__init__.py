@@ -4,9 +4,7 @@ from .base import BaseLLMClient
 from .anthropic import AnthropicClient
 from .deepseek import DeepSeekClient
 from .openai import OpenAIClient
-
 logger = logging.getLogger(__name__)
-
 def get_llm_client(model_type: str, api_key: str, model: Optional[str] = None) -> BaseLLMClient:
     m = model_type.lower()
     if not api_key:

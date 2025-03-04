@@ -12,17 +12,17 @@ def tool_telegram_view(
     config: Dict[str, Any] = None,
     **kwargs
 ) -> Dict[str, Any]:
-    """
-    Fetch recent updates (messages) from your Telegram bot. JSON usage example:
-    {
-      "name": "telegram_view",
-      "params": {
-        "limit": 5,
-        "offset": 100,
-        "token": "..."
-      }
-    }
-    """
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
     if not token or not token.strip():
         if config:
             token = config.get("telegram", {}).get("token", "")
@@ -64,7 +64,7 @@ def tool_telegram_view(
                 "exit_code": 0
             }
 
-        # Trim to limit
+
         messages = messages[-limit:]
         lines = []
         for m in messages:

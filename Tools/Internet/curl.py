@@ -14,20 +14,20 @@ async def tool_curl(
     allow_insecure: bool = False,
     **kwargs
 ) -> Dict[str, Any]:
-    """
-    Make a simple HTTP request. JSON usage example:
-    {
-      "name": "curl",
-      "params": {
-        "method": "POST",
-        "url": "https://example.com/api",
-        "data": "some=payload",
-        "headers": "Content-Type:application/x-www-form-urlencoded",
-        "timeout": 10,
-        "allow_insecure": false
-      }
-    }
-    """
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
     if not url:
         return {
             "output": "",

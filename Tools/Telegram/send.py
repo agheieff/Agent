@@ -12,22 +12,22 @@ def tool_telegram_send(
     config: Dict[str, Any] = None,
     **kwargs
 ) -> Dict[str, Any]:
-    """
-    Send a Telegram message. JSON usage example:
-    {
-      "name": "telegram_send",
-      "params": {
-        "message": "Hello from the agent",
-        "token": "...",
-        "chat_id": "123456"
-      }
-    }
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
 
-    If token/chat_id are omitted, tries config or environment variables:
-    - TELEGRAM_BOT_TOKEN
-    - TELEGRAM_CHAT_ID
-    """
-    # fallback from config
+
     if not token or not token.strip():
         if config:
             token = config.get("telegram", {}).get("token", "")

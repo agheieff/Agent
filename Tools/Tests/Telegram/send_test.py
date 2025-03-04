@@ -7,7 +7,7 @@ from Tools.Telegram.send import tool_telegram_send
 class TestTelegramSendTool:
 
     async def test_no_token_or_env(self):
-        # Remove env token if present
+
         original_token = os.environ.pop("TELEGRAM_BOT_TOKEN", None)
         result = tool_telegram_send(message="hi")
         assert result["success"] is False

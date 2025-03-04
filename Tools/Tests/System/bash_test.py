@@ -11,7 +11,7 @@ class TestBashTool:
         assert "Hello" in result["output"]
 
     async def test_timeout(self):
-        # Command should exceed the timeout and be killed
+
         result = await tool_bash(command="sleep 2", timeout=1)
         assert result["success"] is False
         assert "timed out" in result["error"].lower()

@@ -25,20 +25,20 @@ async def tool_read(
     limit: int = 2000,
     **kwargs
 ) -> Dict[str, Any]:
-    """
-    Read a file's contents. Return up to `limit` lines after skipping `offset`.
-    If the file is binary or unreadable, return a note about that.
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
 
-    JSON usage example:
-    {
-      "name": "read",
-      "params": {
-        "file_path": "/etc/hosts",
-        "offset": 10,
-        "limit": 50
-      }
-    }
-    """
     if not file_path:
         return {
             "output": "",
@@ -89,7 +89,7 @@ async def tool_read(
     truncated = False
     try:
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
-            # skip offset lines
+
             for _ in range(offset):
                 if not next(f, None):
                     break
@@ -98,7 +98,7 @@ async def tool_read(
                 if line is None:
                     break
                 content_lines.append(line)
-            # If there's more lines, we're truncating
+
             if next(f, None) is not None:
                 truncated = True
     except UnicodeDecodeError:

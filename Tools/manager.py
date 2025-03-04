@@ -26,11 +26,11 @@ class ToolManager:
         self.agent_conversation_history = conversation_ref
 
     async def process_message_from_calls(self, tool_calls: List[Dict[str, Any]]) -> str:
-        """
-        Accepts an already-parsed list of tool calls. Each call is dict:
-          { "name": "<tool_name>", "params": { ... } }
-        Then executes them in sequence, returning a summary of results.
-        """
+\
+\
+\
+\
+
         if not tool_calls:
             return ""
 
@@ -41,7 +41,7 @@ class ToolManager:
 
             logger.info(f"Executing tool: {tool_name} with params: {params}")
 
-            # Optionally check config for internet access, etc.:
+
             if not self.agent_config.get("agent", {}).get("allow_internet", True):
                 netlike = {"curl", "web_client", "search_engine"}
                 if tool_name in netlike or "url" in params:
@@ -53,14 +53,14 @@ class ToolManager:
                     }))
                     continue
 
-            # Provide config to telegram if needed:
+
             if tool_name.lower() in ["telegram_send", "telegram_view"]:
                 params["config"] = self.agent_config
 
-            # Actually execute:
+
             tool_result = await execute_tool(tool_name, params)
             results.append((tool_name, params, tool_result))
 
-        # Compose text summary for them:
+
         summary = self.composer.compose_response(results)
         return summary

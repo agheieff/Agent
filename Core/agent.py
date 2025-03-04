@@ -66,7 +66,7 @@ class AutonomousAgent:
     async def run(self, initial_prompt: str, system_prompt: str = ""):
         try:
             self.agent_state['status'] = 'running'
-            # Start conversation with system + user messages
+
             self.local_conversation_history = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": initial_prompt}
@@ -78,7 +78,7 @@ class AutonomousAgent:
             iteration = 0
             while should_continue and not self.should_exit:
                 response_state = await self._process_response(response)
-                # If test mode, break after first iteration
+
                 iteration += 1
                 if self.test_mode and iteration >= 1:
                     break
@@ -87,12 +87,12 @@ class AutonomousAgent:
                     should_continue = False
                     break
 
-                # In fully-autonomous mode, continue automatically:
+
                 auto_continue = self.config.get("agent", {}).get("autonomous_mode", True)
                 if auto_continue and not self.should_exit:
-                    user_followup = "Continue."  # could be "Ok, next step" or some other auto prompt
+                    user_followup = "Continue."
                 else:
-                    # If not autonomous, ask user for next input:
+
                     user_followup = await self._get_user_input()
                     if user_followup.strip().lower() in ["exit", "quit", "bye"]:
                         break
@@ -108,12 +108,12 @@ class AutonomousAgent:
             raise
 
     async def _generate_response(self, system_prompt: Optional[str], user_input: str) -> str:
-        """
-        Send conversation history to LLM and get the assistant response.
-        """
+\
+\
+
         try:
             if system_prompt is not None:
-                # Reset conversation:
+
                 self.local_conversation_history = [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_input}
@@ -139,41 +139,41 @@ class AutonomousAgent:
             return error_message
 
     async def _process_response(self, response: str) -> bool:
-        """
-        Parse the LLM's response as JSON, execute any tool calls, and store final answer.
-        Return True if we should continue, False to stop.
-        """
+\
+\
+\
+
         if not response.strip():
             return True
 
         parsed = ToolParser.parse_message(response)
 
-        # If there's an "answer" field, we can display it:
+
         final_answer = parsed.get("answer", "")
         if final_answer:
             print(f"\n[Agent Answer]: {final_answer}\n")
 
-        # If there are tool calls, execute them:
+
         tool_calls = parsed.get("tool_calls", [])
         if tool_calls:
             result_str = await self.tool_manager.process_message_from_calls(tool_calls)
-            # Optionally, we can inject result_str back into conversation or keep it quiet
+
             if result_str:
-                # In some designs, we might re-inject the tool results as user content:
+
                 self.local_conversation_history.append({"role": "user", "content": result_str})
 
-        # Check if the agent wants to exit (some final condition):
-        # e.g. If final_answer includes "goodbye" or something
-        # For demonstration, let's check a special token:
+
+
+
         if "[EXIT]" in final_answer:
             return False
 
         return True
 
     async def _get_user_input(self) -> str:
-        """
-        For non-autonomous mode, request user input from console.
-        """
+\
+\
+
         self.agent_state['status'] = 'waiting_for_input'
         prompt = "\n[User Input] > "
         print(prompt, end="", flush=True)

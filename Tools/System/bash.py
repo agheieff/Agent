@@ -10,18 +10,18 @@ async def tool_bash(
     timeout: int = 60,
     **kwargs
 ) -> Dict[str, Any]:
-    """
-    Execute a shell command. JSON usage example:
-    {
-      "name": "bash",
-      "params": {
-        "command": "echo Hello && ls -la",
-        "timeout": 30
-      }
-    }
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
 
-    If timeout=0, no timeout is enforced.
-    """
     if not command:
         return {
             "output": "",
@@ -30,7 +30,7 @@ async def tool_bash(
             "exit_code": 1
         }
 
-    # create subprocess
+
     try:
         process = await asyncio.create_subprocess_shell(
             command,

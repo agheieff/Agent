@@ -18,18 +18,18 @@ async def tool_write(
     mkdir: bool = True,
     **kwargs
 ) -> Dict[str, Any]:
-    """
-    Create a new file. Fails if file already exists.
-    JSON usage example:
-    {
-      "name": "write",
-      "params": {
-        "file_path": "/tmp/new_file.txt",
-        "content": "Hello world",
-        "mkdir": true
-      }
-    }
-    """
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
     if not file_path:
         return {
             "output": "",

@@ -15,19 +15,19 @@ def tool_edit(
     new: str,
     **kwargs
 ) -> Dict[str, Any]:
-    """
-    Edit a file by replacing exactly one occurrence of `old` with `new`.
-    If `old` is empty and the file does not exist, create a new file with `new`.
-    JSON usage example:
-    {
-      "name": "edit",
-      "params": {
-        "file_path": "/path/to/file.txt",
-        "old": "Hello World",
-        "new": "Hello Universe"
-      }
-    }
-    """
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
     if not file_path:
         return {
             "output": "",
@@ -52,7 +52,7 @@ def tool_edit(
 
     abs_path = _ensure_absolute_path(file_path)
     if not os.path.exists(abs_path):
-        # If old=="" we create new file with 'new' as content
+
         if old == "":
             parent_dir = os.path.dirname(abs_path)
             if parent_dir and not os.path.exists(parent_dir):
@@ -81,7 +81,7 @@ def tool_edit(
                 "exit_code": 1
             }
 
-    # read file
+
     try:
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
@@ -93,7 +93,7 @@ def tool_edit(
             "exit_code": 1
         }
 
-    # check uniqueness
+
     occurrences = content.count(old)
     if occurrences == 0:
         return {
@@ -110,7 +110,7 @@ def tool_edit(
             "exit_code": 1
         }
 
-    # replace once
+
     new_content = content.replace(old, new, 1)
     try:
         with open(abs_path, 'w', encoding='utf-8') as f:

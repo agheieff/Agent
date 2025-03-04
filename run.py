@@ -20,11 +20,17 @@ logger = logging.getLogger(__name__)
 INITIAL_PROMPT_HISTORY_FILE = '~/.agent_prompt_history'
 CONTEXT_HISTORY_FILE = '~/.agent_context_history'
 
-
 PROVIDER_ENV_PREFIXES = {
     "anthropic": "ANTHROPIC",
     "deepseek": "DEEPSEEK",
     "openai": "OPENAI",
+}
+
+
+CLIENT_CLASSES = {
+    "anthropic": "AnthropicClient",
+    "deepseek": "DeepSeekClient",
+    "openai": "OpenAIClient",
 }
 
 current_agent = None
@@ -105,33 +111,24 @@ def get_initial_prompt() -> str:
     return "\n".join(lines)
 
 def get_available_model_providers() -> Dict[str, Dict[str, List[str]]]:
+
     available_providers = {}
-
-
     import importlib
 
-
     for provider, env_prefix in PROVIDER_ENV_PREFIXES.items():
-        api_key = os.getenv(f"{env_prefix}_API_KEY", "")
-        if not api_key.strip():
+        api_key = os.getenv(f"{env_prefix}_API_KEY", "").strip()
+        if not api_key:
             continue
 
-
+        module_name = f"Clients.{provider}"
         try:
-
-            module_name = f"Clients.{provider}"
             module = importlib.import_module(module_name)
 
-
-            client_class_name = f"{provider.capitalize()}Client"
+            client_class_name = CLIENT_CLASSES[provider]
             client_class = getattr(module, client_class_name)
 
-
-            client = client_class(api_key)
-
-
+            client = client_class(api_key=api_key)
             models = client.get_available_models()
-
             available_providers[provider] = {
                 "env_prefix": env_prefix,
                 "models": models
@@ -143,7 +140,7 @@ def get_available_model_providers() -> Dict[str, Dict[str, List[str]]]:
 
 def get_model_choice(available_providers: Dict[str, Dict[str, List[str]]]) -> Dict[str, str]:
     if not available_providers:
-        print("No providers found. Please set an API key.")
+        print("No providers found. Please set an API key (e.g. OPENAI_API_KEY or ANTHROPIC_API_KEY).")
         sys.exit(1)
     if len(available_providers) == 1:
         only_provider = list(available_providers.keys())[0]
@@ -222,7 +219,6 @@ async def main():
             sys.exit(1)
         provider = args.provider
         if args.model:
-
             if args.model in available_providers[provider]["models"]:
                 model = args.model
             else:
@@ -234,7 +230,7 @@ async def main():
             model = available_providers[provider]["models"][0]
     else:
         if not available_providers:
-            print("No providers found. Please set an API key.")
+            print("No providers found. Please set an API key (e.g. OPENAI_API_KEY or ANTHROPIC_API_KEY).")
             sys.exit(1)
         if args.model:
             guess_provider = None
@@ -246,8 +242,6 @@ async def main():
                 guess_provider = list(available_providers.keys())[0]
                 print(f"Warning: Model {args.model} not found in any provider. Using provider: {guess_provider}")
             provider = guess_provider
-
-
             if args.model in available_providers[provider]["models"]:
                 model = args.model
             else:
@@ -258,9 +252,8 @@ async def main():
             provider = chosen["provider"]
             model = chosen["model"]
 
-
     env_prefix = PROVIDER_ENV_PREFIXES.get(provider, provider.upper())
-    api_key = os.getenv(f"{env_prefix}_API_KEY", "")
+    api_key = os.getenv(f"{env_prefix}_API_KEY", "").strip()
     if not api_key:
         print(f"No API key for {provider} found in environment under {env_prefix}_API_KEY. Exiting.")
         sys.exit(1)

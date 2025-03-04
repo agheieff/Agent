@@ -21,7 +21,6 @@ class DeepSeekClient(BaseLLMClient):
             raise ValueError(f"Failed to initialize DeepSeek client: {str(e)}")
 
     def _register_models(self) -> None:
-
         self.models["deepseek-reasoner"] = ModelInfo(
             name="DeepSeek Reasoner",
             api_name="deepseek-reasoner",
@@ -35,7 +34,6 @@ class DeepSeekClient(BaseLLMClient):
             discount_hours=(16, 30, 0, 30),
             discount_rate=0.75
         )
-
         self.default_model = "deepseek-reasoner"
 
     async def _make_api_call(
@@ -47,10 +45,8 @@ class DeepSeekClient(BaseLLMClient):
         tool_usage: bool,
         thinking_config: Optional[Dict] = None
     ) -> Any:
-
         if not hasattr(self, 'client'):
             raise ValueError("DeepSeek client not initialized")
-
 
         params = {
             "model": model_name,
@@ -58,19 +54,14 @@ class DeepSeekClient(BaseLLMClient):
             "max_tokens": max_tokens,
             "temperature": temperature
         }
-
-
         if tool_usage:
-
             params["functions"] = self._get_function_schema()
             params["function_call"] = "auto"
-
 
         logger.debug(f"Sending request to DeepSeek with {len(messages)} messages")
         return self.client.chat.completions.create(**params)
 
     def _get_function_schema(self) -> List[Dict[str, Any]]:
-
         return [{
             "name": "tool",
             "description": "A general purpose tool that can perform actions",
@@ -95,33 +86,21 @@ class DeepSeekClient(BaseLLMClient):
         }]
 
     def extract_response_content(self, message) -> str:
-
         try:
-
             response_text = super().extract_response_content(message)
-
-
-            if (hasattr(message, 'choices') and message.choices and len(message.choices) > 0 and
+            if (hasattr(message, 'choices') and message.choices and
                 hasattr(message.choices[0], 'message')):
-
                 choice = message.choices[0]
-
-
                 if (hasattr(choice.message, 'function_call') and
                     choice.message.function_call is not None):
-
                     function_call = choice.message.function_call
-
                     function_data = {
                         "action": function_call.name,
                         "action_input": json.loads(function_call.arguments),
                         "response": response_text
                     }
                     return json.dumps(function_data)
-
-
             return response_text
-
         except Exception as e:
             logger.error(f"Error extracting DeepSeek response content: {e}")
             return f"Error parsing response: {e}"

@@ -20,7 +20,6 @@ class OpenAIClient(BaseLLMClient):
             raise ValueError(f"Failed to initialize OpenAI client: {str(e)}")
 
     def _register_models(self) -> None:
-
         self.models["gpt-4.5-preview"] = ModelInfo(
             name="GPT-4.5 Preview",
             api_name="gpt-4.5-preview",
@@ -69,7 +68,6 @@ class OpenAIClient(BaseLLMClient):
             input_cache_write_price=1.1
         )
 
-
         if self.requested_model and self.requested_model in self.models:
             self.default_model = self.requested_model
         else:
@@ -84,7 +82,6 @@ class OpenAIClient(BaseLLMClient):
         tool_usage: bool,
         thinking_config: Optional[Dict] = None
     ) -> Any:
-
         if not hasattr(self, 'client'):
             raise ValueError("OpenAI client not initialized")
 
@@ -96,7 +93,6 @@ class OpenAIClient(BaseLLMClient):
         }
 
         if tool_usage:
-
             tools = [{
                 "type": "function",
                 "function": {
@@ -118,7 +114,6 @@ class OpenAIClient(BaseLLMClient):
                     }
                 }
             }]
-
             params["tools"] = tools
             params["tool_choice"] = "auto"
 
@@ -126,25 +121,15 @@ class OpenAIClient(BaseLLMClient):
         return self.client.chat.completions.create(**params)
 
     def extract_response_content(self, message) -> str:
-
         try:
-
             response_text = super().extract_response_content(message)
-
-
             if (hasattr(message, 'choices') and message.choices and len(message.choices) > 0 and
                 hasattr(message.choices[0], 'message')):
-
                 choice = message.choices[0]
-
-
                 if (hasattr(choice.message, 'tool_calls') and
                     choice.message.tool_calls and
                     len(choice.message.tool_calls) > 0):
-
                     tool_call = choice.message.tool_calls[0]
-
-
                     if hasattr(tool_call, 'function'):
                         function_data = {
                             "name": tool_call.function.name,
@@ -152,10 +137,7 @@ class OpenAIClient(BaseLLMClient):
                             "response": response_text
                         }
                         return json.dumps(function_data)
-
-
             return response_text
-
         except Exception as e:
             logger.error(f"Error extracting OpenAI response content: {e}")
             return f"Error parsing response: {e}"

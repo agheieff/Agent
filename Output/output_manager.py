@@ -23,6 +23,8 @@ class OutputManager:
         self.register_formatter("user_interaction", self._user_interaction_formatter)
         self.register_formatter("agent_message", self._agent_message_formatter)
         self.register_formatter("conversation_end", self._conversation_end_formatter)
+        self.register_formatter("api_usage", self._api_usage_formatter)
+        self.register_formatter("api_usage_summary", self._api_usage_summary_formatter)
 
     def register_formatter(self, formatter_name: str, formatter_func):
         self.tool_formatters[formatter_name] = formatter_func
@@ -192,5 +194,19 @@ class OutputManager:
 
     async def _conversation_end_formatter(self, output: Dict[str, Any]) -> str:
         return "Conversation has ended."
+        
+    async def _api_usage_formatter(self, output: Dict[str, Any]) -> str:
+        if not output.get("success", False):
+            return f"Error: {output.get('error', 'API usage tracking failed')}"
+            
+        cost = output.get("cost", 0.0)
+        return f"\n[API USAGE] Cost: ${cost:.6f}"
+        
+    async def _api_usage_summary_formatter(self, output: Dict[str, Any]) -> str:
+        if not output.get("success", False):
+            return f"Error: {output.get('error', 'API usage summary failed')}"
+            
+        total_cost = output.get("total_cost", 0.0)
+        return f"\nTotal API Cost: ${total_cost:.6f}"
 
 output_manager = OutputManager()

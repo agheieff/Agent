@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 import argparse
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
 import socket
@@ -14,8 +15,17 @@ from Config import config, Config
 from Core.agent import AutonomousAgent
 from Prompts.main import generate_system_prompt
 
+logger = logging.getLogger(__name__)
+
 INITIAL_PROMPT_HISTORY_FILE = '~/.agent_prompt_history'
 CONTEXT_HISTORY_FILE = '~/.agent_context_history'
+
+# Define the mapping of provider to env prefix
+PROVIDER_ENV_PREFIXES = {
+    "anthropic": "ANTHROPIC",
+    "deepseek": "DEEPSEEK",
+    "openai": "OPENAI",
+}
 
 current_agent = None
 paused_for_context = False
@@ -95,25 +105,40 @@ def get_initial_prompt() -> str:
     return "\n".join(lines)
 
 def get_available_model_providers() -> Dict[str, Dict[str, List[str]]]:
-    provider_config = {
-        "anthropic": {
-            "env_prefix": "ANTHROPIC",
-            "models": ["claude-3-7-sonnet"]
-        },
-        "deepseek": {
-            "env_prefix": "DEEPSEEK",
-            "models": ["deepseek-reasoner", "deepseek-reasoner-tools"]
-        },
-        "openai": {
-            "env_prefix": "OPENAI",
-            "models": ["o1", "o3-mini", "gpt-4o", "gpt-4.5-preview"]
-        },
-    }
     available_providers = {}
-    for prov, info in provider_config.items():
-        api_key = os.getenv(f"{info['env_prefix']}_API_KEY", "")
-        if api_key.strip():
-            available_providers[prov] = info
+    
+    # Import dynamically only when needed to avoid circular imports
+    import importlib
+    
+    # Check each provider
+    for provider, env_prefix in PROVIDER_ENV_PREFIXES.items():
+        api_key = os.getenv(f"{env_prefix}_API_KEY", "")
+        if not api_key.strip():
+            continue
+            
+        # Create a temporary client to get available models
+        try:
+            # Dynamically import the client module
+            module_name = f"Clients.{provider}"
+            module = importlib.import_module(module_name)
+            
+            # Get the client class - by convention it's ProviderClient (e.g., AnthropicClient)
+            client_class_name = f"{provider.capitalize()}Client"
+            client_class = getattr(module, client_class_name)
+            
+            # Create an instance of the client
+            client = client_class(api_key)
+            
+            # Get available models from the client
+            models = client.get_available_models()
+            
+            available_providers[provider] = {
+                "env_prefix": env_prefix,
+                "models": models
+            }
+        except Exception as e:
+            logger.warning(f"Error getting models for {provider}: {str(e)}")
+            
     return available_providers
 
 def get_model_choice(available_providers: Dict[str, Dict[str, List[str]]]) -> Dict[str, str]:
@@ -171,8 +196,8 @@ async def main():
 
     parser = argparse.ArgumentParser(description="Run the Autonomous Agent.")
     parser.add_argument('--test', action='store_true', help="Run in test mode (no real commands execution)")
-    parser.add_argument('--provider', choices=['anthropic', 'deepseek', 'openai'], help="Specify model provider directly")
-    parser.add_argument('--model', help="Specify model name directly (e.g. claude-3-7-sonnet, deepseek-reasoner, o1, gpt-4o, gpt-4.5-preview)")
+    parser.add_argument('--provider', choices=list(PROVIDER_ENV_PREFIXES.keys()), help="Specify model provider directly")
+    parser.add_argument('--model', help="Specify model name directly (models are determined from provider clients)")
     parser.add_argument('--headless', action='store_true', help="Run in headless mode (no interactive prompts)")
     parser.add_argument('--no-internet', action='store_true', help="Disable internet access")
     parser.add_argument('--non-autonomous', action='store_true', help="Disable autonomous mode")
@@ -197,7 +222,14 @@ async def main():
             sys.exit(1)
         provider = args.provider
         if args.model:
-            model = args.model
+            # Check if the specified model exists in the provider
+            if args.model in available_providers[provider]["models"]:
+                model = args.model
+            else:
+                print(f"Warning: Model {args.model} not found for provider {provider}.")
+                print(f"Available models: {', '.join(available_providers[provider]['models'])}")
+                model = available_providers[provider]["models"][0]
+                print(f"Using default model: {model}")
         else:
             model = available_providers[provider]["models"][0]
     else:
@@ -212,14 +244,22 @@ async def main():
                     break
             if guess_provider is None:
                 guess_provider = list(available_providers.keys())[0]
+                print(f"Warning: Model {args.model} not found in any provider. Using provider: {guess_provider}")
             provider = guess_provider
-            model = args.model
+            
+            # If the model isn't in the chosen provider, use the default model
+            if args.model in available_providers[provider]["models"]:
+                model = args.model
+            else:
+                model = available_providers[provider]["models"][0]
+                print(f"Using default model for {provider}: {model}")
         else:
             chosen = get_model_choice(available_providers)
             provider = chosen["provider"]
             model = chosen["model"]
 
-    env_prefix = {"anthropic": "ANTHROPIC", "deepseek": "DEEPSEEK", "openai": "OPENAI"}.get(provider, provider.upper())
+    # Get the environment prefix for the provider
+    env_prefix = PROVIDER_ENV_PREFIXES.get(provider, provider.upper())
     api_key = os.getenv(f"{env_prefix}_API_KEY", "")
     if not api_key:
         print(f"No API key for {provider} found in environment under {env_prefix}_API_KEY. Exiting.")
@@ -268,13 +308,13 @@ async def main():
         print("\nExiting (KeyboardInterrupt).")
     finally:
         if agent and hasattr(agent, 'llm') and getattr(agent.llm, 'usage_history', None):
-            print("\n=== API USAGE SUMMARY ===")
-            print(f"Total API Calls: {len(agent.llm.usage_history)}")
-            print(f"Total Tokens: {agent.llm.total_tokens:,}")
-            print(f"  - Input Tokens: {agent.llm.total_prompt_tokens:,}")
-            print(f"  - Output Tokens: {agent.llm.total_completion_tokens:,}")
-            print(f"Total Cost: ${agent.llm.total_cost:.6f}")
-            print("=========================")
+            from Output.output_manager import output_manager
+            usage_output = {
+                "success": True,
+                "formatter": "api_usage_summary",
+                "total_cost": agent.llm.total_cost
+            }
+            asyncio.run(output_manager.handle_tool_output("api_usage_summary", usage_output))
 
         print("\nAgent session ended.")
 

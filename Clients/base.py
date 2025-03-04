@@ -134,6 +134,10 @@ class BaseLLMClient(ABC):
 
 
         return None
+        
+    def get_available_models(self) -> List[str]:
+        """Returns a list of available model names for this client."""
+        return list(self.models.keys())
 
     def add_usage(self, usage: TokenUsage):
         self.usage_history.append(usage)
@@ -141,9 +145,6 @@ class BaseLLMClient(ABC):
         self.total_completion_tokens += usage.completion_tokens
         self.total_tokens += usage.total_tokens
         self.total_cost += usage.total_cost
-
-        print(f"\n[API USAGE] {usage}")
-        print(f"[API USAGE] Total cost so far: ${self.total_cost:.6f} ({self.total_tokens} tokens)")
 
     def get_usage_summary(self) -> Dict[str, Any]:
         return {
@@ -290,12 +291,13 @@ class BaseLLMClient(ABC):
             return f"Error parsing response: {e}"
 
     def track_usage(self, usage_data: Dict[str, int], model_name: str, cache_hit: bool = False, cache_write: bool = False):
+        import asyncio
+        from Output.output_manager import output_manager
 
         model_info = self.get_model_info(model_name)
         if model_info:
             model_pricing = model_info.get_pricing()
         else:
-
             logger.warning(f"No model info found for {model_name}, using default pricing")
             model_pricing = {"input": 0.0, "output": 0.0}
 
@@ -318,6 +320,21 @@ class BaseLLMClient(ABC):
         )
 
         self.add_usage(token_usage)
+        
+        # Output the API usage information via the output manager
+        usage_output = {
+            "success": True,
+            "formatter": "api_usage",
+            "cost": token_usage.total_cost,
+            "model": model_name
+        }
+        try:
+            asyncio.get_event_loop().run_until_complete(
+                output_manager.handle_tool_output("api_usage", usage_output)
+            )
+        except RuntimeError:
+            # In case we're not in an event loop
+            pass
 
     async def generate_response(self, conversation_history: List[Dict]) -> str:
 

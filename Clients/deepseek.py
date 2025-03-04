@@ -1,182 +1,120 @@
 import logging
-import datetime
+import json
 from typing import Optional, List, Dict, Tuple, Any
 from openai import OpenAI
-from .base import BaseLLMClient, TokenUsage
+from .base import BaseLLMClient, ModelInfo
 
 logger = logging.getLogger(__name__)
 
-DEEPSEEK_PRICING = {
-    "deepseek-reasoner": {
-        "input": 0.14 / 1_000_000,
-        "input_cache_read": 0.05 / 1_000_000,
-        "input_cache_write": 0.14 / 1_000_000,
-        "output": 2.19 / 1_000_000,
-        "discount_hours": (16, 30, 0, 30),
-        "discount_rate": 0.75,
-    },
-    "deepseek-reasoner-tools": {
-        "input": 0.14 / 1_000_000,
-        "input_cache_read": 0.05 / 1_000_000,
-        "input_cache_write": 0.14 / 1_000_000,
-        "output": 2.19 / 1_000_000,
-        "discount_hours": (16, 30, 0, 30),
-        "discount_rate": 0.75,
-    },
-    "default": {
-        "input": 0.14 / 1_000_000,
-        "output": 2.19 / 1_000_000,
-    }
-}
-
 class DeepSeekClient(BaseLLMClient):
     def __init__(self, api_key: str):
-        super().__init__()
-        if not api_key:
-            raise ValueError("DeepSeek API key is required")
+        super().__init__(api_key)
 
-        if len(api_key) < 10:
-            logger.warning("DeepSeek API key may be invalid (too short)")
-
+    def _initialize_client(self, api_key: str) -> None:
         try:
             self.client = OpenAI(
                 api_key=api_key,
                 base_url="https://api.deepseek.com"
             )
-            if hasattr(self.client, 'api_key'):
-                logger.info("DeepSeek client initialized successfully")
+            logger.info("DeepSeek client initialized successfully")
         except Exception as e:
             raise ValueError(f"Failed to initialize DeepSeek client: {str(e)}")
 
-        self.default_model = "deepseek-reasoner"
+    def _register_models(self) -> None:
 
-    def get_model_pricing(self, model: str) -> Dict[str, float]:
-        pricing = DEEPSEEK_PRICING.get(model, DEEPSEEK_PRICING["default"])
-        if "discount_hours" in pricing and "discount_rate" in pricing:
-            current_time = datetime.datetime.now(datetime.timezone.utc)
-            current_hour = current_time.hour
-            current_minute = current_time.minute
-            start_hour, start_minute, end_hour, end_minute = pricing["discount_hours"]
-            current_time_mins = current_hour * 60 + current_minute
-            start_time_mins = start_hour * 60 + start_minute
-            end_time_mins = end_hour * 60 + end_minute
-            discount_applied = False
-            if end_time_mins < start_time_mins:
-                if current_time_mins >= start_time_mins or current_time_mins <= end_time_mins:
-                    discount_applied = True
-            else:
-                if start_time_mins <= current_time_mins <= end_time_mins:
-                    discount_applied = True
-            if discount_applied:
-                discount_multiplier = 1.0 - pricing["discount_rate"]
-                pricing_copy = pricing.copy()
-                for key in ["input", "input_cache_read", "input_cache_write", "output"]:
-                    if key in pricing_copy:
-                        pricing_copy[key] = pricing_copy[key] * discount_multiplier
-                return pricing_copy
-        return pricing
-
-    def adjust_prompts(self, system_prompt: Optional[str], user_prompt: str) -> Tuple[Optional[str], str]:
-        if system_prompt:
-            combined = system_prompt + "\n\n" + user_prompt
-            return None, combined
-        else:
-            return None, user_prompt
-
-    async def generate_response(self, conversation_history: List[Dict]) -> str:
-
-
-        combined_content = ""
-        for msg in conversation_history:
-            if msg.get("content"):
-                combined_content += msg["content"] + "\n"
-        if not combined_content.strip():
-            combined_content = "Hello, please respond."
-        fixed_messages = [{"role": "user", "content": combined_content.strip()}]
-
-
-        response = await self.get_response(
-            prompt=None,
-            system=None,
-            conversation_history=fixed_messages,
-            temperature=0.6,
-            max_tokens=4000
+        self.models["deepseek-reasoner"] = ModelInfo(
+            name="DeepSeek Reasoner",
+            api_name="deepseek-reasoner",
+            supports_reasoning=False,
+            prefers_separate_system_prompt=False,
+            context_window=128000,
+            input_price=0.14,
+            output_price=2.19,
+            input_cache_read_price=0.05,
+            input_cache_write_price=0.14,
+            discount_hours=(16, 30, 0, 30),
+            discount_rate=0.75
         )
 
-        if response is None:
-            return "I apologize, but I'm having trouble generating a response. Please try again."
+        self.default_model = "deepseek-reasoner"
 
-        return response
-
-    async def get_response(
+    async def _make_api_call(
         self,
-        prompt: Optional[str],
-        system: Optional[str],
-        conversation_history: List[Dict] = None,
-        temperature: float = 0.5,
-        max_tokens: int = 4096,
-        tool_usage: bool = False,
-        model: Optional[str] = None
-    ) -> Optional[str]:
-        try:
-            if conversation_history:
-                messages = conversation_history
-            else:
-                messages = []
-                if prompt:
-                    messages.append({"role": "user", "content": prompt})
-            logger.debug(f"Sending request to DeepSeek with {len(messages)} messages")
-            model_name = model or ("deepseek-reasoner-tools" if tool_usage else self.default_model)
-            if tool_usage:
-                response = self.client.chat.completions.create(
-                    model=model_name,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    functions=[{
-                        "name": "my_tool",
-                        "description": "Example tool usage placeholder",
-                        "parameters": {}
-                    }],
-                    function_call="auto"
-                )
-            else:
-                response = self.client.chat.completions.create(
-                    model=model_name,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature
-                )
-            if hasattr(response, "usage"):
-                usage_data = {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens
-                }
-                cache_hit = False
-                if hasattr(response, "cached") and response.cached:
-                    cache_hit = True
-                model_pricing = self.get_model_pricing(model_name)
-                costs = self.calculate_token_cost(usage_data, model_pricing, cache_hit=cache_hit)
-                token_usage = TokenUsage(
-                    prompt_tokens=usage_data["prompt_tokens"],
-                    completion_tokens=usage_data["completion_tokens"],
-                    total_tokens=usage_data["total_tokens"],
-                    prompt_cost=costs["prompt_cost"],
-                    completion_cost=costs["completion_cost"],
-                    total_cost=costs["total_cost"],
-                    model=model_name,
-                    cache_hit=cache_hit
-                )
-                self.add_usage(token_usage)
-            if response.choices and len(response.choices) > 0:
-                message = response.choices[0].message
-                content = message.content
-                return content
-            return None
-        except Exception as e:
-            logger.error(f"DeepSeek API call failed: {str(e)}", exc_info=True)
-            return None
+        messages: List[Dict],
+        model_name: str,
+        temperature: float,
+        max_tokens: int,
+        tool_usage: bool,
+        thinking_config: Optional[Dict] = None
+    ) -> Any:
 
-    async def check_for_user_input_request(self, response: str) -> Tuple[bool, Optional[str]]:
-        return False, None
+        if not hasattr(self, 'client'):
+            raise ValueError("DeepSeek client not initialized")
+
+
+        params = {
+            "model": model_name,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature
+        }
+
+
+        if tool_usage:
+
+            params["functions"] = self._get_function_schema()
+            params["function_call"] = "auto"
+
+
+        logger.debug(f"Sending request to DeepSeek with {len(messages)} messages")
+        return self.client.chat.completions.create(**params)
+
+    def _get_function_schema(self) -> List[Dict[str, Any]]:
+
+        return [{
+            "name": "tool",
+            "description": "A general purpose tool that can perform actions",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "The tool name to call"
+                    },
+                    "action_input": {
+                        "type": "object",
+                        "description": "The parameters for the tool"
+                    },
+                    "thinking": {
+                        "type": "string",
+                        "description": "Reasoning about the tool call"
+                    }
+                },
+                "required": ["action", "action_input"]
+            }
+        }]
+
+    def extract_response_content(self, message) -> str:
+
+        try:
+
+            response_text = super().extract_response_content(message)
+
+
+            if hasattr(message, 'choices') and message.choices and len(message.choices) > 0:
+                choice = message.choices[0]
+                if hasattr(choice, 'message') and hasattr(choice.message, 'function_call'):
+                    function_call = choice.message.function_call
+
+                    function_data = {
+                        "action": function_call.name,
+                        "action_input": json.loads(function_call.arguments),
+                        "response": response_text
+                    }
+                    return json.dumps(function_data)
+
+            return response_text
+
+        except Exception as e:
+            logger.error(f"Error extracting DeepSeek response content: {e}")
+            return f"Error parsing response: {e}"

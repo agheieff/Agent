@@ -1,7 +1,7 @@
 import os
 import pytest
 import tempfile
-from Tools.File.edit import tool_edit, _ensure_absolute_path
+from Tools.File.edit import tool_edit, _ensure_absolute_path, EXAMPLES
 
 class TestEditTool:
     @pytest.fixture
@@ -11,6 +11,16 @@ class TestEditTool:
             fname = tmp.name
         yield fname
         os.unlink(fname)
+
+    def test_examples_dict(self):
+
+        assert isinstance(EXAMPLES, dict)
+        assert "file_path" in EXAMPLES
+        assert isinstance(EXAMPLES["file_path"], str)
+        assert "old" in EXAMPLES
+        assert isinstance(EXAMPLES["old"], str)
+        assert "new" in EXAMPLES
+        assert isinstance(EXAMPLES["new"], str)
 
     def test_edit_unique_replacement(self, existing_file):
         result = tool_edit(file_path=existing_file, old="Hello World", new="Hello Universe")

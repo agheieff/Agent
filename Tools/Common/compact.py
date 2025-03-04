@@ -5,42 +5,19 @@ from Prompts.compact import get_compact_prompt
 
 TOOL_NAME = "compact"
 TOOL_DESCRIPTION = "Summarize the conversation so far and replace it with a concise summary"
-TOOL_HELP = """
-Usage:
-  /compact
 
-No additional parameters are required.
 
-Description:
-  Summarizes the entire conversation so far. The tool calls the LLM with a special
-  prompt that requests a concise summary of the conversation. Then it replaces the
-  conversation history with the single summary message.
+EXAMPLES = {}
 
-  This helps to reduce token usage and keep the conversation history manageable.
-"""
-TOOL_EXAMPLES = [
-    ("/compact", "Summarize the entire conversation and replace it with the summary.")
-]
+FORMATTER = "status"
 
 logger = logging.getLogger(__name__)
 
 async def tool_compact(
     conversation_history: List[Dict[str, str]] = None,
     llm: Any = None,
-    help: bool = False,
     **kwargs
 ) -> Dict[str, Any]:
-    if help:
-        example_text = "\nExamples:\n" + "\n".join(
-            [f"  {ex[0]}\n    {ex[1]}" for ex in TOOL_EXAMPLES]
-        )
-        return {
-            "output": f"{TOOL_DESCRIPTION}\n\n{TOOL_HELP}{example_text}",
-            "error": "",
-            "success": True,
-            "exit_code": 0
-        }
-
     if not conversation_history or not isinstance(conversation_history, list):
         return {
             "output": "",
@@ -67,7 +44,8 @@ async def tool_compact(
             "output": "No user or assistant messages to summarize.",
             "error": "",
             "success": True,
-            "exit_code": 0
+            "exit_code": 0,
+            "status": "No messages to compact"
         }
 
     conversation_text = "\n".join(user_and_assistant_messages)
@@ -99,7 +77,9 @@ async def tool_compact(
             "output": "Conversation has been compacted into a summary.",
             "error": "",
             "success": True,
-            "exit_code": 0
+            "exit_code": 0,
+            "status": "Conversation compacted",
+            "summary": summary_text
         }
     except Exception as e:
         logger.exception("Error while summarizing conversation in compact tool")

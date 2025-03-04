@@ -4,18 +4,15 @@ from typing import Dict, Any
 
 TOOL_NAME = "read"
 TOOL_DESCRIPTION = "Read the contents of a text file with optional offset and limit."
-TOOL_HELP = """
-Usage:
-  /read file_path=<path> [offset=<offset>] [limit=<limit>]
 
-Description:
-  Reads the contents of a text file from the specified path.
-  Optional 'offset' and 'limit' parameters can be provided to read a portion of the file.
-"""
-TOOL_EXAMPLES = [
-    ("/read file_path=/etc/hosts", "Reads the entire /etc/hosts file."),
-    ("/read file_path=/var/log/syslog offset=10 limit=20", "Reads 20 lines starting from line 11 of syslog.")
-]
+
+EXAMPLES = {
+    "file_path": "/etc/hosts",
+    "offset": 0,
+    "limit": 2000
+}
+
+FORMATTER = "file_content"
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +48,8 @@ async def tool_read(
             "output": "",
             "error": f"File not found: {abs_path}",
             "success": False,
-            "exit_code": 1
+            "exit_code": 1,
+            "file_path": abs_path
         }
 
     if os.path.isdir(abs_path):
@@ -59,7 +57,8 @@ async def tool_read(
             "output": "",
             "error": f"Path is a directory: {abs_path}",
             "success": False,
-            "exit_code": 1
+            "exit_code": 1,
+            "file_path": abs_path
         }
 
     try:
@@ -80,7 +79,9 @@ async def tool_read(
             "output": f"[Binary file: {abs_path}]",
             "error": "",
             "success": True,
-            "exit_code": 0
+            "exit_code": 0,
+            "file_path": abs_path,
+            "binary": True
         }
 
     content_lines = []
@@ -102,14 +103,17 @@ async def tool_read(
             "output": f"[Binary or non-text file: {abs_path}]",
             "error": "",
             "success": True,
-            "exit_code": 0
+            "exit_code": 0,
+            "file_path": abs_path,
+            "binary": True
         }
     except Exception as e:
         return {
             "output": "",
             "error": f"Error reading file: {str(e)}",
             "success": False,
-            "exit_code": 1
+            "exit_code": 1,
+            "file_path": abs_path
         }
 
     info = f"File: {abs_path}\nStarting from line: {offset+1}\nShowing {len(content_lines)} lines"
@@ -119,9 +123,17 @@ async def tool_read(
     else:
         info += " (complete)\n"
 
+    content = "".join(content_lines)
+
     return {
-        "output": info + "---\n" + "".join(content_lines),
+        "output": info + "---\n" + content,
         "error": "",
         "success": True,
-        "exit_code": 0
+        "exit_code": 0,
+        "file_path": abs_path,
+        "content": content,
+        "truncated": truncated,
+        "binary": False,
+        "line_count": len(content_lines),
+        "offset": offset
     }

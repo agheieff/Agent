@@ -4,17 +4,15 @@ from typing import Dict, Any
 
 TOOL_NAME = "telegram_send"
 TOOL_DESCRIPTION = "Send a message via Telegram to a specified chat_id."
-TOOL_HELP = """
-Usage:
-  /telegram_send message="<message>" [token=<bot token>] [chat_id=<chat id>]
 
-Description:
-  Sends a message via Telegram using the specified bot token and chat id.
-  If token or chat_id are not provided as parameters, the tool attempts to retrieve them from the config or environment.
-"""
-TOOL_EXAMPLES = [
-    ("/telegram_send message='Hello' token=ABC123 chat_id=123456", "Sends 'Hello' using the provided token and chat id.")
-]
+
+EXAMPLES = {
+    "message": "Hello from the agent!",
+    "token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+    "chat_id": "12345678"
+}
+
+FORMATTER = "telegram"
 
 def tool_telegram_send(
     message: str,
@@ -77,7 +75,10 @@ def tool_telegram_send(
             "output": f"Message sent successfully to chat {chat_id}.",
             "error": "",
             "success": True,
-            "exit_code": 0
+            "exit_code": 0,
+            "message": message,
+            "chat_id": chat_id,
+            "sent": True
         }
     except Exception as e:
         return {

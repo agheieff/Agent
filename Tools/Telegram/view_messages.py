@@ -4,18 +4,15 @@ from typing import Dict, Any
 
 TOOL_NAME = "telegram_view"
 TOOL_DESCRIPTION = "View recent messages received by your Telegram bot."
-TOOL_HELP = """
-Usage:
-  /telegram_view [limit=<number>] [offset=<offset>] [token=<bot token>]
 
-Description:
-  Retrieves recent messages for your Telegram bot.
-  The 'limit' parameter controls how many messages to return.
-  Optionally, an offset or bot token can be provided.
-"""
-TOOL_EXAMPLES = [
-    ("/telegram_view limit=5", "Displays the 5 most recent messages.")
-]
+
+EXAMPLES = {
+    "limit": 5,
+    "offset": 0,
+    "token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+}
+
+FORMATTER = "telegram_messages"
 
 def tool_telegram_view(
     limit: int = 5,
@@ -62,11 +59,13 @@ def tool_telegram_view(
                 "output": "No new messages available.",
                 "error": "",
                 "success": True,
-                "exit_code": 0
+                "exit_code": 0,
+                "messages": []
             }
 
         messages = messages[-limit:]
-        lines = []
+        formatted_messages = []
+
         for m in messages:
             update_id = m.get("update_id")
             msg = m.get("message")
@@ -76,14 +75,23 @@ def tool_telegram_view(
                 text = msg.get("text", "")
                 sender_info = msg.get("from", {})
                 sender = sender_info.get("username") or sender_info.get("first_name", "")
-            lines.append(f"update_id={update_id}, from={sender}, text={text}")
 
+            formatted_messages.append({
+                "update_id": update_id,
+                "sender": sender,
+                "text": text,
+                "raw": m
+            })
+
+        lines = [f"update_id={m['update_id']}, from={m['sender']}, text={m['text']}" for m in formatted_messages]
         output_text = "Recent Telegram messages:\n\n" + "\n".join(lines)
+
         return {
             "output": output_text,
             "error": "",
             "success": True,
-            "exit_code": 0
+            "exit_code": 0,
+            "messages": formatted_messages
         }
 
     except Exception as e:

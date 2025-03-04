@@ -4,18 +4,14 @@ from typing import Dict, Any
 
 TOOL_NAME = "bash"
 TOOL_DESCRIPTION = "Execute arbitrary shell (bash) commands, with optional timeout."
-TOOL_HELP = """
-Usage:
-  /bash command="<shell command>" [timeout=<seconds>]
 
-Description:
-  Executes the given shell command using bash.
-  An optional 'timeout' (in seconds) can be provided to limit the execution time.
-"""
-TOOL_EXAMPLES = [
-    ("/bash command='ls -l /tmp'", "Lists the contents of the /tmp directory."),
-    ("/bash command='sleep 5' timeout=3", "Attempts to sleep for 5 seconds but times out after 3 seconds.")
-]
+
+EXAMPLES = {
+    "command": "ls -la /tmp",
+    "timeout": 60
+}
+
+FORMATTER = "command"
 
 async def tool_bash(
     command: str,
@@ -48,7 +44,9 @@ async def tool_bash(
                     "output": "",
                     "error": f"Command timed out after {timeout} seconds",
                     "success": False,
-                    "exit_code": 124
+                    "exit_code": 124,
+                    "command": command,
+                    "timed_out": True
                 }
         else:
             stdout_bytes, stderr_bytes = await process.communicate()
@@ -67,12 +65,16 @@ async def tool_bash(
             "output": output,
             "error": "" if success else stderr_str,
             "success": success,
-            "exit_code": process.returncode
+            "exit_code": process.returncode,
+            "command": command,
+            "stdout": stdout_str,
+            "stderr": stderr_str
         }
     except Exception as e:
         return {
             "output": "",
             "error": f"Error executing bash command: {str(e)}",
             "success": False,
-            "exit_code": 1
+            "exit_code": 1,
+            "command": command
         }

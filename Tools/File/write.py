@@ -4,17 +4,15 @@ from typing import Dict, Any
 
 TOOL_NAME = "write"
 TOOL_DESCRIPTION = "Create a new file with specified content (will not overwrite existing)."
-TOOL_HELP = """
-Usage:
-  /write file_path=<path> content="<file content>" [mkdir=<true|false>]
 
-Description:
-  Creates a new file at the specified path with the given content.
-  The tool will not overwrite an existing file unless explicitly allowed.
-"""
-TOOL_EXAMPLES = [
-    ("/write file_path=/tmp/newfile.txt content='Hello World'", "Creates a new file with 'Hello World'.")
-]
+
+EXAMPLES = {
+    "file_path": "/tmp/newfile.txt",
+    "content": "Hello World",
+    "mkdir": True
+}
+
+FORMATTER = "file_operation"
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +48,9 @@ async def tool_write(
             "output": "",
             "error": f"File already exists: {abs_path}",
             "success": False,
-            "exit_code": 1
+            "exit_code": 1,
+            "file_path": abs_path,
+            "exists": True
         }
 
     parent_dir = os.path.dirname(abs_path)
@@ -63,14 +63,18 @@ async def tool_write(
                     "output": "",
                     "error": f"Error creating parent directory: {str(e)}",
                     "success": False,
-                    "exit_code": 1
+                    "exit_code": 1,
+                    "file_path": abs_path,
+                    "parent_dir": parent_dir
                 }
         else:
             return {
                 "output": "",
                 "error": f"Parent directory does not exist: {parent_dir}",
                 "success": False,
-                "exit_code": 1
+                "exit_code": 1,
+                "file_path": abs_path,
+                "parent_dir": parent_dir
             }
 
     try:
@@ -81,12 +85,17 @@ async def tool_write(
             "output": f"Created file: {abs_path} (size: {file_size} bytes)",
             "error": "",
             "success": True,
-            "exit_code": 0
+            "exit_code": 0,
+            "file_path": abs_path,
+            "file_size": file_size,
+            "content_length": len(content),
+            "created": True
         }
     except Exception as e:
         return {
             "output": "",
             "error": f"Error writing file: {str(e)}",
             "success": False,
-            "exit_code": 1
+            "exit_code": 1,
+            "file_path": abs_path
         }

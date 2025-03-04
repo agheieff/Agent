@@ -4,19 +4,18 @@ import os
 
 TOOL_NAME = "curl"
 TOOL_DESCRIPTION = "Send an HTTP request (GET, POST, etc.), similar to a basic curl."
-TOOL_HELP = """
-Usage:
-  /curl method=<HTTP method> url=<url> [data=<data>] [headers=<header1:value1,header2:value2>] [timeout=<seconds>] [allow_insecure=<true|false>]
 
-Description:
-  Sends an HTTP request using the specified method (GET, POST, etc.) to the given URL.
-  Optional data and headers can be provided. The 'timeout' parameter (in seconds) is optional,
-  and 'allow_insecure' can be set to true to disable SSL verification.
-"""
-TOOL_EXAMPLES = [
-    ("/curl method=GET url=http://example.com", "Sends a GET request to example.com."),
-    ("/curl method=POST url=http://example.com/api data='{\"key\":\"value\"}'", "Sends a POST request with JSON data.")
-]
+
+EXAMPLES = {
+    "method": "GET",
+    "url": "https://example.com",
+    "data": '{"key":"value"}',
+    "headers": "Content-Type:application/json,Accept:application/json",
+    "timeout": 20,
+    "allow_insecure": False
+}
+
+FORMATTER = "http_request"
 
 async def tool_curl(
     method: str = "GET",
@@ -64,7 +63,12 @@ async def tool_curl(
             "output": f"Status: {resp.status_code}\n\n{resp.text}",
             "error": "",
             "success": True,
-            "exit_code": 0
+            "exit_code": 0,
+            "method": method,
+            "url": url,
+            "status_code": resp.status_code,
+            "response_body": resp.text,
+            "response_headers": dict(resp.headers)
         }
     except requests.exceptions.RequestException as e:
         return {

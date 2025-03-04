@@ -1,7 +1,7 @@
 import logging
 import asyncio
 import json
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 from Tools.executor import execute_tool
 from Core.composer import ToolResponseComposer
@@ -14,6 +14,8 @@ except (ImportError, ModuleNotFoundError):
 logger = logging.getLogger(__name__)
 
 class ToolManager:
+
+
     def __init__(self):
         self.composer = ToolResponseComposer()
         self.agent_config: Dict[str, Any] = {}
@@ -21,19 +23,30 @@ class ToolManager:
         self.agent_conversation_history: List[Dict[str, Any]] = []
 
     def set_agent_context(self, config: Dict[str, Any], llm, conversation_ref: List[Dict[str, Any]]):
+
         self.agent_config = config
         self.agent_llm = llm
         self.agent_conversation_history = conversation_ref
 
-    async def process_message_from_calls(self, tool_calls: List[Dict[str, Any]]) -> str:
+    async def process_message_from_calls(
+        self,
+        tool_calls: List[Dict[str, Any]],
+        output_format: str = "text"
+    ) -> str:
 
         if not tool_calls:
             return ""
 
         results = []
         for call in tool_calls:
-            tool_name = call.get("name")
-            params = call.get("params", {})
+
+            if isinstance(call, dict) and "name" in call:
+                tool_name = call.get("name")
+                params = call.get("params", {})
+                is_help = call.get("help", False)
+            else:
+
+                tool_name, params, is_help = call
 
             logger.info(f"Executing tool: {tool_name} with params: {params}")
 
@@ -54,9 +67,17 @@ class ToolManager:
                 params["config"] = self.agent_config
 
 
+            if is_help:
+                params["help"] = True
+
+
             tool_result = await execute_tool(tool_name, params)
             results.append((tool_name, params, tool_result))
 
 
-        summary = self.composer.compose_response(results)
+        if output_format == "json":
+            summary = self.composer.compose_response(results, format_name="json")
+        else:
+            summary = self.composer.compose_response(results, format_name="text")
+
         return summary

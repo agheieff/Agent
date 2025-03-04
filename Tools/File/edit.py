@@ -3,17 +3,14 @@ from typing import Dict, Any
 
 TOOL_NAME = "edit"
 TOOL_DESCRIPTION = "Edit a file by replacing a unique occurrence of `old` with `new`."
-TOOL_HELP = """
-Usage:
-  /edit file_path=<path> old="<old text>" new="<new text>"
 
-Description:
-  Edits the specified file by replacing a single, unique occurrence of the text provided in 'old'
-  with the text provided in 'new'. If the target string is not found or appears multiple times, an error is returned.
-"""
-TOOL_EXAMPLES = [
-    ("/edit file_path=/tmp/config.txt old='version=1.0' new='version=2.0'", "Updates version number in the configuration file.")
-]
+EXAMPLES = {
+    "file_path": "/tmp/config.txt",
+    "old": "version=1.0",
+    "new": "version=2.0"
+}
+
+FORMATTER = "file_operation"
 
 def _ensure_absolute_path(path: str) -> str:
     if not os.path.isabs(path):
@@ -51,9 +48,21 @@ def tool_edit(
     abs_path = _ensure_absolute_path(file_path)
     if not os.path.exists(abs_path):
         if old == "":
+
             parent_dir = os.path.dirname(abs_path)
             if parent_dir and not os.path.exists(parent_dir):
-                os.makedirs(parent_dir, exist_ok=True)
+                try:
+                    os.makedirs(parent_dir, exist_ok=True)
+                except Exception as e:
+                    return {
+                        "output": "",
+                        "error": f"Error creating parent directory: {str(e)}",
+                        "success": False,
+                        "exit_code": 1,
+                        "file_path": abs_path,
+                        "action": "create",
+                        "parent_dir": parent_dir
+                    }
             try:
                 with open(abs_path, 'w', encoding='utf-8') as f:
                     f.write(new)
@@ -61,21 +70,28 @@ def tool_edit(
                     "output": f"Created new file: {abs_path}",
                     "error": "",
                     "success": True,
-                    "exit_code": 0
+                    "exit_code": 0,
+                    "file_path": abs_path,
+                    "action": "create",
+                    "file_size": len(new),
+                    "created": True
                 }
             except Exception as e:
                 return {
                     "output": "",
                     "error": f"Error creating new file: {str(e)}",
                     "success": False,
-                    "exit_code": 1
+                    "exit_code": 1,
+                    "file_path": abs_path,
+                    "action": "create"
                 }
         else:
             return {
                 "output": "",
                 "error": f"File not found: {abs_path}",
                 "success": False,
-                "exit_code": 1
+                "exit_code": 1,
+                "file_path": abs_path
             }
 
     try:
@@ -86,7 +102,8 @@ def tool_edit(
             "output": "",
             "error": f"Error reading file: {str(e)}",
             "success": False,
-            "exit_code": 1
+            "exit_code": 1,
+            "file_path": abs_path
         }
 
     occurrences = content.count(old)
@@ -95,14 +112,20 @@ def tool_edit(
             "output": "",
             "error": f"Target string not found in {abs_path}",
             "success": False,
-            "exit_code": 1
+            "exit_code": 1,
+            "file_path": abs_path,
+            "action": "edit",
+            "occurrences": 0
         }
     if occurrences > 1:
         return {
             "output": "",
             "error": f"Target string appears {occurrences} times in {abs_path}. Must be unique.",
             "success": False,
-            "exit_code": 1
+            "exit_code": 1,
+            "file_path": abs_path,
+            "action": "edit",
+            "occurrences": occurrences
         }
 
     new_content = content.replace(old, new, 1)
@@ -113,12 +136,19 @@ def tool_edit(
             "output": f"Successfully edited file: {abs_path}",
             "error": "",
             "success": True,
-            "exit_code": 0
+            "exit_code": 0,
+            "file_path": abs_path,
+            "action": "edit",
+            "original_length": len(content),
+            "new_length": len(new_content),
+            "edited": True
         }
     except Exception as e:
         return {
             "output": "",
             "error": f"Error writing updated file: {str(e)}",
             "success": False,
-            "exit_code": 1
+            "exit_code": 1,
+            "file_path": abs_path,
+            "action": "edit"
         }

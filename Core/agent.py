@@ -2,16 +2,19 @@ from datetime import datetime
 import asyncio
 import logging
 import uuid
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 
 from Clients import get_llm_client
 from Output.output_manager import OutputManager
 from Core.parser import ToolParser
+from Core.composer import ToolResponseComposer
 from Tools.manager import ToolManager
 
 logger = logging.getLogger(__name__)
 
 class ToolResult:
+
+
     def __init__(self, output: str, success: bool, error: str = None):
         self.output = output
         self.success = success
@@ -27,6 +30,8 @@ class ToolResult:
         }
 
 class AutonomousAgent:
+
+
     def __init__(
         self,
         api_key: str = "",
@@ -38,11 +43,17 @@ class AutonomousAgent:
         if not api_key:
             raise ValueError("API key required")
 
+
         self.api_key = api_key
         self.model_name = model
         self.provider = provider.lower()
         self.test_mode = test_mode
         self.config = config or {}
+
+
+        self.default_input_format = self.config.get("format", {}).get("input", "auto")
+        self.default_output_format = self.config.get("format", {}).get("output", "text")
+
 
         self.agent_id = str(uuid.uuid4())[:8]
         self.agent_state = {
@@ -54,16 +65,24 @@ class AutonomousAgent:
             'last_error': None,
             'current_task': None,
         }
+
+
         self.llm = get_llm_client(self.provider, self.api_key, model=self.model_name)
         self.should_exit = False
-
         self.local_conversation_history: List[Dict[str, str]] = []
+        self.tool_parser = ToolParser()
         self.tool_manager = ToolManager()
+        self.response_composer = ToolResponseComposer()
         self.display_manager = OutputManager()
+
+
+        if self.default_output_format in self.response_composer.composers:
+            self.response_composer.set_default_format(self.default_output_format)
 
         self.agent_state['status'] = 'ready'
 
     async def run(self, initial_prompt: str, system_prompt: str = ""):
+
         try:
             self.agent_state['status'] = 'running'
 
@@ -101,7 +120,8 @@ class AutonomousAgent:
             self.agent_state['last_error'] = str(e)
             raise
 
-    async def _generate_response(self, system_prompt: Optional[str], user_input: str) -> str:
+    async def _generate_response(self, system_prompt: Optional[str], user_input: str) -> Union[str, Dict[str, Any]]:
+
         try:
             if system_prompt is not None:
                 self.local_conversation_history = [
@@ -114,9 +134,18 @@ class AutonomousAgent:
                 )
 
             response = await self.llm.generate_response(self.local_conversation_history)
-            self.local_conversation_history.append(
-                {"role": "assistant", "content": response or ""}
-            )
+
+
+            if isinstance(response, dict):
+                content = response.get("answer", "") or response.get("content", "")
+                self.local_conversation_history.append(
+                    {"role": "assistant", "content": content or ""}
+                )
+            else:
+                self.local_conversation_history.append(
+                    {"role": "assistant", "content": response or ""}
+                )
+
             logger.debug(f"LLM response: {response}")
 
             self.agent_state['last_active'] = datetime.now().isoformat()
@@ -127,17 +156,26 @@ class AutonomousAgent:
             self.local_conversation_history.append({"role": "assistant", "content": error_message})
             return error_message
 
-    async def _process_response(self, response: str) -> bool:
-        if not response.strip():
-            return True
+    async def _process_response(self, response) -> bool:
 
 
-        parsed = ToolParser.parse_message(response)
+        if isinstance(response, str):
+            if not response.strip():
+                return True
+            parsed = self.tool_parser.parse_message(response)
+        else:
+
+            parsed = response
 
 
         thinking = parsed.get("thinking", "")
         if thinking:
             print(f"[Agent Thinking]: {thinking}")
+
+
+        analysis = parsed.get("analysis", "")
+        if analysis:
+            print(f"[Agent Analysis]: {analysis}")
 
 
         final_answer = parsed.get("answer", "")
@@ -147,9 +185,14 @@ class AutonomousAgent:
 
         tool_calls = parsed.get("tool_calls", [])
         if tool_calls:
-            result_str = await self.tool_manager.process_message_from_calls(tool_calls)
+
+            result_str = await self.tool_manager.process_message_from_calls(
+                tool_calls,
+                output_format=self.default_output_format
+            )
             if result_str:
                 self.local_conversation_history.append({"role": "user", "content": result_str})
+
 
         if "[EXIT]" in final_answer:
             return False
@@ -157,6 +200,7 @@ class AutonomousAgent:
         return True
 
     async def _get_user_input(self) -> str:
+
         self.agent_state['status'] = 'waiting_for_input'
         prompt = "\n[User Input] > "
         print(prompt, end="", flush=True)

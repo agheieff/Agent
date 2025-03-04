@@ -2,9 +2,8 @@ import os
 import pytest
 import tempfile
 import asyncio
-from Tools.File.read import tool_read, _is_binary_file, _ensure_absolute_path
+from Tools.File.read import tool_read, _is_binary_file, _ensure_absolute_path, EXAMPLES
 
-@pytest.mark.asyncio
 class TestReadTool:
     @pytest.fixture
     def text_file(self):
@@ -22,6 +21,16 @@ class TestReadTool:
             file_name = tmp.name
         yield file_name
         os.unlink(file_name)
+
+    def test_examples_dict(self):
+
+        assert isinstance(EXAMPLES, dict)
+        assert "file_path" in EXAMPLES
+        assert isinstance(EXAMPLES["file_path"], str)
+        assert "offset" in EXAMPLES
+        assert isinstance(EXAMPLES["offset"], int)
+        assert "limit" in EXAMPLES
+        assert isinstance(EXAMPLES["limit"], int)
 
     @pytest.mark.asyncio
     async def test_read_file_success(self, text_file):

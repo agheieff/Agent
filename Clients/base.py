@@ -134,9 +134,9 @@ class BaseLLMClient(ABC):
 
 
         return None
-        
+
     def get_available_models(self) -> List[str]:
-        """Returns a list of available model names for this client."""
+
         return list(self.models.keys())
 
     def add_usage(self, usage: TokenUsage):
@@ -320,8 +320,8 @@ class BaseLLMClient(ABC):
         )
 
         self.add_usage(token_usage)
-        
-        # Output the API usage information via the output manager
+
+
         usage_output = {
             "success": True,
             "formatter": "api_usage",
@@ -333,7 +333,7 @@ class BaseLLMClient(ABC):
                 output_manager.handle_tool_output("api_usage", usage_output)
             )
         except RuntimeError:
-            # In case we're not in an event loop
+
             pass
 
     async def generate_response(self, conversation_history: List[Dict]) -> str:

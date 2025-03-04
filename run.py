@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 INITIAL_PROMPT_HISTORY_FILE = '~/.agent_prompt_history'
 CONTEXT_HISTORY_FILE = '~/.agent_context_history'
 
-# Define the mapping of provider to env prefix
+
 PROVIDER_ENV_PREFIXES = {
     "anthropic": "ANTHROPIC",
     "deepseek": "DEEPSEEK",
@@ -106,39 +106,39 @@ def get_initial_prompt() -> str:
 
 def get_available_model_providers() -> Dict[str, Dict[str, List[str]]]:
     available_providers = {}
-    
-    # Import dynamically only when needed to avoid circular imports
+
+
     import importlib
-    
-    # Check each provider
+
+
     for provider, env_prefix in PROVIDER_ENV_PREFIXES.items():
         api_key = os.getenv(f"{env_prefix}_API_KEY", "")
         if not api_key.strip():
             continue
-            
-        # Create a temporary client to get available models
+
+
         try:
-            # Dynamically import the client module
+
             module_name = f"Clients.{provider}"
             module = importlib.import_module(module_name)
-            
-            # Get the client class - by convention it's ProviderClient (e.g., AnthropicClient)
+
+
             client_class_name = f"{provider.capitalize()}Client"
             client_class = getattr(module, client_class_name)
-            
-            # Create an instance of the client
+
+
             client = client_class(api_key)
-            
-            # Get available models from the client
+
+
             models = client.get_available_models()
-            
+
             available_providers[provider] = {
                 "env_prefix": env_prefix,
                 "models": models
             }
         except Exception as e:
             logger.warning(f"Error getting models for {provider}: {str(e)}")
-            
+
     return available_providers
 
 def get_model_choice(available_providers: Dict[str, Dict[str, List[str]]]) -> Dict[str, str]:
@@ -222,7 +222,7 @@ async def main():
             sys.exit(1)
         provider = args.provider
         if args.model:
-            # Check if the specified model exists in the provider
+
             if args.model in available_providers[provider]["models"]:
                 model = args.model
             else:
@@ -246,8 +246,8 @@ async def main():
                 guess_provider = list(available_providers.keys())[0]
                 print(f"Warning: Model {args.model} not found in any provider. Using provider: {guess_provider}")
             provider = guess_provider
-            
-            # If the model isn't in the chosen provider, use the default model
+
+
             if args.model in available_providers[provider]["models"]:
                 model = args.model
             else:
@@ -258,7 +258,7 @@ async def main():
             provider = chosen["provider"]
             model = chosen["model"]
 
-    # Get the environment prefix for the provider
+
     env_prefix = PROVIDER_ENV_PREFIXES.get(provider, provider.upper())
     api_key = os.getenv(f"{env_prefix}_API_KEY", "")
     if not api_key:

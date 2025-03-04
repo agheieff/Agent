@@ -1,196 +1,42 @@
-"""
-Additional format handlers for the agent.
-
-This module contains implementations for various format handlers
-that can be plugged into the parser and composer components.
-"""
 
 import logging
 import json
-import xml.dom.minidom
-import xml.etree.ElementTree as ET
 import re
 from typing import List, Dict, Any, Tuple, Optional
-from xml.sax.saxutils import escape as xml_escape
 
 from Core.parser import FormatParser
 from Core.composer import FormatComposer
 
 logger = logging.getLogger(__name__)
 
-class XMLFormatParser(FormatParser):
-
-
-    def can_parse(self, message: str) -> bool:
-
-        message = message.strip()
-        return message.startswith('<') and message.endswith('>')
-
-    def parse(self, message: str) -> Dict[str, Any]:
-
-        try:
-
-            root = ET.fromstring(message.strip())
-
-
-            if root.tag != 'agent_response':
-                logger.warning(f"XML root element is not 'agent_response', found '{root.tag}'")
-
-
-            thinking_elem = root.find('thinking')
-            thinking = thinking_elem.text if thinking_elem is not None else ""
-
-            analysis_elem = root.find('analysis')
-            analysis = analysis_elem.text if analysis_elem is not None else ""
-
-            answer_elem = root.find('answer')
-            answer = answer_elem.text if answer_elem is not None else ""
-
-
-            tool_calls = []
-            tools_elem = root.find('tool_calls')
-
-            if tools_elem is not None:
-                for tool_elem in tools_elem.findall('tool'):
-                    name = tool_elem.get('name', '')
-                    is_help = tool_elem.get('help', 'false').lower() == 'true'
-
-
-                    params = {}
-                    params_elem = tool_elem.find('params')
-                    if params_elem is not None:
-                        for param in params_elem.findall('param'):
-                            param_name = param.get('name', '')
-                            param_value = param.text or ''
-                            if param_name:
-                                params[param_name] = param_value
-
-                    tool_calls.append({
-                        "name": name,
-                        "params": params,
-                        "help": is_help
-                    })
-
-            return {
-                "thinking": thinking,
-                "analysis": analysis,
-                "tool_calls": tool_calls,
-                "answer": answer
-            }
-
-        except ET.ParseError as e:
-            logger.error(f"Failed to parse XML: {e}")
-        except Exception as ex:
-            logger.error(f"Unexpected error parsing XML: {ex}")
-
-
-        return {
-            "thinking": "",
-            "analysis": "",
-            "tool_calls": [],
-            "answer": message
-        }
-
-class XMLFormatComposer(FormatComposer):
-
-
-    def format_tool_result(self, tool_name: str, params: Dict[str, Any], result: Dict[str, Any]) -> str:
-
-        root = ET.Element('tool_result')
-
-
-        name_elem = ET.SubElement(root, 'name')
-        name_elem.text = tool_name
-
-
-        params_elem = ET.SubElement(root, 'params')
-        for key, value in params.items():
-            param = ET.SubElement(params_elem, 'param', {'name': key})
-            if isinstance(value, str):
-                param.text = value
-            else:
-                param.text = str(value)
-
-
-        status_elem = ET.SubElement(root, 'status')
-        success = result.get("success", False)
-        status_elem.text = 'success' if success else 'failure'
-
-
-        error = result.get("error", "")
-        if error:
-            error_elem = ET.SubElement(root, 'error')
-            error_elem.text = error
-
-
-        output = result.get("output", "")
-        if output:
-            output_elem = ET.SubElement(root, 'output')
-            output_elem.text = output
-
-
-        exit_code = result.get("exit_code", 1 if not success else 0)
-        exit_code_elem = ET.SubElement(root, 'exit_code')
-        exit_code_elem.text = str(exit_code)
-
-
-        xml_str = ET.tostring(root, encoding='unicode')
-        dom = xml.dom.minidom.parseString(xml_str)
-        return dom.toprettyxml(indent="  ")
-
-    def compose_response(self, tool_results: List[Tuple[str, Dict[str, Any], Dict[str, Any]]]) -> str:
-
-        root = ET.Element('tool_results')
-
-        if not tool_results:
-            message = ET.SubElement(root, 'message')
-            message.text = "No tools were executed."
-
-            xml_str = ET.tostring(root, encoding='unicode')
-            dom = xml.dom.minidom.parseString(xml_str)
-            return dom.toprettyxml(indent="  ")
-
-
-        for tool_name, params, result in tool_results:
-
-            result_xml = self.format_tool_result(tool_name, params, result)
-
-
-            result_elem = ET.fromstring(result_xml)
-            root.append(result_elem)
-
-
-        message = ET.SubElement(root, 'message')
-        message.text = "Tool execution complete."
-
-
-        xml_str = ET.tostring(root, encoding='unicode')
-        dom = xml.dom.minidom.parseString(xml_str)
-        return dom.toprettyxml(indent="  ")
-
 class AnthropicToolsParser(FormatParser):
-
-
     def can_parse(self, message: str) -> bool:
-
-
+        """Check if the message is in Claude's tool use format"""
         if not isinstance(message, str):
             return False
-
-
-        return bool(re.search(r'tool_use\s*:\s*{', message, re.DOTALL))
+            
+        # Look for tool_use format
+        tool_use_pattern = r'<tool_use>|tool_use\s*:'
+        return bool(re.search(tool_use_pattern, message, re.DOTALL))
 
     def parse(self, message: str) -> Dict[str, Any]:
-
+        """Parse a message in Claude's tool use format"""
         try:
             tool_calls = []
-
-
-            tool_use_pattern = r'tool_use\s*:\s*(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})'
-            matches = re.finditer(tool_use_pattern, message, re.DOTALL)
-
-            for match in matches:
-                tool_json_str = match.group(1)
+            thinking = ""
+            analysis = ""
+            answer = ""
+            
+            # Extract answer if present
+            answer_match = re.search(r'<answer>(.*?)</answer>', message, re.DOTALL)
+            if answer_match:
+                answer = answer_match.group(1).strip()
+            
+            # Try both the XML-like patterns
+            # First, the tag-based pattern 
+            tool_use_match = re.search(r'<tool_use>(.*?)</tool_use>', message, re.DOTALL)
+            if tool_use_match:
+                tool_json_str = tool_use_match.group(1).strip()
                 try:
                     tool_data = json.loads(tool_json_str)
                     if "name" in tool_data:
@@ -201,13 +47,40 @@ class AnthropicToolsParser(FormatParser):
                         })
                 except json.JSONDecodeError:
                     logger.warning(f"Failed to parse tool use JSON: {tool_json_str}")
+            
+            # Try the colon-based pattern
+            tool_use_pattern = r'tool_use\s*:\s*(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})'
+            matches = re.finditer(tool_use_pattern, message, re.DOTALL)
+            for match in matches:
+                tool_json_str = match.group(1)
+                try:
+                    tool_data = json.loads(tool_json_str)
+                    if "name" in tool_data:
+                        # Only add if not already added from the tag version
+                        if not tool_calls or tool_calls[0]["name"] != tool_data.get("name", ""):
+                            tool_calls.append({
+                                "name": tool_data.get("name", ""),
+                                "params": tool_data.get("input", {}),
+                                "help": False
+                            })
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse tool use JSON: {tool_json_str}")
 
+            # If no tools found and we have an answer, use the message tool
+            if not tool_calls and answer:
+                tool_calls.append({
+                    "name": "message",
+                    "params": {"text": answer},
+                    "help": False
+                })
+                # Clear the answer since we're converting it to a message tool
+                answer = ""
 
             return {
-                "thinking": "",
-                "analysis": "",
+                "thinking": thinking,
+                "analysis": analysis,
                 "tool_calls": tool_calls,
-                "answer": ""
+                "answer": answer
             }
 
         except Exception as e:
@@ -220,17 +93,31 @@ class AnthropicToolsParser(FormatParser):
             }
 
 class DeepseekToolsParser(FormatParser):
-
+    """
+    Parser for DeepSeek's JSON format.
+    
+    DeepSeek's format typically looks like:
+    {
+      "thinking": "...",
+      "reasoning": "...",
+      "action": "tool_name",
+      "action_input": {
+        "param1": "value1"
+      },
+      "response": "..."
+    }
+    """
 
     def can_parse(self, message: str) -> bool:
-
+        """Check if the message is in DeepSeek's JSON format"""
         try:
             if not isinstance(message, str):
                 return False
 
-
+            # Try to parse as JSON
             data = json.loads(message.strip())
 
+            # Check if it's a dict with at least "action" key
             return (isinstance(data, dict) and
                     "action" in data and
                     (("action_input" in data) or ("parameters" in data)))
@@ -238,26 +125,30 @@ class DeepseekToolsParser(FormatParser):
             return False
 
     def parse(self, message: str) -> Dict[str, Any]:
-
+        """Parse a message in DeepSeek's JSON format"""
         try:
             data = json.loads(message.strip())
 
-
+            # Get the tool name
             tool_name = data.get("action", "")
 
-
+            # Get parameters (DeepSeek might use "action_input" or "parameters")
             params = data.get("action_input", {})
             if not params and "parameters" in data:
                 params = data.get("parameters", {})
 
-
+            # If params is a string, try to parse it as JSON
             if isinstance(params, str):
                 try:
                     params = json.loads(params)
                 except json.JSONDecodeError:
-
+                    # If it's not valid JSON, treat it as a single value
                     params = {"value": params}
 
+            # If no tool is specified but there is a response, use the message tool
+            if not tool_name and "response" in data:
+                tool_name = "message"
+                params = {"text": data.get("response", "")}
 
             return {
                 "thinking": data.get("thinking", ""),
@@ -278,3 +169,179 @@ class DeepseekToolsParser(FormatParser):
                 "tool_calls": [],
                 "answer": message
             }
+
+class OpenAIToolsParser(FormatParser):
+    """
+    Parser for OpenAI's JSON format.
+    
+    OpenAI's format typically looks like:
+    {
+      "thinking": "...",
+      "analysis": "...",
+      "tool_calls": [{
+        "name": "tool_name",
+        "params": {
+          "param1": "value1"
+        }
+      }],
+      "answer": "..."
+    }
+    """
+
+    def can_parse(self, message: str) -> bool:
+        """Check if the message is in OpenAI's JSON format"""
+        try:
+            if not isinstance(message, str):
+                return False
+
+            # Try to parse as JSON
+            data = json.loads(message.strip())
+
+            # Check if it has the expected structure
+            return (isinstance(data, dict) and
+                    ("tool_calls" in data or 
+                     "function_call" in data or
+                     "function_calls" in data))
+        except (json.JSONDecodeError, AttributeError):
+            return False
+
+    def parse(self, message: str) -> Dict[str, Any]:
+        """Parse a message in OpenAI's JSON format"""
+        try:
+            data = json.loads(message.strip())
+            
+            # Initialize the structure
+            parsed = {
+                "thinking": data.get("thinking", ""),
+                "analysis": data.get("analysis", ""),
+                "tool_calls": [],
+                "answer": data.get("answer", "")
+            }
+            
+            # Handle tool_calls
+            if "tool_calls" in data and isinstance(data["tool_calls"], list):
+                parsed["tool_calls"] = data["tool_calls"]
+            
+            # Handle function_call (OpenAI native format)
+            elif "function_call" in data:
+                function_call = data["function_call"]
+                name = function_call.get("name", "")
+                arguments = function_call.get("arguments", "{}")
+                
+                try:
+                    args = json.loads(arguments)
+                except json.JSONDecodeError:
+                    args = {"value": arguments}
+                    
+                if name:
+                    parsed["tool_calls"].append({
+                        "name": name,
+                        "params": args,
+                        "help": False
+                    })
+            
+            # Handle function_calls (plural) if present
+            elif "function_calls" in data and isinstance(data["function_calls"], list):
+                for func_call in data["function_calls"]:
+                    name = func_call.get("name", "")
+                    arguments = func_call.get("arguments", "{}")
+                    
+                    try:
+                        args = json.loads(arguments)
+                    except json.JSONDecodeError:
+                        args = {"value": arguments}
+                        
+                    if name:
+                        parsed["tool_calls"].append({
+                            "name": name,
+                            "params": args,
+                            "help": False
+                        })
+            
+            # If no tool calls found but there's an answer, convert to message
+            if not parsed["tool_calls"] and parsed["answer"]:
+                parsed["tool_calls"].append({
+                    "name": "message",
+                    "params": {"text": parsed["answer"]},
+                    "help": False
+                })
+                parsed["answer"] = ""
+                
+            return parsed
+
+        except Exception as e:
+            logger.error(f"Error parsing OpenAI JSON format: {e}")
+            return {
+                "thinking": "",
+                "analysis": "",
+                "tool_calls": [],
+                "answer": message
+            }
+
+class JSONFormatParser(FormatParser):
+    """
+    Generic JSON format parser.
+    
+    Parses standard JSON format:
+    {
+      "thinking": "...",
+      "analysis": "...",
+      "tool_calls": [{
+        "name": "tool_name",
+        "params": {
+          "param1": "value1"
+        }
+      }],
+      "answer": "..."
+    }
+    """
+
+    def can_parse(self, message: str) -> bool:
+        """Check if the message is in JSON format"""
+        message = message.strip()
+        return (message.startswith('{') and message.endswith('}')) or \
+               (message.startswith('[') and message.endswith(']'))
+
+    def parse(self, message: str) -> Dict[str, Any]:
+        """Parse a message in JSON format"""
+        try:
+            data = json.loads(message.strip())
+
+            if not isinstance(data, dict):
+                raise ValueError("Top-level JSON must be an object.")
+
+            parsed = {
+                "thinking": data.get("thinking", ""),
+                "analysis": data.get("analysis", ""),
+                "tool_calls": data.get("tool_calls", []),
+                "answer": data.get("answer", "")
+            }
+
+            # Validate tool_calls is a list
+            if not isinstance(parsed["tool_calls"], list):
+                logger.warning("tool_calls is not a list; forcing it to be an empty list.")
+                parsed["tool_calls"] = []
+                
+            # If no tool calls but there's an answer, convert to message tool
+            if not parsed["tool_calls"] and parsed["answer"]:
+                parsed["tool_calls"].append({
+                    "name": "message",
+                    "params": {"text": parsed["answer"]},
+                    "help": False
+                })
+                parsed["answer"] = ""
+
+            return parsed
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON from model response: {e}")
+        except Exception as ex:
+            logger.error(f"Unexpected error parsing JSON response: {ex}")
+
+        # Return default structure if parsing fails
+        return {
+            "thinking": "",
+            "analysis": "",
+            "tool_calls": [],
+            "answer": message
+        }

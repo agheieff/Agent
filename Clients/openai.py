@@ -91,38 +91,14 @@ class OpenAIClient(BaseLLMClient):
             "max_tokens": max_tokens,
             "temperature": temperature
         }
-
-        if tool_usage:
-            tools = [{
-                "type": "function",
-                "function": {
-                    "name": "execute_tool",
-                    "description": "Execute a tool with the given parameters",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "The name of the tool to execute"
-                            },
-                            "input": {
-                                "type": "object",
-                                "description": "The input parameters for the tool"
-                            }
-                        },
-                        "required": ["name", "input"]
-                    }
-                }
-            }]
-            params["tools"] = tools
-            params["tool_choice"] = "auto"
-
         logger.debug(f"Sending request to OpenAI with {len(messages)} messages")
         return self.client.chat.completions.create(**params)
 
     def extract_response_content(self, message) -> str:
         try:
+            # Get the basic response text using the common base functionality.
             response_text = super().extract_response_content(message)
+            # Check for tool calls in OpenAI's structure.
             if (hasattr(message, 'choices') and message.choices and len(message.choices) > 0 and
                 hasattr(message.choices[0], 'message')):
                 choice = message.choices[0]

@@ -15,9 +15,7 @@ class AnthropicClient(BaseLLMClient):
         if not api_key:
             logger.error("Empty API key provided for Anthropic client")
             raise ValueError("API key cannot be empty")
-
         try:
-
             self.client = anthropic.Client(api_key=api_key)
             logger.info("Anthropic client initialized successfully")
         except Exception as e:
@@ -52,27 +50,16 @@ class AnthropicClient(BaseLLMClient):
         if not hasattr(self, 'client'):
             raise ValueError("Anthropic client not initialized")
 
-
         prompt_text = self._convert_messages_to_prompt(messages)
-
-
         params = {
             "prompt": prompt_text,
             "model": model_name,
             "max_tokens_to_sample": max_tokens,
             "temperature": temperature
         }
-
-
-
-
-
         return self.client.completions.create(**params)
 
     def _convert_messages_to_prompt(self, messages: List[Dict[str, str]]) -> str:
-
-
-
         conversation_text = []
         for m in messages:
             role = m.get("role", "user").lower()

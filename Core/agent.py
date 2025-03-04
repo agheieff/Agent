@@ -1,14 +1,13 @@
 from datetime import datetime
 import asyncio
 import logging
-import os
-import re
 import uuid
-from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 
 from Clients import get_llm_client
 from Output.output_manager import OutputManager
+from Core.parser import ToolParser
+from Tools.manager import ToolManager
 
 logger = logging.getLogger(__name__)
 
@@ -26,46 +25,6 @@ class ToolResult:
             'error': self.error,
             'timestamp': self.timestamp.isoformat()
         }
-
-class ToolExtractor:
-    @staticmethod
-    def extract_tools(response: str) -> List[Tuple[str, Dict[str, str]]]:
-        tools = []
-        tool_pattern = r'/(\w+)\s*\n((?:[^\n]+\n)+)'
-        matches = re.finditer(tool_pattern, response, re.MULTILINE)
-        for match in matches:
-            tool_name = match.group(1)
-            param_block = match.group(2)
-            params = {}
-            param_lines = param_block.strip().split('\n')
-            for line in param_lines:
-                if ':' in line:
-                    key, value = line.split(':', 1)
-                    params[key.strip()] = value.strip()
-            tools.append((tool_name, params))
-        return tools
-
-    @staticmethod
-    def extract_thinking(response: str) -> List[str]:
-        thinking_pattern = r'\[thinking\](.*?)\[/thinking\]'
-        matches = re.finditer(thinking_pattern, response, re.DOTALL)
-        return [match.group(1).strip() for match in matches]
-
-    @staticmethod
-    def extract_planning(response: str) -> List[str]:
-        planning_pattern = r'\[plan\](.*?)\[/plan\]'
-        matches = re.finditer(planning_pattern, response, re.DOTALL)
-        return [match.group(1).strip() for match in matches]
-
-    @staticmethod
-    def is_exit_request(text: str) -> bool:
-        exit_patterns = [r'/exit', r'/quit', r'/bye']
-        for pattern in exit_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                return True
-        return False
-
-from Tools.manager import ToolManager
 
 class AutonomousAgent:
     def __init__(
@@ -95,11 +54,10 @@ class AutonomousAgent:
             'last_error': None,
             'current_task': None,
         }
-        self.llm = get_llm_client(self.provider, self.api_key)
+        self.llm = get_llm_client(self.provider, self.api_key, model=self.model_name)
         self.should_exit = False
-        self.local_conversation_history = []
 
-        self.tool_extractor = ToolExtractor()
+        self.local_conversation_history: List[Dict[str, str]] = []
         self.tool_manager = ToolManager()
         self.display_manager = OutputManager()
 
@@ -108,6 +66,7 @@ class AutonomousAgent:
     async def run(self, initial_prompt: str, system_prompt: str = ""):
         try:
             self.agent_state['status'] = 'running'
+            # Start conversation with system + user messages
             self.local_conversation_history = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": initial_prompt}
@@ -116,126 +75,109 @@ class AutonomousAgent:
             response = await self._generate_response(system_prompt, initial_prompt)
             should_continue = True
 
-
             iteration = 0
-
             while should_continue and not self.should_exit:
                 response_state = await self._process_response(response)
-
-                if isinstance(response_state, dict) and response_state.get("auto_continue"):
-                    response = response_state.get("next_response", "")
-                    should_continue = True
-                else:
-                    should_continue = response_state
-
-
+                # If test mode, break after first iteration
                 iteration += 1
                 if self.test_mode and iteration >= 1:
                     break
 
-                if should_continue and not self.should_exit:
-                    auto_continue = self.config.get("agent", {}).get("autonomous_mode", True)
-                    if auto_continue:
-                        auto_message = "Continue with your plan based on the tool results."
-                        self.local_conversation_history.append({
-                            "role": "user",
-                            "content": auto_message
-                        })
-                        response = await self._generate_response(None, auto_message)
-                    else:
-                        user_input = await self._get_user_input()
-                        if user_input.strip().lower() in ["exit", "quit", "bye"]:
-                            should_continue = False
-                            break
-                        response = await self._generate_response(None, user_input)
+                if response_state == False or self.should_exit:
+                    should_continue = False
+                    break
+
+                # In fully-autonomous mode, continue automatically:
+                auto_continue = self.config.get("agent", {}).get("autonomous_mode", True)
+                if auto_continue and not self.should_exit:
+                    user_followup = "Continue."  # could be "Ok, next step" or some other auto prompt
+                else:
+                    # If not autonomous, ask user for next input:
+                    user_followup = await self._get_user_input()
+                    if user_followup.strip().lower() in ["exit", "quit", "bye"]:
+                        break
+
+                response = await self._generate_response(None, user_followup)
 
             self.agent_state['status'] = 'completed'
 
         except Exception as e:
-            logger.error(f"Error in agent run: {e}")
+            logger.error(f"Error in agent run: {e}", exc_info=True)
             self.agent_state['status'] = 'error'
             self.agent_state['last_error'] = str(e)
             raise
 
     async def _generate_response(self, system_prompt: Optional[str], user_input: str) -> str:
+        """
+        Send conversation history to LLM and get the assistant response.
+        """
         try:
             if system_prompt is not None:
+                # Reset conversation:
                 self.local_conversation_history = [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_input}
                 ]
             else:
-                self.local_conversation_history.append({
-                    "role": "user",
-                    "content": user_input
-                })
+                self.local_conversation_history.append(
+                    {"role": "user", "content": user_input}
+                )
 
             response = await self.llm.generate_response(self.local_conversation_history)
-            self.local_conversation_history.append({
-                "role": "assistant",
-                "content": response
-            })
+            self.local_conversation_history.append(
+                {"role": "assistant", "content": response or ""}
+            )
+            logger.debug(f"LLM response: {response}")
 
-            print(f"\n{response}\n")
             self.agent_state['last_active'] = datetime.now().isoformat()
-
-            return response
+            return response or ""
 
         except Exception as e:
-            logger.error(f"Error generating response: {e}")
-            error_message = f"I encountered an error while generating a response: {str(e)}"
-            self.local_conversation_history.append({
-                "role": "assistant",
-                "content": error_message
-            })
+            logger.error(f"Error generating response: {e}", exc_info=True)
+            error_message = f"Error generating a response: {str(e)}"
+            self.local_conversation_history.append({"role": "assistant", "content": error_message})
             return error_message
 
-    async def _process_response(self, response: str) -> Any:
-        try:
-            verbose_level = self.config.get("output", {}).get("verbose_level", 0)
-
-            if self.tool_extractor.is_exit_request(response):
-                self.should_exit = True
-                return False
-
-            thinking = self.tool_extractor.extract_thinking(response)
-            planning = self.tool_extractor.extract_planning(response)
-
-            if verbose_level >= 2:
-                if thinking:
-                    print(f"[VERBOSE] Extracted {len(thinking)} thinking blocks")
-                if planning:
-                    print(f"[VERBOSE] Extracted {len(planning)} planning blocks")
-
-            tool_response = await self.tool_manager.process_message(response)
-
-            if tool_response:
-                self.agent_state['tools_executed'] += 1
-                if verbose_level >= 1:
-                    print(f"\n[TOOLS] Executed tools and received response")
-                if self.config.get("agent", {}).get("autonomous_mode", True):
-                    self.local_conversation_history.append({
-                        "role": "user",
-                        "content": tool_response
-                    })
-                    new_response = await self._generate_response(None, tool_response)
-                    return {
-                        "auto_continue": True,
-                        "next_response": new_response
-                    }
-
+    async def _process_response(self, response: str) -> bool:
+        """
+        Parse the LLM's response as JSON, execute any tool calls, and store final answer.
+        Return True if we should continue, False to stop.
+        """
+        if not response.strip():
             return True
 
-        except Exception as e:
-            logger.error(f"Error processing response: {e}")
-            return True
+        parsed = ToolParser.parse_message(response)
+
+        # If there's an "answer" field, we can display it:
+        final_answer = parsed.get("answer", "")
+        if final_answer:
+            print(f"\n[Agent Answer]: {final_answer}\n")
+
+        # If there are tool calls, execute them:
+        tool_calls = parsed.get("tool_calls", [])
+        if tool_calls:
+            result_str = await self.tool_manager.process_message_from_calls(tool_calls)
+            # Optionally, we can inject result_str back into conversation or keep it quiet
+            if result_str:
+                # In some designs, we might re-inject the tool results as user content:
+                self.local_conversation_history.append({"role": "user", "content": result_str})
+
+        # Check if the agent wants to exit (some final condition):
+        # e.g. If final_answer includes "goodbye" or something
+        # For demonstration, let's check a special token:
+        if "[EXIT]" in final_answer:
+            return False
+
+        return True
 
     async def _get_user_input(self) -> str:
+        """
+        For non-autonomous mode, request user input from console.
+        """
         self.agent_state['status'] = 'waiting_for_input'
         prompt = "\n[User Input] > "
         print(prompt, end="", flush=True)
         loop = asyncio.get_event_loop()
         user_input = await loop.run_in_executor(None, input)
-        print(f"\n[Input received] Processing...", flush=True)
         self.agent_state['status'] = 'running'
         return user_input

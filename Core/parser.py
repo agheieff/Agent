@@ -1,8 +1,3 @@
-"""
-Parser for extracting JSON tool calls from agent messages.
-"""
-
-import re
 import json
 import logging
 from typing import List, Dict, Any, Tuple, Optional
@@ -10,94 +5,56 @@ from typing import List, Dict, Any, Tuple, Optional
 logger = logging.getLogger(__name__)
 
 class ToolParser:
-    @staticmethod
-    def extract_tool_calls(message: str) -> List[Tuple[str, Dict[str, Any], bool]]:
-\
-\
-\
-\
-\
-\
-\
-\
-
-        tool_calls = []
-
-
-        tool_pattern = r'#tool\s*(\{[^#]*?\})'
-        raw_matches = re.finditer(tool_pattern, message, re.MULTILINE | re.DOTALL)
-
-        for match in raw_matches:
-            try:
-                json_str = match.group(1).strip()
-
-                tool_data = json.loads(json_str)
-
-
-                tool_name = tool_data.get("name", "")
-                params = tool_data.get("params", {})
-                is_help = tool_data.get("help", False)
-
-                if tool_name:
-                    tool_calls.append((tool_name, params, is_help))
-                else:
-                    logger.warning("Tool call missing 'name' field")
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse tool call JSON: {e}")
-                continue
-            except Exception as e:
-                logger.error(f"Unexpected error parsing tool call: {e}")
-                continue
-
-
-        thinking_pattern = r'#thinking\s*(\{[^#]*?\})'
-        thinking_matches = re.finditer(thinking_pattern, message, re.MULTILINE | re.DOTALL)
-
-        for match in thinking_matches:
-            try:
-                json_str = match.group(1).strip()
-
-                json.loads(json_str)
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse thinking JSON: {e}")
-
-        return tool_calls
+    """
+    Parses model responses assuming they return JSON of the form:
+    {
+      "thinking": "...",
+      "analysis": "...",
+      "tool_calls": [
+        { "name": "some_tool", "params": {...} },
+        ...
+      ],
+      "answer": "..."
+    }
+    """
 
     @staticmethod
-    def extract_thinking(message: str) -> List[Dict[str, Any]]:
-\
-\
-\
-\
-\
-\
-\
-\
+    def parse_message(message: str) -> Dict[str, Any]:
+        """
+        Attempt to parse the entire message as JSON. Return a dictionary with
+        "thinking", "analysis", "tool_calls", and "answer".
+        If parsing fails, log an error and return a minimal dict.
+        """
+        try:
+            data = json.loads(message.strip())
+            # Basic structure check:
+            if not isinstance(data, dict):
+                raise ValueError("Top-level JSON must be an object.")
 
-        thinking_sections = []
+            # Ensure the fields we care about exist or are set:
+            parsed = {
+                "thinking": data.get("thinking", ""),
+                "analysis": data.get("analysis", ""),
+                "tool_calls": data.get("tool_calls", []),
+                "answer": data.get("answer", "")
+            }
 
-        thinking_pattern = r'#thinking\s*(\{[^#]*?\})'
-        matches = re.finditer(thinking_pattern, message, re.MULTILINE | re.DOTALL)
+            # Validate "tool_calls" shape:
+            if not isinstance(parsed["tool_calls"], list):
+                logger.warning("tool_calls is not a list; forcing it to be an empty list.")
+                parsed["tool_calls"] = []
 
-        for match in matches:
-            try:
-                json_str = match.group(1).strip()
-                thinking_data = json.loads(json_str)
-                thinking_sections.append(thinking_data)
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse thinking JSON: {e}")
-            except Exception as e:
-                logger.error(f"Unexpected error parsing thinking section: {e}")
+            return parsed
 
-        return thinking_sections
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON from model response: {e}")
+        except Exception as ex:
+            logger.error(f"Unexpected error parsing JSON response: {ex}")
 
-    @staticmethod
-    def is_exit_request(text: str) -> bool:
-\
-\
-
-        exit_patterns = [r'#tool\s*{"name":\s*"exit"}', r'#tool\s*{"name":\s*"quit"}']
-        for pattern in exit_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                return True
-        return False
+        # Fallback if parsing fails:
+        return {
+            "thinking": "",
+            "analysis": "",
+            "tool_calls": [],
+            "answer": message  # fallback to raw message
+        }

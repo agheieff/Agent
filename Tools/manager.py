@@ -1,10 +1,8 @@
 import logging
 import asyncio
 import json
-from typing import List, Dict, Any, Tuple, Optional
-from datetime import datetime
+from typing import List, Dict, Any, Tuple
 
-from Core.parser import ToolParser
 from Tools.executor import execute_tool
 from Core.composer import ToolResponseComposer
 
@@ -17,126 +15,52 @@ logger = logging.getLogger(__name__)
 
 class ToolManager:
     def __init__(self):
-        self.parser = ToolParser()
         self.composer = ToolResponseComposer()
-
-        self.agent_config = None
+        self.agent_config: Dict[str, Any] = {}
         self.agent_llm = None
-        self.agent_conversation_history = None
+        self.agent_conversation_history: List[Dict[str, Any]] = []
 
-    def set_agent_context(self, config: Dict[str, Any], llm, conversation_ref: List[Dict]):
+    def set_agent_context(self, config: Dict[str, Any], llm, conversation_ref: List[Dict[str, Any]]):
         self.agent_config = config
         self.agent_llm = llm
         self.agent_conversation_history = conversation_ref
 
-    async def process_message(self, message: str) -> str:
-\
-\
-\
-
-        tool_calls = self.parser.extract_tool_calls(message)
+    async def process_message_from_calls(self, tool_calls: List[Dict[str, Any]]) -> str:
+        """
+        Accepts an already-parsed list of tool calls. Each call is dict:
+          { "name": "<tool_name>", "params": { ... } }
+        Then executes them in sequence, returning a summary of results.
+        """
         if not tool_calls:
             return ""
 
-
-        thinking_sections = self.parser.extract_thinking(message)
-        if thinking_sections and output_manager:
-            for section in thinking_sections:
-                formatted = json.dumps(section, indent=2)
-                await output_manager.handle_tool_output("thinking", {
-                    "output": formatted,
-                    "success": True,
-                    "error": "",
-                    "exit_code": 0
-                })
-
         results = []
+        for call in tool_calls:
+            tool_name = call.get("name")
+            params = call.get("params", {})
 
-        for tool_name, params, is_help in tool_calls:
-            logger.info(f"Executing tool: {tool_name} with params: {params}, help={is_help}")
+            logger.info(f"Executing tool: {tool_name} with params: {params}")
 
+            # Optionally check config for internet access, etc.:
+            if not self.agent_config.get("agent", {}).get("allow_internet", True):
+                netlike = {"curl", "web_client", "search_engine"}
+                if tool_name in netlike or "url" in params:
+                    results.append((tool_name, params, {
+                        "success": False,
+                        "error": "Internet access disabled",
+                        "output": "",
+                        "exit_code": 1
+                    }))
+                    continue
 
-            if self.agent_config:
-                allow_inet = self.agent_config.get("agent", {}).get("allow_internet", True)
-                if not allow_inet:
-                    net_tools = {"curl", "search_engine", "internet_tool", "web_client"}
-                    if tool_name.lower() in net_tools or "url" in params or "internet" in tool_name.lower():
-                        logger.warning("Internet access is disabled; blocking this tool call.")
-                        result = {
-                            "output": "",
-                            "error": "Internet access is disabled in config. This tool call is blocked.",
-                            "success": False,
-                            "exit_code": 1
-                        }
-                        results.append((tool_name, params, result))
-                        continue
-
-
-            if tool_name.lower() == "compact":
-                params["conversation_history"] = self.agent_conversation_history
-                params["llm"] = self.agent_llm
-
-
+            # Provide config to telegram if needed:
             if tool_name.lower() in ["telegram_send", "telegram_view"]:
                 params["config"] = self.agent_config
 
-
-            if is_help:
-                params["help"] = True
-
-
+            # Actually execute:
             tool_result = await execute_tool(tool_name, params)
-
-
-            if self.agent_llm and hasattr(self.agent_llm, "total_tokens"):
-                used_tokens = self.agent_llm.total_tokens
-                max_tokens = getattr(self.agent_llm, "max_model_tokens", 128000)
-                percent = (used_tokens / max_tokens) * 100.0
-                usage_str = f"[Status: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Used {used_tokens}/{max_tokens} ({percent:.2f}%)]"
-                if tool_result.get("output"):
-                    tool_result["output"] += f"\n\n{usage_str}"
-                else:
-                    tool_result["output"] = usage_str
-
-
-            if output_manager:
-                await output_manager.handle_tool_output(tool_name, tool_result)
-
             results.append((tool_name, params, tool_result))
 
-        if results:
-            return self.composer.compose_response(results)
-        return ""
-
-    async def execute_single_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-
-        result = await execute_tool(tool_name, params)
-
-        if self.agent_llm and hasattr(self.agent_llm, "total_tokens"):
-            used_tokens = self.agent_llm.total_tokens
-            max_tokens = getattr(self.agent_llm, "max_model_tokens", 128000)
-            percent = (used_tokens / max_tokens) * 100.0
-            stamp = f"[Status: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Used {used_tokens}/{max_tokens} ({percent:.2f}%)]"
-            if result.get("output"):
-                result["output"] += f"\n\n{stamp}"
-            else:
-                result["output"] = stamp
-
-        if output_manager:
-            await output_manager.handle_tool_output(tool_name, result)
-
-        return result
-
-    async def execute_tools_concurrently(self, tool_requests: List[Tuple[str, Dict[str, Any]]]) -> List[Tuple[str, Dict[str, Any], Dict[str, Any]]]:
-
-        async def _execute_tool(tn, pm):
-            return await self.execute_single_tool(tn, pm)
-
-        tasks = [_execute_tool(name, params) for name, params in tool_requests]
-        results_raw = await asyncio.gather(*tasks)
-
-        results = []
-        for (tool_name, params), tool_result in zip(tool_requests, results_raw):
-            results.append((tool_name, params, tool_result))
-
-        return results
+        # Compose text summary for them:
+        summary = self.composer.compose_response(results)
+        return summary

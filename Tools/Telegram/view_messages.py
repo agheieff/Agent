@@ -9,19 +9,35 @@ Usage:
   /telegram_view [limit=N]
   /telegram_view token=<BOT_TOKEN> offset=<update_id>
 
-Environment variables:
-  TELEGRAM_BOT_TOKEN - Default bot token (if not overridden by tool params)
+Priority order for token:
+  1. Direct parameter to the tool
+  2. `config["telegram"]["token"]` (if passed in)
+  3. Environment variable TELEGRAM_BOT_TOKEN
 
-Notes:
-  - This uses getUpdates. By default, it will show the last 'limit' messages
-    that the bot has not processed, or that remain in the queue.
-  - You can also supply 'offset' to fetch messages beyond that offset.
+Likewise for chat_id if needed. But typically for getUpdates, chat_id is not required.
 """
+
+TOOL_NAME = "telegram_view"
+TOOL_DESCRIPTION = "View recent messages received by your Telegram bot"
+TOOL_HELP = """
+View recent messages received by your Telegram bot.
+
+Usage:
+  /telegram_view [limit=N] [offset=update_id]
+  /telegram_view token=<BOT_TOKEN> limit=10
+
+You can rely on config['telegram']['token'] or environment variable TELEGRAM_BOT_TOKEN as well.
+"""
+TOOL_EXAMPLES = [
+    ("/telegram_view limit=5", "Show the last 5 updates"),
+    ("/telegram_view token=123:abc offset=100", "Use token 123:abc and show updates after update_id=100"),
+]
 
 def tool_telegram_view(
     limit: int = 5,
     token: str = None,
     offset: int = None,
+    config: Dict[str, Any] = None,
     help: bool = False,
     value: str = None,
     **kwargs
@@ -34,22 +50,19 @@ def tool_telegram_view(
                 "Usage:\n"
                 "  /telegram_view [limit=N] [offset=update_id]\n"
                 "  /telegram_view token=<BOT_TOKEN> limit=10\n\n"
-                "Environment:\n"
-                "  TELEGRAM_BOT_TOKEN for default bot token\n"
+                "You can also rely on config['telegram']['token'] or environment variables.\n"
             ),
             "error": "",
             "success": True,
             "exit_code": 0
         }
 
-    bot_token = token or os.getenv("TELEGRAM_BOT_TOKEN", "")
-    if not bot_token.strip():
-        return {
-            "output": "",
-            "error": "No Telegram bot token provided (env or param).",
-            "success": False,
-            "exit_code": 1
-        }
+
+    if not token or not token.strip():
+        if config:
+            token = config.get("telegram", {}).get("token", "")
+    if not token or not token.strip():
+        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
     if not isinstance(limit, int) and value:
         try:
@@ -60,8 +73,16 @@ def tool_telegram_view(
     if not limit or limit < 1:
         limit = 5
 
+    if not token.strip():
+        return {
+            "output": "",
+            "error": "No Telegram bot token provided (check tool param, config, or TELEGRAM_BOT_TOKEN).",
+            "success": False,
+            "exit_code": 1
+        }
+
     try:
-        url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
+        url = f"https://api.telegram.org/bot{token}/getUpdates"
         params = {}
         if offset is not None:
             params["offset"] = offset

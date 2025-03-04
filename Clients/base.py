@@ -43,11 +43,7 @@ class BaseLLMClient(ABC):
         self.total_tokens = 0
         self.total_cost = 0.0
 
-
-
         self.max_model_tokens = 128000
-
-
 
     def add_usage(self, usage: TokenUsage):
         self.usage_history.append(usage)
@@ -71,7 +67,6 @@ class BaseLLMClient(ABC):
 
     def calculate_token_cost(self, usage: Dict[str, int], model_pricing: Dict[str, float], 
                              cache_hit: bool = False, cache_write: bool = False) -> Dict[str, float]:
-
         if cache_hit and "input_cache_read" in model_pricing:
             prompt_cost = usage["prompt_tokens"] * model_pricing["input_cache_read"]
         elif cache_write and "input_cache_write" in model_pricing:
@@ -123,3 +118,28 @@ class BaseLLMClient(ABC):
 
     def adjust_prompts(self, system_prompt: Optional[str], user_prompt: str) -> Tuple[Optional[str], str]:
         return (system_prompt, user_prompt)
+
+# ----------------------------------------------------------------------------
+# DummyLLMClient for test mode
+# ----------------------------------------------------------------------------
+class DummyLLMClient(BaseLLMClient):
+    async def get_response(
+        self,
+        prompt: str,
+        system: str,
+        conversation_history: List[Dict] = None,
+        temperature: float = 0.5,
+        max_tokens: int = 4096,
+        tool_usage: bool = False,
+        model: Optional[str] = None
+    ) -> Optional[str]:
+        return "Dummy response."
+
+    async def generate_response(self, conversation_history: List[Dict]) -> str:
+        return "Agent session ended."
+
+    async def check_for_user_input_request(self, response: str) -> Tuple[bool, Optional[str]]:
+        return False, None
+
+    def get_model_pricing(self, model: str) -> Dict[str, float]:
+        return {"input": 0.0, "output": 0.0}

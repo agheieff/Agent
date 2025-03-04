@@ -29,7 +29,6 @@ class ToolManager:
         self.agent_conversation_history = conversation_ref
 
     async def process_message(self, message: str) -> str:
-
         tool_calls = self.parser.extract_tool_calls(message)
         if not tool_calls:
             return ""
@@ -61,10 +60,11 @@ class ToolManager:
                 params["llm"] = self.agent_llm
 
 
-            if is_help:
-                tool_result = await execute_tool(tool_name, {"help": True})
-            else:
-                tool_result = await execute_tool(tool_name, params)
+            if tool_name.lower() in ["telegram_send", "telegram_view"]:
+                params["config"] = self.agent_config
+
+
+            tool_result = await execute_tool(tool_name, params)
 
 
             if self.agent_llm and hasattr(self.agent_llm, "total_tokens"):

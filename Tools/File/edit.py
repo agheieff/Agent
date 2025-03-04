@@ -111,7 +111,7 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
     try:
         abs_path = _ensure_absolute_path(file_path)
 
-        # Automatically mark the file as viewed if it exists.
+
         if os.path.exists(abs_path):
             _viewed_files.add(abs_path)
 
@@ -136,7 +136,7 @@ def tool_edit(file_path: str = None, old: str = None, new: str = None,
                 "exit_code": 0
             }
 
-        # (The original confirmation step is skipped because the file is marked as viewed.)
+
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
 

@@ -9,17 +9,10 @@ from typing import List, Dict, Any, Tuple, Optional
 logger = logging.getLogger(__name__)
 
 class ToolParser:
-    """
-    ToolParser provides functionality to extract tool calls from a given message.
-    Each tool call is returned as a tuple containing:
-      - the tool name (str),
-      - a dictionary of parameters (Dict[str, Any]),
-      - a boolean indicating if the help flag was provided.
-    """
     @staticmethod
     def extract_tool_calls(message: str) -> List[Tuple[str, Dict[str, Any], bool]]:
         tool_calls = []
-        # Modified regex: capture any optional arguments non-greedily.
+
         tool_pattern = r'/(\w+)(?:\s+(.*?))?(?:\s*$|\n)'
         matches = re.finditer(tool_pattern, message, re.MULTILINE | re.DOTALL)
         for match in matches:

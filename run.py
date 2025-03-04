@@ -1,6 +1,3 @@
-
-"""Main entry point for the autonomous agent."""
-
 import asyncio
 import os
 import sys
@@ -121,7 +118,7 @@ def get_available_model_providers() -> Dict[str, Dict[str, List[str]]]:
 
 def get_model_choice(available_providers: Dict[str, Dict[str, List[str]]]) -> Dict[str, str]:
     if not available_providers:
-        print("No valid providers found. Please set an API key.")
+        print("No providers found. Please set an API key.")
         sys.exit(1)
     if len(available_providers) == 1:
         only_provider = list(available_providers.keys())[0]
@@ -132,15 +129,18 @@ def get_model_choice(available_providers: Dict[str, Dict[str, List[str]]]) -> Di
         providers = list(available_providers.keys())
         for i, p in enumerate(providers, start=1):
             print(f"{i}. {p} (models: {available_providers[p]['models']})")
-        choice = input("Choose a provider (number): ")
         try:
+            choice = input("Choose a provider (number): ")
             idx = int(choice) - 1
             if idx < 0 or idx >= len(providers):
                 raise ValueError
             chosen_provider = providers[idx]
-        except:
+        except EOFError:
             chosen_provider = providers[0]
-            print(f"Invalid choice. Using default: {chosen_provider}")
+            print(f"\nNo input received. Using default provider: {chosen_provider}")
+        except Exception:
+            chosen_provider = providers[0]
+            print(f"Invalid choice provided. Using default: {chosen_provider}")
 
         provider_models = available_providers[chosen_provider]["models"]
         if len(provider_models) == 1:
@@ -148,15 +148,18 @@ def get_model_choice(available_providers: Dict[str, Dict[str, List[str]]]) -> Di
         else:
             for i, m in enumerate(provider_models, start=1):
                 print(f"{i}. {m}")
-            model_choice = input("Choose a model: ")
             try:
+                model_choice = input("Choose a model: ")
                 midx = int(model_choice) - 1
                 if midx < 0 or midx >= len(provider_models):
                     raise ValueError
                 chosen_model = provider_models[midx]
-            except:
+            except EOFError:
                 chosen_model = provider_models[0]
-                print(f"Invalid choice. Using default: {chosen_model}")
+                print(f"\nNo model input received. Using default model: {chosen_model}")
+            except Exception:
+                chosen_model = provider_models[0]
+                print(f"Invalid model choice provided. Using default: {chosen_model}")
             return {"provider": chosen_provider, "model": chosen_model}
 
 async def main():
@@ -238,7 +241,10 @@ async def main():
 
     from Clients import get_llm_client
     llm = get_llm_client(provider, api_key, model=model)
-
+    # In test mode, override the LLM client with a dummy that avoids real API calls.
+    if config.get("agent.test_mode", False):
+        from Clients.base import DummyLLMClient
+        llm = DummyLLMClient()
 
     system_prompt, user_prompt = llm.adjust_prompts(full_system_prompt, initial_prompt)
 

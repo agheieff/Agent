@@ -1,11 +1,9 @@
+from datetime import datetime
 import asyncio
 import logging
 import os
-import json
 import re
-import time
 import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -87,8 +85,6 @@ class AutonomousAgent:
         self.test_mode = test_mode
         self.config = config or {}
 
-        # Removed memory_manager and session_manager references.
-        # Initialize local state variables only.
         self.agent_id = str(uuid.uuid4())[:8]
         self.agent_state = {
             'started_at': datetime.now().isoformat(),
@@ -120,8 +116,10 @@ class AutonomousAgent:
             response = await self._generate_response(system_prompt, initial_prompt)
             should_continue = True
 
+            # Introduce an iteration counter; in test mode we only do one iteration.
+            iteration = 0
+
             while should_continue and not self.should_exit:
-                # Removed memory-related conversation metrics and session saving.
                 response_state = await self._process_response(response)
 
                 if isinstance(response_state, dict) and response_state.get("auto_continue"):
@@ -129,6 +127,11 @@ class AutonomousAgent:
                     should_continue = True
                 else:
                     should_continue = response_state
+
+                # If running in test mode, only one iteration is performed.
+                iteration += 1
+                if self.test_mode and iteration >= 1:
+                    break
 
                 if should_continue and not self.should_exit:
                     auto_continue = self.config.get("agent", {}).get("autonomous_mode", True)
@@ -187,7 +190,7 @@ class AutonomousAgent:
             })
             return error_message
 
-    async def _process_response(self, response: str) -> bool:
+    async def _process_response(self, response: str) -> Any:
         try:
             verbose_level = self.config.get("output", {}).get("verbose_level", 0)
 

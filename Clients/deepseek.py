@@ -84,8 +84,8 @@ class DeepSeekClient(BaseLLMClient):
             return None, user_prompt
 
     async def generate_response(self, conversation_history: List[Dict]) -> str:
-        # --- FIX: Flatten the conversation history so that the very first message is sent as a user message.
-        # DeepSeek requires that the first (non‑system) message is from a user.
+
+
         combined_content = ""
         for msg in conversation_history:
             if msg.get("content"):
@@ -93,7 +93,7 @@ class DeepSeekClient(BaseLLMClient):
         if not combined_content.strip():
             combined_content = "Hello, please respond."
         fixed_messages = [{"role": "user", "content": combined_content.strip()}]
-        # --- END FIX
+
 
         response = await self.get_response(
             prompt=None,

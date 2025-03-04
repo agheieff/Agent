@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+
 """
 test.py
 
@@ -9,12 +9,9 @@ import sys
 import pytest
 
 def main():
-    """
-    Discover and run all tests using Pytest.
-    """
     args = [
-        "--maxfail=1",  # Stop after first failing test
-        "-v",           # Verbose output
+        "--maxfail=1",                                 
+        "-v",                           
     ]
     sys.exit(pytest.main(args))
 

@@ -26,10 +26,6 @@ class ToolManager:
         self.agent_conversation_history = conversation_ref
 
     async def process_message_from_calls(self, tool_calls: List[Dict[str, Any]]) -> str:
-\
-\
-\
-\
 
         if not tool_calls:
             return ""

@@ -5,25 +5,10 @@ from typing import List, Dict, Any, Tuple, Optional
 logger = logging.getLogger(__name__)
 
 class ToolParser:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
 
 
     @staticmethod
     def parse_message(message: str) -> Dict[str, Any]:
-\
-\
-\
-\
 
         try:
             data = json.loads(message.strip())

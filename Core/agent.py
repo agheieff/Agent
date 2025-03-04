@@ -131,20 +131,20 @@ class AutonomousAgent:
         if not response.strip():
             return True
 
-        # Parse the JSON response using ToolParser.
+
         parsed = ToolParser.parse_message(response)
 
-        # If there is internal reasoning, print it for debugging.
+
         thinking = parsed.get("thinking", "")
         if thinking:
             print(f"[Agent Thinking]: {thinking}")
 
-        # Extract the final answer from the parsed output.
+
         final_answer = parsed.get("answer", "")
         if final_answer:
             print(f"\n[Agent Answer]: {final_answer}\n")
 
-        # Process any tool calls if provided.
+
         tool_calls = parsed.get("tool_calls", [])
         if tool_calls:
             result_str = await self.tool_manager.process_message_from_calls(tool_calls)

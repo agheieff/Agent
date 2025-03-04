@@ -188,8 +188,6 @@ def list_available_tools() -> Dict[str, Dict[str, Any]]:
     return result
 
 def get_tool_json_schema(tool_name: str) -> Dict[str, Any]:
-\
-\
 
     metadata = get_tool_metadata(tool_name)
     if not metadata["exists"]:

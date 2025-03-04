@@ -42,10 +42,6 @@ RUN_SCRIPT = os.path.join(
     ),
 ])
 def test_run_script(env_vars, args, expected_in_output, expected_rc):
-\
-\
-\
-\
 
     if not os.path.isfile(RUN_SCRIPT):
         pytest.skip(f"run.py not found at: {RUN_SCRIPT}")

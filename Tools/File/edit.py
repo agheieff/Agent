@@ -3,6 +3,17 @@ from typing import Dict, Any
 
 TOOL_NAME = "edit"
 TOOL_DESCRIPTION = "Edit a file by replacing a unique occurrence of `old` with `new`."
+TOOL_HELP = """
+Usage:
+  /edit file_path=<path> old="<old text>" new="<new text>"
+
+Description:
+  Edits the specified file by replacing a single, unique occurrence of the text provided in 'old'
+  with the text provided in 'new'. If the target string is not found or appears multiple times, an error is returned.
+"""
+TOOL_EXAMPLES = [
+    ("/edit file_path=/tmp/config.txt old='version=1.0' new='version=2.0'", "Updates version number in the configuration file.")
+]
 
 def _ensure_absolute_path(path: str) -> str:
     if not os.path.isabs(path):
@@ -15,19 +26,6 @@ def tool_edit(
     new: str,
     **kwargs
 ) -> Dict[str, Any]:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-
     if not file_path:
         return {
             "output": "",
@@ -52,7 +50,6 @@ def tool_edit(
 
     abs_path = _ensure_absolute_path(file_path)
     if not os.path.exists(abs_path):
-
         if old == "":
             parent_dir = os.path.dirname(abs_path)
             if parent_dir and not os.path.exists(parent_dir):
@@ -81,7 +78,6 @@ def tool_edit(
                 "exit_code": 1
             }
 
-
     try:
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
@@ -92,7 +88,6 @@ def tool_edit(
             "success": False,
             "exit_code": 1
         }
-
 
     occurrences = content.count(old)
     if occurrences == 0:
@@ -109,7 +104,6 @@ def tool_edit(
             "success": False,
             "exit_code": 1
         }
-
 
     new_content = content.replace(old, new, 1)
     try:

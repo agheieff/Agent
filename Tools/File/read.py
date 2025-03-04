@@ -4,6 +4,18 @@ from typing import Dict, Any
 
 TOOL_NAME = "read"
 TOOL_DESCRIPTION = "Read the contents of a text file with optional offset and limit."
+TOOL_HELP = """
+Usage:
+  /read file_path=<path> [offset=<offset>] [limit=<limit>]
+
+Description:
+  Reads the contents of a text file from the specified path.
+  Optional 'offset' and 'limit' parameters can be provided to read a portion of the file.
+"""
+TOOL_EXAMPLES = [
+    ("/read file_path=/etc/hosts", "Reads the entire /etc/hosts file."),
+    ("/read file_path=/var/log/syslog offset=10 limit=20", "Reads 20 lines starting from line 11 of syslog.")
+]
 
 logger = logging.getLogger(__name__)
 
@@ -25,20 +37,6 @@ async def tool_read(
     limit: int = 2000,
     **kwargs
 ) -> Dict[str, Any]:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-
     if not file_path:
         return {
             "output": "",
@@ -89,7 +87,6 @@ async def tool_read(
     truncated = False
     try:
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
-
             for _ in range(offset):
                 if not next(f, None):
                     break
@@ -98,7 +95,6 @@ async def tool_read(
                 if line is None:
                     break
                 content_lines.append(line)
-
             if next(f, None) is not None:
                 truncated = True
     except UnicodeDecodeError:

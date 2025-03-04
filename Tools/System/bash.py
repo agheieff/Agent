@@ -4,24 +4,24 @@ from typing import Dict, Any
 
 TOOL_NAME = "bash"
 TOOL_DESCRIPTION = "Execute arbitrary shell (bash) commands, with optional timeout."
+TOOL_HELP = """
+Usage:
+  /bash command="<shell command>" [timeout=<seconds>]
+
+Description:
+  Executes the given shell command using bash.
+  An optional 'timeout' (in seconds) can be provided to limit the execution time.
+"""
+TOOL_EXAMPLES = [
+    ("/bash command='ls -l /tmp'", "Lists the contents of the /tmp directory."),
+    ("/bash command='sleep 5' timeout=3", "Attempts to sleep for 5 seconds but times out after 3 seconds.")
+]
 
 async def tool_bash(
     command: str,
     timeout: int = 60,
     **kwargs
 ) -> Dict[str, Any]:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-
     if not command:
         return {
             "output": "",
@@ -29,7 +29,6 @@ async def tool_bash(
             "success": False,
             "exit_code": 1
         }
-
 
     try:
         process = await asyncio.create_subprocess_shell(

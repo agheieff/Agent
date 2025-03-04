@@ -4,6 +4,17 @@ from typing import Dict, Any
 
 TOOL_NAME = "write"
 TOOL_DESCRIPTION = "Create a new file with specified content (will not overwrite existing)."
+TOOL_HELP = """
+Usage:
+  /write file_path=<path> content="<file content>" [mkdir=<true|false>]
+
+Description:
+  Creates a new file at the specified path with the given content.
+  The tool will not overwrite an existing file unless explicitly allowed.
+"""
+TOOL_EXAMPLES = [
+    ("/write file_path=/tmp/newfile.txt content='Hello World'", "Creates a new file with 'Hello World'.")
+]
 
 logger = logging.getLogger(__name__)
 
@@ -18,18 +29,6 @@ async def tool_write(
     mkdir: bool = True,
     **kwargs
 ) -> Dict[str, Any]:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-
     if not file_path:
         return {
             "output": "",

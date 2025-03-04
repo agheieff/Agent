@@ -4,6 +4,18 @@ from typing import Dict, Any
 
 TOOL_NAME = "telegram_view"
 TOOL_DESCRIPTION = "View recent messages received by your Telegram bot."
+TOOL_HELP = """
+Usage:
+  /telegram_view [limit=<number>] [offset=<offset>] [token=<bot token>]
+
+Description:
+  Retrieves recent messages for your Telegram bot.
+  The 'limit' parameter controls how many messages to return.
+  Optionally, an offset or bot token can be provided.
+"""
+TOOL_EXAMPLES = [
+    ("/telegram_view limit=5", "Displays the 5 most recent messages.")
+]
 
 def tool_telegram_view(
     limit: int = 5,
@@ -12,17 +24,6 @@ def tool_telegram_view(
     config: Dict[str, Any] = None,
     **kwargs
 ) -> Dict[str, Any]:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-
     if not token or not token.strip():
         if config:
             token = config.get("telegram", {}).get("token", "")
@@ -63,7 +64,6 @@ def tool_telegram_view(
                 "success": True,
                 "exit_code": 0
             }
-
 
         messages = messages[-limit:]
         lines = []

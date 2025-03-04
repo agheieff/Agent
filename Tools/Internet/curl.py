@@ -4,6 +4,19 @@ import os
 
 TOOL_NAME = "curl"
 TOOL_DESCRIPTION = "Send an HTTP request (GET, POST, etc.), similar to a basic curl."
+TOOL_HELP = """
+Usage:
+  /curl method=<HTTP method> url=<url> [data=<data>] [headers=<header1:value1,header2:value2>] [timeout=<seconds>] [allow_insecure=<true|false>]
+
+Description:
+  Sends an HTTP request using the specified method (GET, POST, etc.) to the given URL.
+  Optional data and headers can be provided. The 'timeout' parameter (in seconds) is optional,
+  and 'allow_insecure' can be set to true to disable SSL verification.
+"""
+TOOL_EXAMPLES = [
+    ("/curl method=GET url=http://example.com", "Sends a GET request to example.com."),
+    ("/curl method=POST url=http://example.com/api data='{\"key\":\"value\"}'", "Sends a POST request with JSON data.")
+]
 
 async def tool_curl(
     method: str = "GET",
@@ -14,20 +27,6 @@ async def tool_curl(
     allow_insecure: bool = False,
     **kwargs
 ) -> Dict[str, Any]:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-
     if not url:
         return {
             "output": "",

@@ -80,7 +80,7 @@ class TokenUsage:
         }
 
 class BaseLLMClient(ABC):
-    def __init__(self, api_key: str = ""):
+    def __init__(self, api_key: str = "", use_system_prompt: bool = True):
         if api_key and api_key.startswith("sk-") and len(api_key) < 20:
             logger.warning("API key has unexpected format or length")
 
@@ -90,6 +90,7 @@ class BaseLLMClient(ABC):
         self.total_tokens = 0
         self.models: Dict[str, ModelInfo] = {}
         self.default_model = None
+        self.use_system_prompt = use_system_prompt  # New parameter controlling prompt handling
 
         self._initialize_client(api_key)
         self._register_models()
@@ -119,6 +120,59 @@ class BaseLLMClient(ABC):
             "calls": len(self.usage_history),
             "history": [usage.to_dict() for usage in self.usage_history]
         }
+
+    def adjust_prompts(self, system_prompt: Optional[str], user_prompt: str) -> Tuple[Optional[str], str]:
+        # If use_system_prompt is False, merge system prompt into user prompt.
+        if not self.use_system_prompt and system_prompt:
+            combined = system_prompt + "\n\n" + user_prompt
+            return None, combined
+        return system_prompt, user_prompt
+
+    @abstractmethod
+    def _initialize_client(self, api_key: str) -> None:
+        pass
+
+    @abstractmethod
+    def _register_models(self) -> None:
+        pass
+
+    def extract_response_content(self, message) -> str:
+        try:
+            if hasattr(message, 'content'):
+                if isinstance(message.content, list):
+                    texts = []
+                    for block in message.content:
+                        if isinstance(block, dict) and block.get('type') == 'text' and 'text' in block:
+                            texts.append(block['text'])
+                        elif hasattr(block, 'text'):
+                            texts.append(block.text)
+                    if texts:
+                        return "\n".join(texts)
+                    if message.content:
+                        first = message.content[0]
+                        return first.text if hasattr(first, 'text') else first.get('text', "")
+                elif isinstance(message.content, str):
+                    return message.content
+            elif hasattr(message, 'completion'):
+                return message.completion
+            elif hasattr(message, 'choices') and message.choices:
+                first = message.choices[0]
+                if hasattr(first, 'message') and hasattr(first.message, 'content'):
+                    return first.message.content
+            return str(message)
+        except Exception as e:
+            logger.error(f"Error extracting response content: {e}")
+            return f"Error parsing response: {e}"
+
+    def track_usage(self, message, model_name: str):
+        usage_data = self.extract_usage_data(message, model_name)
+        token_usage = TokenUsage(
+            prompt_tokens=usage_data["prompt_tokens"],
+            completion_tokens=usage_data["completion_tokens"],
+            total_tokens=usage_data["total_tokens"],
+            model=model_name
+        )
+        self.add_usage(token_usage)
 
     def extract_usage_data(self, message, model_name: str) -> Dict[str, int]:
         usage_data = None
@@ -163,44 +217,6 @@ class BaseLLMClient(ABC):
             }
         return usage_data
 
-    def extract_response_content(self, message) -> str:
-        try:
-            if hasattr(message, 'content'):
-                if isinstance(message.content, list):
-                    texts = []
-                    for block in message.content:
-                        if isinstance(block, dict) and block.get('type') == 'text' and 'text' in block:
-                            texts.append(block['text'])
-                        elif hasattr(block, 'text'):
-                            texts.append(block.text)
-                    if texts:
-                        return "\n".join(texts)
-                    if message.content:
-                        first = message.content[0]
-                        return first.text if hasattr(first, 'text') else first.get('text', "")
-                elif isinstance(message.content, str):
-                    return message.content
-            elif hasattr(message, 'completion'):
-                return message.completion
-            elif hasattr(message, 'choices') and message.choices:
-                first = message.choices[0]
-                if hasattr(first, 'message') and hasattr(first.message, 'content'):
-                    return first.message.content
-            return str(message)
-        except Exception as e:
-            logger.error(f"Error extracting response content: {e}")
-            return f"Error parsing response: {e}"
-
-    def track_usage(self, message, model_name: str):
-        usage_data = self.extract_usage_data(message, model_name)
-        token_usage = TokenUsage(
-            prompt_tokens=usage_data["prompt_tokens"],
-            completion_tokens=usage_data["completion_tokens"],
-            total_tokens=usage_data["total_tokens"],
-            model=model_name
-        )
-        self.add_usage(token_usage)
-
     async def generate_response(self, conversation_history: List[Dict]) -> str:
         try:
             model_info = self.get_model_info(self.default_model)
@@ -209,7 +225,6 @@ class BaseLLMClient(ABC):
                 if not combined.strip():
                     combined = "Hello, please respond."
                 conversation_history = [{"role": "user", "content": combined.strip()}]
-
             response = await self.get_response(
                 prompt=None,
                 system=None,
@@ -249,7 +264,6 @@ class BaseLLMClient(ABC):
                     combined = (system + "\n\n" + prompt) if (system and prompt) else (system or prompt or "")
                     if combined:
                         messages.append({"role": "user", "content": combined})
-
             api_model_name = model_info.api_name if model_info else model_name
 
             response = await self._make_api_call(
@@ -302,18 +316,3 @@ class BaseLLMClient(ABC):
             return self.client.chat.completions.create(**params)
         else:
             raise NotImplementedError("Unknown API pattern for this client")
-
-    @abstractmethod
-    def _initialize_client(self, api_key: str) -> None:
-        pass
-
-    @abstractmethod
-    def _register_models(self) -> None:
-        pass
-
-    def adjust_prompts(self, system_prompt: Optional[str], user_prompt: str) -> Tuple[Optional[str], str]:
-        model_info = self.get_model_info(self.default_model)
-        if model_info and not model_info.prefers_separate_system_prompt and system_prompt:
-            combined = system_prompt + "\n\n" + user_prompt
-            return None, combined
-        return system_prompt, user_prompt

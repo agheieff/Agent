@@ -3,13 +3,13 @@ import json
 from typing import Optional, List, Dict, Any
 from openai import OpenAI
 from .base import BaseLLMClient, ModelInfo
-from .deepseek_schema import get_function_schema  # moved out of this file
 
 logger = logging.getLogger(__name__)
 
 class DeepSeekClient(BaseLLMClient):
     def __init__(self, api_key: str):
-        super().__init__(api_key)
+        # DeepSeek does not use a separate system prompt – so set use_system_prompt to False.
+        super().__init__(api_key, use_system_prompt=False)
 
     def _initialize_client(self, api_key: str) -> None:
         try:
@@ -44,17 +44,14 @@ class DeepSeekClient(BaseLLMClient):
     ) -> Any:
         if not hasattr(self, 'client'):
             raise ValueError("DeepSeek client not initialized")
-
+        # With use_system_prompt=False (set in __init__), any system prompt is expected
+        # to have already been merged into the first user message.
         params = {
             "model": model_name,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature
         }
-        if tool_usage:
-            params["functions"] = get_function_schema()
-            params["function_call"] = "auto"
-
         logger.debug(f"Sending request to DeepSeek with {len(messages)} messages")
         return self.client.chat.completions.create(**params)
 

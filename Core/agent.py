@@ -11,7 +11,7 @@ from Output.output_manager import OutputManager, output_manager
 from Core.parser import ToolParser
 from Core.composer import ToolResponseComposer
 from Tools.manager import ToolManager
-from detect_providenrs import get_active_providers  # New helper import
+from Core.detect_providers import get_active_providers
 
 logger = logging.getLogger(__name__)
 
@@ -42,31 +42,24 @@ class AutonomousAgent:
         if not api_key:
             raise ValueError("API key required")
 
-        # Basic configuration
         self.api_key = api_key
         self.model_name = model
-        self.provider = provider.lower()  # user's provided preference
+        self.provider = provider.lower()
         self.test_mode = test_mode
         self.config = config or {}
 
-        # Determine active providers from environment and available client implementations.
         active_providers = get_active_providers()
         if self.provider in active_providers:
             self.provider_type = self.provider
-            # Optionally override the API key with the one from the environment
             self.api_key = active_providers[self.provider]
         elif active_providers:
-            # Fallback: choose the first active provider
             self.provider_type, self.api_key = next(iter(active_providers.items()))
         else:
-            # No active provider found; default to openai
             self.provider_type = "openai"
 
-        # Format configuration
         self.default_input_format = self.config.get("format", {}).get("input", "auto")
         self.default_output_format = self.config.get("format", {}).get("output", "json")
 
-        # Agent state and identity
         self.agent_id = str(uuid.uuid4())[:8]
         self.agent_state = {
             'started_at': datetime.now().isoformat(),
@@ -78,7 +71,6 @@ class AutonomousAgent:
             'current_task': None,
         }
 
-        # Components
         self.llm = get_llm_client(self.provider_type, self.api_key, model=self.model_name)
         self.should_exit = False
         self.local_conversation_history: List[Dict[str, str]] = []
@@ -87,7 +79,6 @@ class AutonomousAgent:
         self.response_composer = ToolResponseComposer()
         self.display_manager = output_manager or OutputManager()
 
-        # Set tool manager context and default output format
         self.tool_manager.set_agent_context(self.config, self.llm, self.local_conversation_history)
         if self.default_output_format in self.response_composer.composers:
             self.response_composer.set_default_format(self.default_output_format)
@@ -154,7 +145,6 @@ class AutonomousAgent:
         try:
             parsed = self.tool_parser.parse_message(response) if isinstance(response, str) else response
 
-            # Handle any "thinking" or "analysis" outputs.
             for key in ("thinking", "analysis", "reasoning"):
                 if parsed.get(key):
                     output = {"success": True, "output": parsed[key], "formatter": f"agent_{key}"}

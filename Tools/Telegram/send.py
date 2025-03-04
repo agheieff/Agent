@@ -5,7 +5,6 @@ from typing import Dict, Any
 TOOL_NAME = "telegram_send"
 TOOL_DESCRIPTION = "Send a message via Telegram to a specified chat_id."
 
-
 EXAMPLES = {
     "message": "Hello from the agent!",
     "token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
@@ -72,13 +71,12 @@ def tool_telegram_send(
                 "exit_code": 1
             }
         return {
-            "output": f"Message sent successfully to chat {chat_id}.",
+            "output": f"Message sent via Telegram to chat {chat_id}",
             "error": "",
             "success": True,
             "exit_code": 0,
             "message": message,
-            "chat_id": chat_id,
-            "sent": True
+            "chat_id": chat_id
         }
     except Exception as e:
         return {

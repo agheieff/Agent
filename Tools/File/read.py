@@ -5,7 +5,6 @@ from typing import Dict, Any
 TOOL_NAME = "read"
 TOOL_DESCRIPTION = "Read the contents of a text file with optional offset and limit."
 
-
 EXAMPLES = {
     "file_path": "/etc/hosts",
     "offset": 0,
@@ -24,7 +23,8 @@ def _ensure_absolute_path(path: str) -> str:
 def _is_binary_file(file_path: str) -> bool:
     try:
         with open(file_path, 'rb') as f:
-            return b'\0' in f.read(4096)
+            chunk = f.read(4096)
+            return b'\0' in chunk
     except:
         return False
 
@@ -76,7 +76,7 @@ async def tool_read(
 
     if _is_binary_file(abs_path):
         return {
-            "output": f"[Binary file: {abs_path}]",
+            "output": f"Binary file: {abs_path}",
             "error": "",
             "success": True,
             "exit_code": 0,
@@ -88,6 +88,7 @@ async def tool_read(
     truncated = False
     try:
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+
             for _ in range(offset):
                 if not next(f, None):
                     break
@@ -96,11 +97,12 @@ async def tool_read(
                 if line is None:
                     break
                 content_lines.append(line)
+
             if next(f, None) is not None:
                 truncated = True
     except UnicodeDecodeError:
         return {
-            "output": f"[Binary or non-text file: {abs_path}]",
+            "output": f"Binary or non-text file: {abs_path}",
             "error": "",
             "success": True,
             "exit_code": 0,
@@ -116,24 +118,20 @@ async def tool_read(
             "file_path": abs_path
         }
 
-    info = f"File: {abs_path}\nStarting from line: {offset+1}\nShowing {len(content_lines)} lines"
+    read_count = len(content_lines)
+    short_info = f"Read {read_count} lines from {abs_path}"
     if truncated:
-        info += " (truncated)\n"
-        content_lines.append("[...file content truncated...]")
-    else:
-        info += " (complete)\n"
-
-    content = "".join(content_lines)
+        short_info += " (truncated)"
 
     return {
-        "output": info + "---\n" + content,
+        "output": short_info,
         "error": "",
         "success": True,
         "exit_code": 0,
         "file_path": abs_path,
-        "content": content,
+        "content": "".join(content_lines),
         "truncated": truncated,
         "binary": False,
-        "line_count": len(content_lines),
+        "line_count": read_count,
         "offset": offset
     }

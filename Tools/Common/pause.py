@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 TOOL_NAME = "pause"
 TOOL_DESCRIPTION = "Pause the conversation and wait for user input."
 
-# Example values for parameters - used for generating examples
+
 EXAMPLES = {
     "message": "Please provide your API key:"
 }
@@ -18,16 +18,7 @@ async def tool_pause(
     output_manager=None,
     **kwargs
 ) -> Dict[str, Any]:
-    """
-    Pause the conversation and wait for user input.
-    
-    Args:
-        message: Message to display to the user
-        output_manager: Output manager instance for direct user interaction
-        
-    Returns:
-        Dictionary with the user's response
-    """
+
     if not message:
         return {
             "output": "",
@@ -35,7 +26,7 @@ async def tool_pause(
             "success": False,
             "exit_code": 1
         }
-    
+
     if output_manager is None:
         return {
             "output": "",
@@ -43,11 +34,11 @@ async def tool_pause(
             "success": False,
             "exit_code": 1
         }
-    
+
     try:
-        # Display the message to the user
+
         user_input = await output_manager.get_user_input(f"{message} ")
-        
+
         return {
             "output": f"Received user input: {user_input}",
             "error": "",

@@ -23,7 +23,6 @@ class TestReadTool:
         os.unlink(file_name)
 
     def test_examples_dict(self):
-
         assert isinstance(EXAMPLES, dict)
         assert "file_path" in EXAMPLES
         assert isinstance(EXAMPLES["file_path"], str)
@@ -36,9 +35,10 @@ class TestReadTool:
     async def test_read_file_success(self, text_file):
         result = await tool_read(file_path=text_file, offset=10, limit=5)
         assert result["success"] is True
-        assert "Line 11" in result["output"]
-        assert "Line 15" in result["output"]
-        assert "Line 16" not in result["output"]
+
+        assert "Read 5 lines from" in result["output"]
+
+        assert len(result["content"].splitlines()) == 5
 
     @pytest.mark.asyncio
     async def test_read_missing_file(self):
@@ -48,8 +48,7 @@ class TestReadTool:
 
     @pytest.mark.asyncio
     async def test_read_directory(self, tmp_path):
-        dir_path = tmp_path
-        result = await tool_read(file_path=str(dir_path))
+        result = await tool_read(file_path=str(tmp_path))
         assert result["success"] is False
         assert "Path is a directory" in result["error"]
 
@@ -57,7 +56,8 @@ class TestReadTool:
     async def test_read_binary_file(self, binary_file):
         result = await tool_read(file_path=binary_file)
         assert result["success"] is True
-        assert "[Binary file:" in result["output"]
+        assert "Binary file:" in result["output"]
+        assert result.get("binary") is True
 
     @pytest.mark.asyncio
     async def test_negative_offset(self, text_file):

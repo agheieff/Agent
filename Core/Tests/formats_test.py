@@ -5,9 +5,9 @@ from Core.formats import AnthropicToolsParser, DeepseekToolsParser, XMLFormatPar
 class TestAnthropicToolsParser:
     def setup_method(self):
         self.parser = AnthropicToolsParser()
-        
+
     def test_can_parse_valid_format(self):
-        # Valid Anthropic token-efficient tool use format
+
         message = """I'll help you with that.
 
 tool_use: {
@@ -18,15 +18,15 @@ tool_use: {
 }
 """
         assert self.parser.can_parse(message) is True
-        
+
     def test_can_parse_invalid_format(self):
-        # No tool use in message
+
         message = "I'll help you with that."
         assert self.parser.can_parse(message) is False
-        
-        # Not a string
+
+
         assert self.parser.can_parse(123) is False
-        
+
     def test_parse_valid_message(self):
         message = """I'll help you with that.
 
@@ -38,11 +38,11 @@ tool_use: {
 }
 """
         result = self.parser.parse(message)
-        
+
         assert len(result["tool_calls"]) == 1
         assert result["tool_calls"][0]["name"] == "search"
         assert result["tool_calls"][0]["params"]["query"] == "weather in San Francisco"
-        
+
     def test_parse_multiple_tool_calls(self):
         message = """I'll use multiple tools.
 
@@ -63,11 +63,11 @@ tool_use: {
 }
 """
         result = self.parser.parse(message)
-        
+
         assert len(result["tool_calls"]) == 2
         assert result["tool_calls"][0]["name"] == "search"
         assert result["tool_calls"][1]["name"] == "read_file"
-        
+
     def test_parse_invalid_json(self):
         message = """tool_use: {
   "name": "search",
@@ -75,16 +75,16 @@ tool_use: {
 }
 """
         result = self.parser.parse(message)
-        
-        # Should still extract the pattern but fail to parse the JSON
+
+
         assert len(result["tool_calls"]) == 0
-        
+
 class TestDeepseekToolsParser:
     def setup_method(self):
         self.parser = DeepseekToolsParser()
-        
+
     def test_can_parse_valid_format(self):
-        # Valid Deepseek tool use format
+
         message = json.dumps({
             "action": "search",
             "action_input": {
@@ -92,8 +92,8 @@ class TestDeepseekToolsParser:
             }
         })
         assert self.parser.can_parse(message) is True
-        
-        # Valid Deepseek tool use with parameters field
+
+
         message = json.dumps({
             "action": "search",
             "parameters": {
@@ -101,23 +101,23 @@ class TestDeepseekToolsParser:
             }
         })
         assert self.parser.can_parse(message) is True
-        
+
     def test_can_parse_invalid_format(self):
-        # Missing action field
+
         message = json.dumps({
             "parameters": {
                 "query": "weather in San Francisco"
             }
         })
         assert self.parser.can_parse(message) is False
-        
-        # Not JSON
+
+
         message = "This is not JSON"
         assert self.parser.can_parse(message) is False
-        
-        # Not a string
+
+
         assert self.parser.can_parse(123) is False
-        
+
     def test_parse_valid_message(self):
         message = json.dumps({
             "action": "search",
@@ -127,27 +127,27 @@ class TestDeepseekToolsParser:
             "thinking": "I need to search for the weather",
             "reasoning": "The user asked about weather"
         })
-        
+
         result = self.parser.parse(message)
-        
+
         assert len(result["tool_calls"]) == 1
         assert result["tool_calls"][0]["name"] == "search"
         assert result["tool_calls"][0]["params"]["query"] == "weather in San Francisco"
         assert result["thinking"] == "I need to search for the weather"
         assert result["analysis"] == "The user asked about weather"
-        
+
     def test_parse_with_string_params(self):
         message = json.dumps({
             "action": "search",
             "action_input": "weather in San Francisco"
         })
-        
+
         result = self.parser.parse(message)
-        
+
         assert len(result["tool_calls"]) == 1
         assert result["tool_calls"][0]["name"] == "search"
         assert result["tool_calls"][0]["params"]["value"] == "weather in San Francisco"
-        
+
     def test_parse_with_parameters_field(self):
         message = json.dumps({
             "action": "search",
@@ -155,27 +155,27 @@ class TestDeepseekToolsParser:
                 "query": "weather in San Francisco"
             }
         })
-        
+
         result = self.parser.parse(message)
-        
+
         assert len(result["tool_calls"]) == 1
         assert result["tool_calls"][0]["name"] == "search"
         assert result["tool_calls"][0]["params"]["query"] == "weather in San Francisco"
-        
+
 class TestXMLFormatParser:
     def setup_method(self):
         self.parser = XMLFormatParser()
-        
+
     def test_can_parse_valid_format(self):
-        # Valid XML
+
         message = "<agent_response><answer>Hello</answer></agent_response>"
         assert self.parser.can_parse(message) is True
-        
+
     def test_can_parse_invalid_format(self):
-        # Not XML
+
         message = "This is not XML"
         assert self.parser.can_parse(message) is False
-        
+
     def test_parse_valid_message(self):
         message = """
         <agent_response>
@@ -191,22 +191,22 @@ class TestXMLFormatParser:
             <answer>Here is the information</answer>
         </agent_response>
         """
-        
+
         result = self.parser.parse(message)
-        
+
         assert result["thinking"] == "I need to analyze this"
-        assert result["analysis"] == "The user wants information" 
+        assert result["analysis"] == "The user wants information"
         assert len(result["tool_calls"]) == 1
         assert result["tool_calls"][0]["name"] == "search"
         assert result["tool_calls"][0]["params"]["query"] == "weather in San Francisco"
         assert result["answer"] == "Here is the information"
-        
+
     def test_parse_invalid_xml(self):
         message = "<broken_xml>This is broken"
-        
+
         result = self.parser.parse(message)
-        
-        # Should fallback to default behavior
+
+
         assert result["tool_calls"] == []
         assert result["answer"] == message
 

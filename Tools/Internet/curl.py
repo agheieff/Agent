@@ -5,7 +5,6 @@ import os
 TOOL_NAME = "curl"
 TOOL_DESCRIPTION = "Send an HTTP request (GET, POST, etc.), similar to a basic curl."
 
-
 EXAMPLES = {
     "method": "GET",
     "url": "https://example.com",
@@ -59,8 +58,9 @@ async def tool_curl(
         else:
             resp = req_func(url, headers=parsed_headers, timeout=timeout, verify=verify_ssl)
 
+        short_text = f"{method} {url} -> Status: {resp.status_code}"
         return {
-            "output": f"Status: {resp.status_code}\n\n{resp.text}",
+            "output": short_text,
             "error": "",
             "success": True,
             "exit_code": 0,

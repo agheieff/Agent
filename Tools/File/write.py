@@ -5,7 +5,6 @@ from typing import Dict, Any
 TOOL_NAME = "write"
 TOOL_DESCRIPTION = "Create a new file with specified content (will not overwrite existing)."
 
-
 EXAMPLES = {
     "file_path": "/tmp/newfile.txt",
     "content": "Hello World",
@@ -49,8 +48,7 @@ async def tool_write(
             "error": f"File already exists: {abs_path}",
             "success": False,
             "exit_code": 1,
-            "file_path": abs_path,
-            "exists": True
+            "file_path": abs_path
         }
 
     parent_dir = os.path.dirname(abs_path)
@@ -64,8 +62,7 @@ async def tool_write(
                     "error": f"Error creating parent directory: {str(e)}",
                     "success": False,
                     "exit_code": 1,
-                    "file_path": abs_path,
-                    "parent_dir": parent_dir
+                    "file_path": abs_path
                 }
         else:
             return {
@@ -73,8 +70,7 @@ async def tool_write(
                 "error": f"Parent directory does not exist: {parent_dir}",
                 "success": False,
                 "exit_code": 1,
-                "file_path": abs_path,
-                "parent_dir": parent_dir
+                "file_path": abs_path
             }
 
     try:
@@ -82,14 +78,12 @@ async def tool_write(
             f.write(content)
         file_size = os.path.getsize(abs_path)
         return {
-            "output": f"Created file: {abs_path} (size: {file_size} bytes)",
+            "output": f"Created file: {abs_path}",
             "error": "",
             "success": True,
             "exit_code": 0,
             "file_path": abs_path,
-            "file_size": file_size,
-            "content_length": len(content),
-            "created": True
+            "file_size": file_size
         }
     except Exception as e:
         return {

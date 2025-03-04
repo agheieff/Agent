@@ -7,12 +7,10 @@ from Tools.Telegram.send import tool_telegram_send
 class TestTelegramSendTool:
 
     async def test_no_token_or_env(self):
-
         original_token = os.environ.pop("TELEGRAM_BOT_TOKEN", None)
         result = tool_telegram_send(message="hi")
         assert result["success"] is False
         assert "No Telegram bot token provided" in result["error"]
-
         if original_token:
             os.environ["TELEGRAM_BOT_TOKEN"] = original_token
 
@@ -23,6 +21,7 @@ class TestTelegramSendTool:
         result = tool_telegram_send(message="test msg")
         assert result["success"] is False
         assert "No Telegram chat ID provided." in result["error"]
+
 
         if original_cid:
             os.environ["TELEGRAM_CHAT_ID"] = original_cid
@@ -37,7 +36,7 @@ class TestTelegramSendTool:
                    json={"ok": True, "result": {"message_id": 100}}, status_code=200)
             result = tool_telegram_send(message="Hello")
             assert result["success"] is True
-            assert "Message sent successfully" in result["output"]
+            assert "Message sent via Telegram to chat 123" in result["output"]
 
         os.environ.pop("TELEGRAM_BOT_TOKEN", None)
         os.environ.pop("TELEGRAM_CHAT_ID", None)

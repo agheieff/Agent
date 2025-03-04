@@ -21,7 +21,7 @@ class TestTelegramViewTool:
                   json={"ok": True, "result": []}, status_code=200)
             result = tool_telegram_view(limit=5)
             assert result["success"] is True
-            assert "No new messages available." in result["output"]
+            assert "No new messages found." in result["output"]
         os.environ.pop("TELEGRAM_BOT_TOKEN", None)
 
     async def test_view_some_messages(self):
@@ -43,5 +43,9 @@ class TestTelegramViewTool:
                   json=sample, status_code=200)
             result = tool_telegram_view(limit=5)
             assert result["success"] is True
-            assert "Hello from user" in result["output"]
+            assert "Fetched 1 messages" in result["output"]
+            assert len(result["messages"]) == 1
+            msg_info = result["messages"][0]
+            assert msg_info["text"] == "Hello from user"
+            assert msg_info["sender"] == "testuser"
         os.environ.pop("TELEGRAM_BOT_TOKEN", None)

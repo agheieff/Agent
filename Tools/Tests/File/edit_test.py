@@ -13,7 +13,6 @@ class TestEditTool:
         os.unlink(fname)
 
     def test_examples_dict(self):
-
         assert isinstance(EXAMPLES, dict)
         assert "file_path" in EXAMPLES
         assert isinstance(EXAMPLES["file_path"], str)
@@ -25,6 +24,7 @@ class TestEditTool:
     def test_edit_unique_replacement(self, existing_file):
         result = tool_edit(file_path=existing_file, old="Hello World", new="Hello Universe")
         assert result["success"] is True
+        assert "Edited file:" in result["output"]
         with open(existing_file, "r") as f:
             content = f.read()
             assert "Hello Universe" in content
@@ -38,6 +38,7 @@ class TestEditTool:
         new_file = os.path.join(tmp_path, "myfile.txt")
         result = tool_edit(file_path=new_file, old="", new="New content")
         assert result["success"] is True
+        assert "Created new file:" in result["output"]
         with open(new_file, "r") as f:
             assert "New content" in f.read()
 

@@ -5,7 +5,6 @@ from typing import Dict, Any
 TOOL_NAME = "bash"
 TOOL_DESCRIPTION = "Execute arbitrary shell (bash) commands, with optional timeout."
 
-
 EXAMPLES = {
     "command": "ls -la /tmp",
     "timeout": 60
@@ -45,8 +44,7 @@ async def tool_bash(
                     "error": f"Command timed out after {timeout} seconds",
                     "success": False,
                     "exit_code": 124,
-                    "command": command,
-                    "timed_out": True
+                    "command": command
                 }
         else:
             stdout_bytes, stderr_bytes = await process.communicate()
@@ -54,22 +52,29 @@ async def tool_bash(
         stdout_str = stdout_bytes.decode('utf-8', errors='replace')
         stderr_str = stderr_bytes.decode('utf-8', errors='replace')
         success = (process.returncode == 0)
-        output = stdout_str
-        if stderr_str:
-            if output:
-                output += "\n[stderr]:\n" + stderr_str
-            else:
-                output = stderr_str
+        exit_code = process.returncode
 
-        return {
-            "output": output,
-            "error": "" if success else stderr_str,
-            "success": success,
-            "exit_code": process.returncode,
-            "command": command,
-            "stdout": stdout_str,
-            "stderr": stderr_str
-        }
+        if success:
+
+            return {
+                "output": f"Command executed (exit={exit_code}): {command}",
+                "error": "",
+                "success": True,
+                "exit_code": exit_code,
+                "command": command,
+                "stdout": stdout_str,
+                "stderr": stderr_str
+            }
+        else:
+            return {
+                "output": "",
+                "error": f"Command failed (exit={exit_code}): {stderr_str}",
+                "success": False,
+                "exit_code": exit_code,
+                "command": command,
+                "stdout": stdout_str,
+                "stderr": stderr_str
+            }
     except Exception as e:
         return {
             "output": "",

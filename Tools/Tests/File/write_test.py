@@ -15,7 +15,6 @@ class TestWriteTool:
             pass
 
     def test_examples_dict(self):
-
         assert isinstance(EXAMPLES, dict)
         assert "file_path" in EXAMPLES
         assert isinstance(EXAMPLES["file_path"], str)
@@ -30,6 +29,7 @@ class TestWriteTool:
         content = "Hello World"
         result = await tool_write(file_path=target_file, content=content)
         assert result["success"] is True
+        assert "Created file:" in result["output"]
         assert os.path.exists(target_file)
 
     @pytest.mark.asyncio
@@ -61,7 +61,6 @@ class TestWriteTool:
         result = await tool_write(file_path=nested, content="Hello", mkdir=True)
         assert result["success"] is True
         assert os.path.exists(nested)
-
 
     def test_ensure_absolute_path(self):
         rel = "some/relative"

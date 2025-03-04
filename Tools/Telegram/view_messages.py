@@ -5,7 +5,6 @@ from typing import Dict, Any
 TOOL_NAME = "telegram_view"
 TOOL_DESCRIPTION = "View recent messages received by your Telegram bot."
 
-
 EXAMPLES = {
     "limit": 5,
     "offset": 0,
@@ -56,16 +55,16 @@ def tool_telegram_view(
         messages = data.get("result", [])
         if not messages:
             return {
-                "output": "No new messages available.",
+                "output": "No new messages found.",
                 "error": "",
                 "success": True,
                 "exit_code": 0,
                 "messages": []
             }
 
+
         messages = messages[-limit:]
         formatted_messages = []
-
         for m in messages:
             update_id = m.get("update_id")
             msg = m.get("message")
@@ -83,11 +82,8 @@ def tool_telegram_view(
                 "raw": m
             })
 
-        lines = [f"update_id={m['update_id']}, from={m['sender']}, text={m['text']}" for m in formatted_messages]
-        output_text = "Recent Telegram messages:\n\n" + "\n".join(lines)
-
         return {
-            "output": output_text,
+            "output": f"Fetched {len(formatted_messages)} messages from Telegram.",
             "error": "",
             "success": True,
             "exit_code": 0,

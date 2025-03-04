@@ -23,7 +23,6 @@ class ToolManager:
         self.agent_conversation_history: List[Dict[str, Any]] = []
 
     def set_agent_context(self, config: Dict[str, Any], llm, conversation_ref: List[Dict[str, Any]]):
-
         self.agent_config = config
         self.agent_llm = llm
         self.agent_conversation_history = conversation_ref
@@ -39,14 +38,13 @@ class ToolManager:
 
         results = []
         for call in tool_calls:
-
             if isinstance(call, dict) and "name" in call:
                 tool_name = call.get("name")
                 params = call.get("params", {})
-                is_help = call.get("help", False)
             else:
 
-                tool_name, params, is_help = call
+
+                tool_name, params, _unused = call
 
             logger.info(f"Executing tool: {tool_name} with params: {params}")
 
@@ -65,11 +63,6 @@ class ToolManager:
 
             if tool_name.lower() in ["telegram_send", "telegram_view"]:
                 params["config"] = self.agent_config
-
-
-            if is_help:
-                params["help"] = True
-
 
             tool_result = await execute_tool(tool_name, params)
             results.append((tool_name, params, tool_result))

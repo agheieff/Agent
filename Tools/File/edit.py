@@ -47,8 +47,8 @@ def tool_edit(
 
     abs_path = _ensure_absolute_path(file_path)
     if not os.path.exists(abs_path):
-        if old == "":
 
+        if old == "":
             parent_dir = os.path.dirname(abs_path)
             if parent_dir and not os.path.exists(parent_dir):
                 try:
@@ -59,9 +59,7 @@ def tool_edit(
                         "error": f"Error creating parent directory: {str(e)}",
                         "success": False,
                         "exit_code": 1,
-                        "file_path": abs_path,
-                        "action": "create",
-                        "parent_dir": parent_dir
+                        "file_path": abs_path
                     }
             try:
                 with open(abs_path, 'w', encoding='utf-8') as f:
@@ -71,10 +69,7 @@ def tool_edit(
                     "error": "",
                     "success": True,
                     "exit_code": 0,
-                    "file_path": abs_path,
-                    "action": "create",
-                    "file_size": len(new),
-                    "created": True
+                    "file_path": abs_path
                 }
             except Exception as e:
                 return {
@@ -82,8 +77,7 @@ def tool_edit(
                     "error": f"Error creating new file: {str(e)}",
                     "success": False,
                     "exit_code": 1,
-                    "file_path": abs_path,
-                    "action": "create"
+                    "file_path": abs_path
                 }
         else:
             return {
@@ -93,6 +87,7 @@ def tool_edit(
                 "exit_code": 1,
                 "file_path": abs_path
             }
+
 
     try:
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
@@ -113,9 +108,7 @@ def tool_edit(
             "error": f"Target string not found in {abs_path}",
             "success": False,
             "exit_code": 1,
-            "file_path": abs_path,
-            "action": "edit",
-            "occurrences": 0
+            "file_path": abs_path
         }
     if occurrences > 1:
         return {
@@ -123,9 +116,7 @@ def tool_edit(
             "error": f"Target string appears {occurrences} times in {abs_path}. Must be unique.",
             "success": False,
             "exit_code": 1,
-            "file_path": abs_path,
-            "action": "edit",
-            "occurrences": occurrences
+            "file_path": abs_path
         }
 
     new_content = content.replace(old, new, 1)
@@ -133,15 +124,11 @@ def tool_edit(
         with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
         return {
-            "output": f"Successfully edited file: {abs_path}",
+            "output": f"Edited file: {abs_path}",
             "error": "",
             "success": True,
             "exit_code": 0,
-            "file_path": abs_path,
-            "action": "edit",
-            "original_length": len(content),
-            "new_length": len(new_content),
-            "edited": True
+            "file_path": abs_path
         }
     except Exception as e:
         return {
@@ -149,6 +136,5 @@ def tool_edit(
             "error": f"Error writing updated file: {str(e)}",
             "success": False,
             "exit_code": 1,
-            "file_path": abs_path,
-            "action": "edit"
+            "file_path": abs_path
         }

@@ -116,7 +116,7 @@ class AutonomousAgent:
             response = await self._generate_response(system_prompt, initial_prompt)
             should_continue = True
 
-            # Introduce an iteration counter; in test mode we only do one iteration.
+
             iteration = 0
 
             while should_continue and not self.should_exit:
@@ -128,7 +128,7 @@ class AutonomousAgent:
                 else:
                     should_continue = response_state
 
-                # If running in test mode, only one iteration is performed.
+
                 iteration += 1
                 if self.test_mode and iteration >= 1:
                     break

@@ -3,7 +3,7 @@ from typing import Optional, List, Dict, Union, Tuple, Any
 from datetime import datetime
 
 class TokenUsage:
-    def __init__(self, prompt_tokens=0, completion_tokens=0, total_tokens=0, 
+    def __init__(self, prompt_tokens=0, completion_tokens=0, total_tokens=0,
                  prompt_cost=0.0, completion_cost=0.0, total_cost=0.0,
                  model="", timestamp=None, cache_hit=False):
         self.prompt_tokens = prompt_tokens
@@ -65,7 +65,7 @@ class BaseLLMClient(ABC):
             "history": [usage.to_dict() for usage in self.usage_history]
         }
 
-    def calculate_token_cost(self, usage: Dict[str, int], model_pricing: Dict[str, float], 
+    def calculate_token_cost(self, usage: Dict[str, int], model_pricing: Dict[str, float],
                              cache_hit: bool = False, cache_write: bool = False) -> Dict[str, float]:
         if cache_hit and "input_cache_read" in model_pricing:
             prompt_cost = usage["prompt_tokens"] * model_pricing["input_cache_read"]
@@ -119,9 +119,9 @@ class BaseLLMClient(ABC):
     def adjust_prompts(self, system_prompt: Optional[str], user_prompt: str) -> Tuple[Optional[str], str]:
         return (system_prompt, user_prompt)
 
-# ----------------------------------------------------------------------------
-# DummyLLMClient for test mode
-# ----------------------------------------------------------------------------
+
+
+
 class DummyLLMClient(BaseLLMClient):
     async def get_response(
         self,

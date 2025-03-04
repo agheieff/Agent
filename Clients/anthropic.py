@@ -110,8 +110,8 @@ class AnthropicClient(BaseLLMClient):
             if usage_data:
                 model_pricing = self.get_model_pricing(model_name)
                 costs = self.calculate_token_cost(
-                    usage_data, 
-                    model_pricing, 
+                    usage_data,
+                    model_pricing,
                     cache_hit=cache_hit,
                     cache_write=cache_write
                 )

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Dict, Any
 import asyncio
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -74,15 +75,12 @@ async def execute_tool(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]
 
         if hasattr(handler, '__self__') and hasattr(handler.__self__, 'run'):
             result = await handler.__self__.run(**params)
-
         elif inspect.iscoroutinefunction(handler):
             result = await handler(**params)
         else:
 
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, lambda: handler(**params))
-
-
 
 
         if isinstance(result, dict) and "success" in result:
@@ -167,14 +165,13 @@ def get_tool_metadata(tool_name: str) -> Dict[str, Any]:
 
         for attr in ["TOOL_DESCRIPTION", "TOOL_HELP", "TOOL_EXAMPLES"]:
             if hasattr(module, attr):
-                key = attr.lower()[5:]                       
+                key = attr.lower()[5:]
                 metadata[key] = getattr(module, attr)
 
 
     if handler.__doc__:
         metadata["docstring"] = handler.__doc__.strip()
         if not metadata["description"]:
-
             metadata["description"] = handler.__doc__.strip().split('\n')[0]
 
     return metadata
@@ -189,3 +186,43 @@ def list_available_tools() -> Dict[str, Dict[str, Any]]:
         result[tool_name] = get_tool_metadata(tool_name)
 
     return result
+
+def get_tool_json_schema(tool_name: str) -> Dict[str, Any]:
+\
+\
+
+    metadata = get_tool_metadata(tool_name)
+    if not metadata["exists"]:
+        return {"error": f"Tool {tool_name} not found"}
+
+    schema = {
+        "name": tool_name,
+        "description": metadata.get("description", ""),
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "enum": [tool_name],
+                "description": "Tool name"
+            },
+            "params": {
+                "type": "object",
+                "description": "Tool parameters",
+                "properties": {}
+            }
+        }
+    }
+
+
+    usage = metadata.get("usage", "")
+    if usage:
+
+        param_pattern = r'(?:--|\[|\<)([\w_]+)(?:\>|\]|=)'
+        params = re.findall(param_pattern, usage)
+        for param in params:
+            schema["properties"]["params"]["properties"][param] = {
+                "type": "string",
+                "description": f"Parameter: {param}"
+            }
+
+    return schema

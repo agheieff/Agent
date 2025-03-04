@@ -10,8 +10,8 @@ import pytest
 
 def main():
     args = [
-        "--maxfail=1",                                 
-        "-v",                           
+        "--maxfail=1",
+        "-v",
     ]
     sys.exit(pytest.main(args))
 

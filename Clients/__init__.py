@@ -3,7 +3,7 @@ import logging
 from .base import BaseLLMClient, TokenUsage
 from .anthropic import AnthropicClient
 from .deepseek import DeepSeekClient
-from .openai import OpenAIClient                       
+from .openai import OpenAIClient
 
 logger = logging.getLogger(__name__)
 

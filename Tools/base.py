@@ -12,10 +12,10 @@ except (ImportError, ModuleNotFoundError):
 logger = logging.getLogger(__name__)
 
 class ToolHandler(ABC):
-    name: str = ""                    
-    description: str = ""                                 
-    usage: str = ""                      
-    examples: List[Tuple[str, str]] = []                                         
+    name: str = ""
+    description: str = ""
+    usage: str = ""
+    examples: List[Tuple[str, str]] = []
 
 
     formatter: str = "default"

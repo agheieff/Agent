@@ -12,8 +12,8 @@ Usage:
 No additional parameters are required.
 
 Description:
-  Summarizes the entire conversation so far. The tool calls the LLM with a special 
-  prompt that requests a concise summary of the conversation. Then it replaces the 
+  Summarizes the entire conversation so far. The tool calls the LLM with a special
+  prompt that requests a concise summary of the conversation. Then it replaces the
   conversation history with the single summary message.
 
   This helps to reduce token usage and keep the conversation history manageable.

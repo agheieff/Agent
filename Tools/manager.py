@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import json
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
 
@@ -29,9 +30,25 @@ class ToolManager:
         self.agent_conversation_history = conversation_ref
 
     async def process_message(self, message: str) -> str:
+\
+\
+\
+
         tool_calls = self.parser.extract_tool_calls(message)
         if not tool_calls:
             return ""
+
+
+        thinking_sections = self.parser.extract_thinking(message)
+        if thinking_sections and output_manager:
+            for section in thinking_sections:
+                formatted = json.dumps(section, indent=2)
+                await output_manager.handle_tool_output("thinking", {
+                    "output": formatted,
+                    "success": True,
+                    "error": "",
+                    "exit_code": 0
+                })
 
         results = []
 
@@ -64,6 +81,10 @@ class ToolManager:
                 params["config"] = self.agent_config
 
 
+            if is_help:
+                params["help"] = True
+
+
             tool_result = await execute_tool(tool_name, params)
 
 
@@ -77,6 +98,7 @@ class ToolManager:
                 else:
                     tool_result["output"] = usage_str
 
+
             if output_manager:
                 await output_manager.handle_tool_output(tool_name, tool_result)
 
@@ -87,6 +109,7 @@ class ToolManager:
         return ""
 
     async def execute_single_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+
         result = await execute_tool(tool_name, params)
 
         if self.agent_llm and hasattr(self.agent_llm, "total_tokens"):
@@ -105,6 +128,7 @@ class ToolManager:
         return result
 
     async def execute_tools_concurrently(self, tool_requests: List[Tuple[str, Dict[str, Any]]]) -> List[Tuple[str, Dict[str, Any], Dict[str, Any]]]:
+
         async def _execute_tool(tn, pm):
             return await self.execute_single_tool(tn, pm)
 

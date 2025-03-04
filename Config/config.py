@@ -23,7 +23,7 @@ class Config:
 
         search_paths = [
             Path.cwd() / "Config" / "config.yaml",
-            Path.cwd() / "config.yaml", 
+            Path.cwd() / "config.yaml",
             Path.home() / ".arcadia" / "config.yaml",
             Path(__file__).parent / "config.yaml"
         ]

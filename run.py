@@ -241,7 +241,7 @@ async def main():
 
     from Clients import get_llm_client
     llm = get_llm_client(provider, api_key, model=model)
-    # In test mode, override the LLM client with a dummy that avoids real API calls.
+
     if config.get("agent.test_mode", False):
         from Clients.base import DummyLLMClient
         llm = DummyLLMClient()

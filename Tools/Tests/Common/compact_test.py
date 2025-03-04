@@ -54,5 +54,5 @@ class TestCompactTool:
         result = await tool_compact(conversation_history=conversation_history, llm=MockLLM())
         assert result["success"] is True
         assert "Conversation has been compacted" in result["output"]
-        assert len(conversation_history) == 2                                     
+        assert len(conversation_history) == 2
         assert "MOCK summary" in conversation_history[-1]["content"]

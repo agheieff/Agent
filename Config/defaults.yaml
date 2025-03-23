@@ -1,5 +1,0 @@
-agent:
-  test_mode: true
-  allow_internet: true
-telegram:
-  chat_id: 1234567890

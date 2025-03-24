@@ -1,14 +1,10 @@
-# Exclude everything by default
 *
 
-# Include directories to track structure
 !*/
 
-# Include specific file types
 !*.py
 !*.md
 !*.txt
 !*.sh
 
-# Include .gitignore itself
-!.gitignore 
+!.gitignore

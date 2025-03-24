@@ -5,6 +5,7 @@ import shutil
 from unittest.mock import patch, mock_open
 
 from Tools.File.write import WriteFile
+from Tools.error_codes import ErrorCodes
 
 class TestWriteFile(unittest.TestCase):
     def setUp(self):
@@ -20,8 +21,8 @@ class TestWriteFile(unittest.TestCase):
         """Test successful file creation."""
         exit_code, message = self.tool.execute(self.test_file, self.test_content)
         
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(message, "")
+        self.assertEqual(exit_code, ErrorCodes.SUCCESS)
+        self.assertIsNone(message)
         
         # Verify file was created with correct content
         with open(self.test_file, 'r') as f:
@@ -36,7 +37,7 @@ class TestWriteFile(unittest.TestCase):
             
         exit_code, message = self.tool.execute(self.test_file, self.test_content)
         
-        self.assertEqual(exit_code, 1)
+        self.assertEqual(exit_code, ErrorCodes.RESOURCE_EXISTS)
         self.assertIn("already exists", message)
         
         # Verify original content wasn't changed
@@ -51,7 +52,7 @@ class TestWriteFile(unittest.TestCase):
         
         exit_code, message = self.tool.execute(directory_path, self.test_content)
         
-        self.assertEqual(exit_code, 2)
+        self.assertEqual(exit_code, ErrorCodes.RESOURCE_EXISTS)
         self.assertIn("is a directory", message)
         
     @patch('builtins.open', side_effect=PermissionError("Permission denied"))
@@ -59,7 +60,7 @@ class TestWriteFile(unittest.TestCase):
         """Test error when permission is denied."""
         exit_code, message = self.tool.execute(self.test_file, self.test_content)
         
-        self.assertEqual(exit_code, 3)
+        self.assertEqual(exit_code, ErrorCodes.PERMISSION_DENIED)
         self.assertIn("Permission denied", message)
         
     def test_directory_does_not_exist(self):
@@ -68,8 +69,7 @@ class TestWriteFile(unittest.TestCase):
         
         exit_code, message = self.tool.execute(nonexistent_path, self.test_content)
         
-        self.assertEqual(exit_code, 4)
-        self.assertIn("Directory", message)
+        self.assertEqual(exit_code, ErrorCodes.RESOURCE_NOT_FOUND)
         self.assertIn("does not exist", message)
         
     @patch('builtins.open', side_effect=Exception("Unknown error"))
@@ -77,7 +77,7 @@ class TestWriteFile(unittest.TestCase):
         """Test handling of unknown errors."""
         exit_code, message = self.tool.execute(self.test_file, self.test_content)
         
-        self.assertEqual(exit_code, 5)
+        self.assertEqual(exit_code, ErrorCodes.UNKNOWN_ERROR)
         self.assertIn("Error creating file", message)
         
     def test_large_file_content(self):
@@ -86,8 +86,8 @@ class TestWriteFile(unittest.TestCase):
         
         exit_code, message = self.tool.execute(self.test_file, large_content)
         
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(message, "")
+        self.assertEqual(exit_code, ErrorCodes.SUCCESS)
+        self.assertIsNone(message)
         
         # Check file size to verify content was written
         self.assertTrue(os.path.getsize(self.test_file) > 90000)  # Approx 10 bytes per line

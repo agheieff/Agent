@@ -1,59 +1,103 @@
-from .error_codes import ErrorCodes, DEFAULT_MESSAGES
+import os
+from dataclasses import dataclass, field
+from typing import List, Optional, Any, Dict
+from .error_codes import ErrorCodes
+from .type_system import ArgumentType
 
+# Re-export important types to simplify imports in tools
+__all__ = [
+    'Tool', 'Argument', 'ToolConfig', 'ErrorCodes', 'ArgumentType'
+]
+
+@dataclass
 class Argument:
-    def __init__(self, name: str, is_optional: bool = False):
-        self.name = name
-        self.is_optional = is_optional
-    
-    def __repr__(self):
-        return f"Argument(name='{self.name}', is_optional={self.is_optional})"
+    name: str
+    arg_type: ArgumentType = ArgumentType.STRING
+    is_optional: bool = False
+    description: Optional[str] = None
+    default_value: Optional[Any] = None
+
+@dataclass
+class ToolConfig:
+    allowed_in_test_mode: bool = False
+    requires_sudo: bool = False
+    requires_internet: bool = False
+    examples: List[str] = field(default_factory=list)
+    timeout: Optional[int] = None
+    max_retries: int = 0
+    id: Optional[str] = None
+    output: Dict[str, bool] = field(default_factory=lambda: {
+        'show_call': True,
+        'show_exit_code': True,
+        'show_output': False
+    })
 
 class Tool:
-    def __init__(self, name=None, description=None, help_text=None, 
-                 allowed_in_test_mode=False, requires_sudo=False, requires_internet=False,
-                 examples=None, timeout=None, arguments=None):
+    def __init__(self,
+                 name: Optional[str] = None,
+                 description: Optional[str] = None,
+                 help_text: Optional[str] = None,
+                 arguments: Optional[List[Argument]] = None,
+                 config: Optional[ToolConfig] = None):
         self.name = name or self.__class__.__name__
         self.description = description or ""
         self.help_text = help_text or self.description
-        self.allowed_in_test_mode = allowed_in_test_mode
-        self.requires_sudo = requires_sudo
-        self.requires_internet = requires_internet
-        self.examples = examples or []
-        self.timeout = timeout
+        self.arguments = arguments or []
+        self.config = config or ToolConfig()
         
-        # List of arguments the tool accepts
-        self.arguments = []
-        if arguments:
-            for arg in arguments:
-                if isinstance(arg, Argument):
-                    self.arguments.append(arg)
-                elif isinstance(arg, tuple):
-                    # Support for (name, is_optional) tuples
-                    name, is_optional = arg if len(arg) > 1 else (arg[0], False)
-                    self.arguments.append(Argument(name, is_optional))
-                elif isinstance(arg, str):
-                    # Support for just argument names as strings (required by default)
-                    self.arguments.append(Argument(arg))
-                else:
-                    raise ValueError(f"Invalid argument specification: {arg}")
-    
-    def execute(self, *args, **kwargs):
-        raise NotImplementedError("Tool subclasses must implement execute()")
-    
-    def get_error_message(self, code: int, message: str = None) -> str:
+    def execute(self, *args, **kwargs) -> tuple[int, Optional[str]]:
+        """Execute the tool with the given arguments.
+        
+        Returns:
+            tuple[int, Optional[str]]: A tuple containing (exit_code, error_message).
+            If successful, error_message will be None.
         """
-        Get the error message for a given code. If a specific message is provided,
-        use that instead of the default message.
+        try:
+            # Process file path arguments if any exist
+            for arg in self.arguments:
+                if arg.arg_type == ArgumentType.FILEPATH and arg.name in kwargs:
+                    kwargs[arg.name] = self._resolve_path(kwargs[arg.name])
+                    
+            return self._execute(*args, **kwargs)
+        except Exception as e:
+            return ErrorCodes.UNKNOWN_ERROR, f"Error executing {self.name}: {str(e)}"
+    
+    def _resolve_path(self, path: str) -> str:
         """
-        if code == ErrorCodes.SUCCESS:
-            return message or ""
-        return message or DEFAULT_MESSAGES.get(code, DEFAULT_MESSAGES[ErrorCodes.UNKNOWN_ERROR])
+        Resolve a file path to make it more intuitive for the agent.
+        
+        This method handles:
+        1. Expanding ~ to the user's home directory
+        2. Converting relative paths to absolute paths
+        3. Normalizing paths to use consistent separators
+        4. Making parent directory references (..) more understandable
+        
+        Args:
+            path: The file path to resolve
+            
+        Returns:
+            A resolved file path
+        """
+        # Expand user directory if path starts with ~
+        if path.startswith('~'):
+            path = os.path.expanduser(path)
+        
+        # If path is not absolute, make it relative to the current working directory
+        if not os.path.isabs(path):
+            path = os.path.join(os.getcwd(), path)
+        
+        # Normalize path (resolve .. and . components and ensure consistent separators)
+        path = os.path.normpath(path)
+        
+        return path
     
-    def __str__(self):
-        return f"{self.name}: {self.description}"
-    
-    def __repr__(self):
-        return (f"Tool(name='{self.name}', description='{self.description}', "
-                f"allowed_in_test_mode={self.allowed_in_test_mode}, "
-                f"requires_sudo={self.requires_sudo}, "
-                f"requires_internet={self.requires_internet})") 
+    def _execute(self, *args, **kwargs) -> tuple[int, Optional[str]]:
+        """Execute the tool with the given arguments.
+        
+        This should be implemented by subclasses.
+        
+        Returns:
+            tuple[int, Optional[str]]: A tuple containing (exit_code, error_message).
+            If successful, error_message will be None.
+        """
+        raise NotImplementedError(f"Tool {self.name} does not implement _execute")

@@ -15,6 +15,7 @@ class ErrorCodes:
     MISSING_REQUIRED_ARGUMENT = 11
     INVALID_ARGUMENT_TYPE = 12
     INVALID_ARGUMENT_VALUE = 13
+    MALFORMED_ARGUMENT = 14  # For arguments that don't match expected format (dates, regex, etc.)
     
     # Permission/Access errors (30-49)
     PERMISSION_DENIED = 30
@@ -49,6 +50,7 @@ DEFAULT_MESSAGES = {
     ErrorCodes.MISSING_REQUIRED_ARGUMENT: "Missing required argument",
     ErrorCodes.INVALID_ARGUMENT_TYPE: "Invalid argument type",
     ErrorCodes.INVALID_ARGUMENT_VALUE: "Invalid argument value",
+    ErrorCodes.MALFORMED_ARGUMENT: "Argument does not match required format",
     
     ErrorCodes.PERMISSION_DENIED: "Permission denied",
     ErrorCodes.AUTHENTICATION_FAILED: "Authentication failed",

@@ -1,3 +1,4 @@
+
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Dict, Any, Optional
@@ -32,6 +33,10 @@ class ToolResult:
 
     def __iter__(self):
         return iter((self.code, self.message or str(self.data)))
+    
+    @property
+    def ok(self):
+        return self.success
 
 class Tool:
     def __init__(self, name: str, description: str, args: List[Argument], config: ToolConfig = None):
@@ -40,23 +45,22 @@ class Tool:
         self.args = args
         self.config = config or ToolConfig()
 
-    def execute(self, **kwargs):
+    def execute(self, **kwargs) -> ToolResult:
         try:
             args = self._validate_args(kwargs)
             result = self._run(args)
-            
             if isinstance(result, tuple):
-                return result
+                # Assume tuple is (code, message)
+                return ToolResult(success=(result[0] == ErrorCodes.SUCCESS), code=result[0], message=result[1])
             elif isinstance(result, ToolResult):
-                return (result.code, result.message or str(result.data))
-            return (0, str(result))
-            
+                return result
+            else:
+                return ToolResult(success=True, code=ErrorCodes.SUCCESS, data=result)
         except Exception as e:
-            return (ErrorCodes.UNKNOWN_ERROR, str(e))
+            return ToolResult(success=False, code=ErrorCodes.UNKNOWN_ERROR, message=str(e))
 
-    def _validate_args(self, kwargs):
-        return {arg.name: kwargs.get(arg.name, arg.default) 
-               for arg in self.args if not arg.optional or arg.name in kwargs}
+    def _validate_args(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        return {arg.name: kwargs.get(arg.name, arg.default) for arg in self.args if not arg.optional or arg.name in kwargs}
 
-    def _run(self, args):
+    def _run(self, args: Dict[str, Any]) -> Any:
         raise NotImplementedError

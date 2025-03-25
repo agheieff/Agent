@@ -31,7 +31,7 @@ class ToolResult:
     data: Any = None
 
     def __iter__(self):
-        return iter((0 if self.success else 1, self.message or str(self.data)))
+        return iter((self.code, self.message or str(self.data)))
 
 class Tool:
     def __init__(self, name: str, description: str, args: List[Argument], config: ToolConfig = None):
@@ -48,11 +48,11 @@ class Tool:
             if isinstance(result, tuple):
                 return result
             elif isinstance(result, ToolResult):
-                return (0 if result.success else 1, result.message or str(result.data))
+                return (result.code, result.message or str(result.data))
             return (0, str(result))
             
         except Exception as e:
-            return (1, str(e))
+            return (ErrorCodes.UNKNOWN_ERROR, str(e))
 
     def _validate_args(self, kwargs):
         return {arg.name: kwargs.get(arg.name, arg.default) 

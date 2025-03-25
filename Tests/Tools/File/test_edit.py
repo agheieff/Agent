@@ -22,7 +22,7 @@ class TestEditFile(unittest.TestCase):
             f.write("Line 3: EditFile Tool\n")
         
         # Read the file first to set last_read_file
-        self.read_tool.execute(self.test_file)
+        self.read_tool.execute(path=self.test_file)
                 
         # Create a binary file (cannot be edited with text encoding)
         self.binary_file = os.path.join(self.temp_dir, "binary_file.bin")
@@ -43,12 +43,12 @@ class TestEditFile(unittest.TestCase):
         self.edit_tool.read_tool.last_read_file = self.test_file
         
         exit_code, message = self.edit_tool.execute(
-            self.test_file, 
-            json.dumps(replacements)
+            filename=self.test_file, 
+            replacements=json.dumps(replacements)
         )
         
         self.assertEqual(exit_code, ErrorCodes.SUCCESS)
-        self.assertIn("Successfully made 2 replacements", message)
+        self.assertIn("Made 2 replacements", message)
         self.assertIn("Hello World", message)
         self.assertIn("Hello Universe", message)
         
@@ -64,18 +64,18 @@ class TestEditFile(unittest.TestCase):
         """Test editing a file that doesn't exist."""
         nonexistent_file = os.path.join(self.temp_dir, "nonexistent.txt")
         exit_code, message = self.edit_tool.execute(
-            nonexistent_file, 
-            json.dumps({"test": "replacement"})
+            filename=nonexistent_file, 
+            replacements=json.dumps({"test": "replacement"})
         )
         
         self.assertEqual(exit_code, ErrorCodes.RESOURCE_NOT_FOUND)
-        self.assertIn("does not exist", message)
+        self.assertIn("not found", message)
     
     def test_edit_directory(self):
         """Test editing a directory instead of a file."""
         exit_code, message = self.edit_tool.execute(
-            self.temp_dir, 
-            json.dumps({"test": "replacement"})
+            filename=self.temp_dir,
+            replacements=json.dumps({"test": "replacement"})
         )
         
         self.assertEqual(exit_code, ErrorCodes.RESOURCE_EXISTS)
@@ -89,12 +89,12 @@ class TestEditFile(unittest.TestCase):
             
         # Try to edit without reading
         exit_code, message = self.edit_tool.execute(
-            new_file, 
-            json.dumps({"test": "replacement"})
+            filename=new_file, 
+            replacements=json.dumps({"test": "replacement"})
         )
         
         self.assertEqual(exit_code, ErrorCodes.INVALID_OPERATION)
-        self.assertIn("has not been read first", message)
+        self.assertIn("must be read first", message)
     
     def test_edit_pattern_not_found(self):
         """Test editing with a pattern that doesn't exist."""
@@ -102,8 +102,8 @@ class TestEditFile(unittest.TestCase):
         self.edit_tool.read_tool.last_read_file = self.test_file
         
         exit_code, message = self.edit_tool.execute(
-            self.test_file, 
-            json.dumps({"NonexistentPattern": "replacement"})
+            filename=self.test_file, 
+            replacements=json.dumps({"NonexistentPattern": "replacement"})
         )
         
         self.assertEqual(exit_code, ErrorCodes.RESOURCE_NOT_FOUND)
@@ -117,13 +117,13 @@ class TestEditFile(unittest.TestCase):
             f.write("repeat pattern\n" * 3)
         
         # Read the file first - make sure we directly set the last_read_file
-        self.read_tool.execute(repeat_file)
+        self.read_tool.execute(path=repeat_file)
         self.edit_tool.read_tool.last_read_file = repeat_file
         
         # Try to edit
         exit_code, message = self.edit_tool.execute(
-            repeat_file, 
-            json.dumps({"repeat pattern": "replaced"})
+            filename=repeat_file, 
+            replacements=json.dumps({"repeat pattern": "replaced"})
         )
         
         self.assertEqual(exit_code, ErrorCodes.INVALID_OPERATION)
@@ -135,8 +135,8 @@ class TestEditFile(unittest.TestCase):
         self.edit_tool.read_tool.last_read_file = self.test_file
         
         exit_code, message = self.edit_tool.execute(
-            self.test_file, 
-            "invalid json"
+            filename=self.test_file, 
+            replacements="invalid json"
         )
         
         self.assertEqual(exit_code, ErrorCodes.INVALID_ARGUMENT_VALUE)
@@ -148,12 +148,12 @@ class TestEditFile(unittest.TestCase):
         self.edit_tool.read_tool.last_read_file = self.test_file
         
         exit_code, message = self.edit_tool.execute(
-            self.test_file, 
-            json.dumps(["array", "not", "dict"])
+            filename=self.test_file, 
+            replacements=json.dumps(["array", "not", "dict"])
         )
         
         self.assertEqual(exit_code, ErrorCodes.INVALID_ARGUMENT_VALUE)
-        self.assertIn("must be a JSON object", message)
+        self.assertIn("JSON object", message)
     
     def test_edit_no_write_permission(self):
         """Test editing a file without write permission."""
@@ -167,19 +167,21 @@ class TestEditFile(unittest.TestCase):
             f.write("test content")
         
         # Read the file first
-        self.read_tool.execute(no_write_file)
+        self.read_tool.execute(path=no_write_file)
         
         # Remove write permissions
         os.chmod(no_write_file, 0o400)  # Read-only permission
         
         try:
             exit_code, message = self.edit_tool.execute(
-                no_write_file, 
-                json.dumps({"test": "replacement"})
+                filename=no_write_file, 
+                replacements=json.dumps({"test": "replacement"})
             )
             
             self.assertEqual(exit_code, ErrorCodes.PERMISSION_DENIED)
             self.assertIn("No write permission", message)
+            # Ensure file still exists
+            self.assertTrue(os.path.exists(no_write_file))
         finally:
             # Restore permissions for cleanup
             os.chmod(no_write_file, 0o600)
@@ -190,12 +192,10 @@ class TestEditFile(unittest.TestCase):
         self.edit_tool.read_tool.last_read_file = self.binary_file
         
         exit_code, message = self.edit_tool.execute(
-            self.binary_file, 
-            json.dumps({"test": "replacement"})
+            filename=self.binary_file, 
+            replacements=json.dumps({"test": "replacement"})
         )
         
-        # The actual error code used is INVALID_OPERATION (2) when file has been read
-        # but cannot be processed for editing
         self.assertEqual(exit_code, ErrorCodes.INVALID_OPERATION)
         self.assertIn("Unable to decode file", message)
     
@@ -206,12 +206,12 @@ class TestEditFile(unittest.TestCase):
         
         with patch('builtins.open', side_effect=Exception("Unexpected error")):
             exit_code, message = self.edit_tool.execute(
-                self.test_file, 
-                json.dumps({"Hello World": "Hello Universe"})
+                filename=self.test_file, 
+                replacements=json.dumps({"Hello World": "Hello Universe"})
             )
             
             self.assertEqual(exit_code, ErrorCodes.UNKNOWN_ERROR)
             self.assertIn("Error editing file", message)
 
 if __name__ == '__main__':
-    unittest.main() 
+    unittest.main()

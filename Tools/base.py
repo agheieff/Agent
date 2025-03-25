@@ -9,7 +9,7 @@ class ArgumentType(Enum):
     FLOAT = auto()
     FILEPATH = auto()
 
-@dataclass
+@dataclass 
 class Argument:
     name: str
     type: ArgumentType
@@ -17,11 +17,11 @@ class Argument:
     optional: bool = False
     default: Any = None
 
-@dataclass
 class Tool:
-    name: str
-    description: str
-    args: List[Argument]
+    def __init__(self, name: str, description: str, args: List[Argument]):
+        self.name = name
+        self.description = description 
+        self.args = args
 
     def execute(self, **kwargs) -> Dict[str, Any]:
         try:
@@ -31,12 +31,11 @@ class Tool:
             return {"success": False, "error": str(e)}
 
     def _validate_args(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        validated = {}
-        for arg in self.args:
-            if not arg.optional and arg.name not in args:
-                raise ValueError(f"Missing required argument: {arg.name}")
-            validated[arg.name] = args.get(arg.name, arg.default)
-        return validated
+        return {
+            arg.name: args.get(arg.name, arg.default)
+            for arg in self.args 
+            if not arg.optional or arg.name in args
+        }
 
     def _run(self, args: Dict[str, Any]):
         raise NotImplementedError

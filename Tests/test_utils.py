@@ -4,6 +4,7 @@ import shutil
 import unittest
 from Tools.base import ToolResult
 from Tools.error_codes import ErrorCodes
+from dotenv import load_dotenv
 
 class FileTestCase(unittest.TestCase):
     """Base class for tests that need file operations"""
@@ -31,8 +32,10 @@ def assertToolFailure(self, result: ToolResult, expected_code: ErrorCodes):
 
 class ProviderTestCase(unittest.TestCase):
     """Base class for provider API tests"""
-    provider = None  # Override in subclass
+    provider = None  # Must be overridden in subclasses
     
     def setUp(self):
+        load_dotenv()  # Now properly imported
+        
         if not os.getenv(f"{self.provider.upper()}_API_KEY"):
-            self.skipTest(f"No API key found for {self.provider}")
+            self.skipTest(f"No API key found for {self.provider}. Set {self.provider.upper()}_API_KEY environment variable.")

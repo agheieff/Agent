@@ -1,3 +1,4 @@
+import importlib
 import os
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Any
@@ -41,20 +42,33 @@ class BaseClient:
     def __init__(self, config: ProviderConfig):
         self.config = config
         self.api_key = os.getenv(config.api_key_env)
-        if self.api_key:
+        self.client = None
+        self._initialize()
+        
+    def _initialize(self):
+        if not self.api_key:
+            raise ValueError(f"API key not found in {self.config.api_key_env}")
+            
+        try:
+            if self.config.requires_import:
+                importlib.import_module(self.config.requires_import)
             self.client = self._initialize_client()
-        else:
-            self.client = None
-
-    def _initialize_client(self):
-        raise NotImplementedError
+        except ImportError as e:
+            raise ImportError(f"Required package not installed: {self.config.requires_import}") from e
+        except Exception as e:
+            raise RuntimeError(f"Client initialization failed: {str(e)}") from e
 
     def get_available_models(self):
         return list(self.config.models.keys())
 
-    def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
-        if not self.client:
-            raise ValueError(f"No API key found for {self.config.name}. Set {self.config.api_key_env} environment variable.")
+    def chat_completion(self, messages: List[Message], model: str = None, max_retries=3, **kwargs):
+        for attempt in range(max_retries):
+            try:
+                return self._chat_completion(messages, model, **kwargs)
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(2 ** attempt)
         
         model_config = self._get_model_config(model)
         response = self._call_api(messages=messages, model=model_config.name, **kwargs)

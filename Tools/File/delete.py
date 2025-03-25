@@ -1,4 +1,3 @@
-
 import os
 from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ToolResult, ArgumentType
 
@@ -27,7 +26,7 @@ class DeleteFile(Tool):
     def _run(self, args):
         if not os.path.exists(args['filename']):
             return ToolResult(success=False, code=ErrorCodes.RESOURCE_NOT_FOUND, 
-                              message=f"File '{args['filename']}' not found")
+                              message=f"File '{args['filename']}' does not exist")
         if os.path.isdir(args['filename']):
             return ToolResult(success=False, code=ErrorCodes.RESOURCE_EXISTS,
                               message=f"'{args['filename']}' is a directory")
@@ -39,5 +38,5 @@ class DeleteFile(Tool):
             return ToolResult(success=False, code=ErrorCodes.PERMISSION_DENIED,
                               message="Permission denied")
         except Exception as e:
-            return ToolResult(success=False, code=ErrorCodes.OPERATION_FAILED,
+            return ToolResult(success=False, code=ErrorCodes.UNKNOWN_ERROR,
                               message=str(e))

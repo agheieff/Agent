@@ -5,7 +5,7 @@ import argparse
 import importlib
 import inspect
 import dotenv
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Any
 from Core.agent_runner import AgentRunner
 from Core.utils import get_multiline_input
 
@@ -43,16 +43,14 @@ def discover_providers() -> Dict[str, Any]:
             try:
                 # Import the module
                 module = importlib.import_module(f"Clients.API.{module_name}")
+                provider_name = module_name.lower()
+                env_var_name = f"{provider_name.upper()}_API_KEY"
                 
-                # Look for client classes that inherit from BaseClient
+                # Look for client classes that are defined in this module
                 for name, obj in inspect.getmembers(module):
                     if (inspect.isclass(obj) and 
-                        name.endswith('Client')):
-                        
-                        provider_name = module_name.lower()
-                        
-                        # Check if there's an API key for this provider
-                        env_var_name = f"{provider_name.upper()}_API_KEY"
+                        name.endswith('Client') and 
+                        name.lower().startswith(provider_name)):
                         if os.environ.get(env_var_name):
                             providers[provider_name] = obj
                         break
@@ -256,4 +254,4 @@ def main():
     agent.run(initial_prompt)
 
 if __name__ == "__main__":
-    main() 
+    main()

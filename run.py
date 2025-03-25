@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import sys
 import argparse
@@ -128,6 +129,7 @@ def interactive_model_selection(provider_name: str, provider_class: Any) -> str:
 
 def main():
     load_env_variables()
+    print("a")
     
     # Discover providers
     providers = discover_providers()

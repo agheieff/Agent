@@ -8,7 +8,7 @@ class ReadFile(Tool):
             args=[
                 Argument("path", ArgumentType.FILEPATH, "File path"),
                 Argument("lines", ArgumentType.INT, "Lines to read", 
-                        optional=True, default=100)
+                        is_optional=True, default_value=100)
             ]
         )
 

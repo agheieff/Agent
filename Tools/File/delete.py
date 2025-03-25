@@ -53,4 +53,4 @@ class DeleteFile(Tool):
         except OSError as e:
             return ErrorCodes.OPERATION_FAILED, f"OS error when deleting file '{filename}': {e.strerror}"
         except Exception as e:
-            return ErrorCodes.UNKNOWN_ERROR, f"Unexpected error: {str(e)}" 
+            return ErrorCodes.UNKNOWN_ERROR, f"Unexpected error: {str(e)}"

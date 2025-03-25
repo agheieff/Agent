@@ -4,7 +4,7 @@ import tempfile
 import shutil
 from unittest.mock import patch
 from Tools.File.delete import DeleteFile
-from Tools.base import ErrorCodes
+from Tools.base import ErrorCodes, ToolResult
 
 class TestDeleteFile(unittest.TestCase):
     def setUp(self):
@@ -21,26 +21,26 @@ class TestDeleteFile(unittest.TestCase):
     
     def test_delete_file_success(self):
         """Test deleting a file successfully."""
-        exit_code, message = self.tool.execute(self.test_file)
-        
-        self.assertEqual(exit_code, ErrorCodes.SUCCESS)
-        self.assertIn("deleted successfully", message)
+        result = self.tool.execute(filename=self.test_file)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.code, ErrorCodes.SUCCESS)
+        self.assertIn("deleted successfully", result.message)
         self.assertFalse(os.path.exists(self.test_file))
     
     def test_delete_nonexistent_file(self):
         """Test deleting a file that doesn't exist."""
         nonexistent_file = os.path.join(self.temp_dir, "nonexistent.txt")
-        exit_code, message = self.tool.execute(nonexistent_file)
-        
-        self.assertEqual(exit_code, ErrorCodes.RESOURCE_NOT_FOUND)
-        self.assertIn("does not exist", message)
+        result = self.tool.execute(filename=nonexistent_file)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.code, ErrorCodes.RESOURCE_NOT_FOUND)
+        self.assertIn("does not exist", result.message)
     
     def test_delete_directory(self):
         """Test deleting a directory instead of a file."""
-        exit_code, message = self.tool.execute(self.temp_dir)
-        
-        self.assertEqual(exit_code, ErrorCodes.RESOURCE_EXISTS)
-        self.assertIn("is a directory", message)
+        result = self.tool.execute(filename=self.temp_dir)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.code, ErrorCodes.RESOURCE_EXISTS)
+        self.assertIn("is a directory", result.message)
         # Ensure directory still exists
         self.assertTrue(os.path.exists(self.temp_dir))
     
@@ -63,10 +63,10 @@ class TestDeleteFile(unittest.TestCase):
         os.chmod(no_write_dir, 0o500)  # r-x permission
         
         try:
-            exit_code, message = self.tool.execute(file_path)
-            
-            self.assertEqual(exit_code, ErrorCodes.PERMISSION_DENIED)
-            self.assertIn("No write permission", message)
+            result = self.tool.execute(filename=file_path)
+            self.assertFalse(result.ok)
+            self.assertEqual(result.code, ErrorCodes.PERMISSION_DENIED)
+            self.assertIn("No write permission", result.message)
             # Ensure file still exists
             self.assertTrue(os.path.exists(file_path))
         finally:
@@ -76,34 +76,32 @@ class TestDeleteFile(unittest.TestCase):
     def test_delete_with_permission_error(self):
         """Test handling of permission errors during deletion."""
         with patch('os.remove', side_effect=PermissionError("Permission denied")):
-            exit_code, message = self.tool.execute(self.test_file)
-            
-            self.assertEqual(exit_code, ErrorCodes.PERMISSION_DENIED)
-            self.assertIn("Permission denied", message)
+            result = self.tool.execute(filename=self.test_file)
+            self.assertFalse(result.ok)
+            self.assertEqual(result.code, ErrorCodes.PERMISSION_DENIED)
+            self.assertIn("Permission denied", result.message)
     
     def test_delete_with_os_error(self):
         """Test handling of OS errors during deletion."""
         with patch('os.remove', side_effect=OSError(123, "OS error message")):
-            exit_code, message = self.tool.execute(self.test_file)
-            
-            self.assertEqual(exit_code, ErrorCodes.OPERATION_FAILED)
-            self.assertIn("OS error", message)
-            self.assertIn("OS error message", message)
+            result = self.tool.execute(filename=self.test_file)
+            self.assertFalse(result.ok)
+            self.assertEqual(result.code, ErrorCodes.OPERATION_FAILED)
+            self.assertIn("OS error", result.message)
+            self.assertIn("OS error message", result.message)
     
     def test_delete_with_unexpected_error(self):
         """Test handling of unexpected errors during deletion."""
         with patch('os.remove', side_effect=Exception("Unexpected error")):
-            exit_code, message = self.tool.execute(self.test_file)
-            
-            self.assertEqual(exit_code, ErrorCodes.UNKNOWN_ERROR)
-            self.assertIn("Unexpected error", message)
+            result = self.tool.execute(filename=self.test_file)
+            self.assertFalse(result.ok)
+            self.assertEqual(result.code, ErrorCodes.UNKNOWN_ERROR)
+            self.assertIn("Unexpected error", result.message)
     
     def test_delete_with_force_parameter(self):
         """Test the force parameter is received correctly."""
-        # This test doesn't really test functionality since force doesn't change behavior,
-        # but it verifies the parameter is correctly passed to the method
         with patch.object(self.tool, '_execute', wraps=self.tool._execute) as mock_execute:
-            self.tool.execute(self.test_file, force=True)
+            self.tool.execute(filename=self.test_file, force=True)
             # Check that _execute was called with the right parameters
             self.assertEqual(mock_execute.call_args.args[0], self.test_file)
             self.assertEqual(mock_execute.call_args.kwargs['force'], True)

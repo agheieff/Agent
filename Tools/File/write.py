@@ -9,8 +9,8 @@ class WriteFile(Tool):
             args=[
                 Argument("path", ArgumentType.FILEPATH, "File path"),
                 Argument("content", ArgumentType.STRING, "Content to write"),
-                Argument("overwrite", ArgumentType.BOOLEAN, 
-                        "Overwrite if exists", optional=True, default=False)
+                Argument("overwrite", ArgumentType.BOOLEAN,
+                        "Overwrite if exists", is_optional=True, default_value=False)
             ]
         )
 

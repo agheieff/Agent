@@ -9,6 +9,7 @@ DEEPSEEK_CONFIG = ProviderConfig(
     api_base="https://api.deepseek.com/v1",
     api_key_env="DEEPSEEK_API_KEY",
     default_model="deepseek-chat",
+    requires_import="openai",  # Added this line
     models={
         "deepseek-chat": ModelConfig(
             name="deepseek-chat",
@@ -36,10 +37,11 @@ DEEPSEEK_CONFIG = ProviderConfig(
 )
 
 class DeepSeekClient(BaseClient):
-    def __init__(self, config=None):
+    def __init__(self, config: ProviderConfig = None):
+        self.timeout = 30.0
+        self.max_retries = 3
         config = config or DEEPSEEK_CONFIG
         super().__init__(config)
-        self.timeout = 30.0
         self.default_model = config.default_model
 
     def _initialize_client(self):
@@ -47,7 +49,8 @@ class DeepSeekClient(BaseClient):
         return openai.AsyncOpenAI(
             api_key=self.api_key,
             base_url=self.config.api_base,
-            timeout=self.timeout
+            timeout=self.timeout,
+            max_retries=self.max_retries
         )
 
     def _format_messages(self, messages: List[Message]) -> List[Dict[str, str]]:

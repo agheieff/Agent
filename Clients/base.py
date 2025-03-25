@@ -77,5 +77,5 @@ class BaseClient:
     def _process_response(self, response):
         raise NotImplementedError("Subclasses must implement _process_response")
 
-    def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
+    async def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
         raise NotImplementedError("Subclasses must implement chat_completion")

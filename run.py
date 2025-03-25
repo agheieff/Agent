@@ -62,41 +62,20 @@ def discover_providers() -> Dict[str, Any]:
     return providers
 
 def get_available_models(provider_class: Any) -> List[str]:
-    """
-    Get available models for a provider.
-    
-    Args:
-        provider_class: The provider client class
-    
-    Returns:
-        List of model names
-    """
     try:
-        # Create a temporary instance of the provider class
+        # Create an instance of the provider client without hardcoding configs
         provider_instance = provider_class()
-        # Return sorted list of model names
         return sorted(provider_instance.get_available_models())
     except Exception as e:
         print(f"Error getting models for provider: {e}")
         return []
 
 def interactive_provider_selection(providers: Dict[str, Any]) -> Tuple[str, Any]:
-    """
-    Interactively select a provider from the available options.
-    
-    Args:
-        providers: Dict mapping provider names to their client classes
-    
-    Returns:
-        Tuple of (provider_name, provider_class)
-    """
     if not providers:
         print("Error: No valid providers found with API keys set.")
         print("Please set API keys in your .env file for at least one provider:")
-        print("  OPENAI_API_KEY=your_key_here")
         print("  ANTHROPIC_API_KEY=your_key_here")
         print("  DEEPSEEK_API_KEY=your_key_here")
-        print("  GOOGLE_API_KEY=your_key_here (for Gemini)")
         sys.exit(1)
     
     provider_names = sorted(providers.keys())
@@ -216,61 +195,65 @@ def main():
         # Get available models for this provider
         available_models = get_available_models(provider_class)
         
-        # If no model specified, let the user select one
-        if not args.model:
-            print(f"\nAvailable {provider_name} models:")
-            for i, model in enumerate(available_models, start=1):
-                print(f"  {i}. {model}")
-            print()
+        if not available_models:
+            print(f"\nError: No models available for provider '{provider_name}'")
+            sys.exit(1)
             
-            # Get model selection from user
-            choice = input("Select a model (number or name): ")
-            
-            # Handle selection by number
-            if choice.isdigit() and 1 <= int(choice) <= len(available_models):
-                model_name = available_models[int(choice) - 1]
-            # Handle selection by name 
-            elif choice in available_models:
-                model_name = choice
+        # If model was specified in args
+        if args.model:
+            if args.model in available_models:
+                model_name = args.model
             else:
-                print(f"Error: Invalid model selection: '{choice}'")
-                sys.exit(1)
-        else:
-            # Use the specified model
-            model_name = args.model
-            # Validate it
-            if model_name not in available_models:
-                print(f"Error: Model '{model_name}' not found for provider '{provider_name}'.")
+                print(f"\nError: Model '{args.model}' not found for provider '{provider_name}'")
                 print(f"Available models: {', '.join(available_models)}")
                 sys.exit(1)
+        else:
+            # Interactive model selection
+            print(f"\nAvailable {provider_name} models:")
+            for i, model in enumerate(available_models, 1):
+                print(f"  {i}. {model}")
+            
+            while True:
+                choice = input("\nSelect a model (number or name, or 'q' to quit): ").strip()
+                if choice.lower() == 'q':
+                    sys.exit(0)
+                
+                # Check if input is a number
+                if choice.isdigit():
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(available_models):
+                        model_name = available_models[idx]
+                        break
+                    print(f"Please enter a number between 1 and {len(available_models)}")
+                # Check if input is a model name
+                elif choice in available_models:
+                    model_name = choice
+                    break
+                else:
+                    print(f"Model '{choice}' not found. Please try again.")
         
     except Exception as e:
-        print(f"Error: Failed to get models for provider '{provider_name}': {str(e)}")
+        print(f"\nError: Failed to get models for provider '{provider_name}': {str(e)}")
         sys.exit(1)
-    
-    # Get the initial prompt
-    initial_prompt = args.prompt
-    
-    if args.prompt_file:
+        
+    # Get initial prompt
+    initial_prompt = ""
+    if args.prompt:
+        initial_prompt = args.prompt
+    elif args.prompt_file:
         try:
-            with open(args.prompt_file, 'r') as file:
-                initial_prompt = file.read().strip()
+            with open(args.prompt_file, 'r') as f:
+                initial_prompt = f.read().strip()
         except Exception as e:
-            sys.exit(f"Error reading prompt file: {str(e)}")
+            print(f"Error reading prompt file: {e}")
+            sys.exit(1)
+    else:
+        initial_prompt = get_multiline_input("Enter your prompt (press Enter twice to submit): ")
     
-    if not initial_prompt:
-        print("\nEnter your initial prompt for the agent (press Enter twice to submit):")
-        initial_prompt = get_multiline_input("> ")
-    
-    # Create and run the agent
-    try:
-        print(f"\nStarting agent with provider: {provider_name}, model: {model_name}")
-        agent = AgentRunner(provider_name, model_name)
-        agent.run(initial_prompt)
-    except KeyboardInterrupt:
-        print("\nInterrupted by user. Exiting...")
-    except Exception as e:
-        print(f"Error running agent: {str(e)}")
+    # Initialize and run the agent
+    print(f"\nInitializing agent with {provider_name} provider and {model_name} model...")
+    agent = AgentRunner(provider_name, model_name)
+    agent.run(initial_prompt)
 
 if __name__ == "__main__":
     main() 

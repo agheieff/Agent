@@ -25,18 +25,20 @@ ANTHROPIC_CONFIG = ProviderConfig(
 )
 
 class AnthropicClient(BaseClient):
-    def __init__(self, config=ANTHROPIC_CONFIG):
+    def __init__(self, config=None):
         self.timeout = 30.0  # seconds (use float for timeout)
         self.max_retries = 3
+        config = config or ANTHROPIC_CONFIG
         super().__init__(config)
         self.client = None  # Initialize client attribute
 
     def _initialize_client(self):
-        return anthropic.AsyncAnthropic(
+        self.client = anthropic.AsyncAnthropic(
             api_key=self.api_key,
             timeout=self.timeout,
             max_retries=self.max_retries
         )
+        return self.client
 
     def _format_messages(self, messages: List[Message]) -> (List[Dict[str, str]], Optional[str]):
         formatted = []

@@ -36,10 +36,12 @@ DEEPSEEK_CONFIG = ProviderConfig(
 )
 
 class DeepSeekClient(BaseClient):
-    def __init__(self, config=DEEPSEEK_CONFIG):
+    def __init__(self, config=None):
+        config = config or DEEPSEEK_CONFIG
         super().__init__(config)
         self.timeout = 30.0
         self.client = None
+        self.default_model = config.default_model
 
     def _initialize_client(self):
         import openai
@@ -71,9 +73,9 @@ class DeepSeekClient(BaseClient):
             return ""
         return response.choices[0].message.content
 
-    def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
+    async def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
         model_config = self._get_model_config(model)
-        response = self._call_api(messages=messages, model=model_config.name, **kwargs)
+        response = await self._call_api(messages=messages, model=model_config.name, **kwargs)
         return self._process_response(response)
 
     def calculate_cost(self, model_name: str, input_tokens: int, output_tokens: int, cache_hit: bool = True) -> float:

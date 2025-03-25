@@ -22,19 +22,17 @@ fi
 echo -e "${GREEN}Activating virtual environment...${NC}"
 source .venv/bin/activate
 
-# Install requirements
+# Update pip first
+echo -e "${GREEN}Updating pip to latest version...${NC}"
+pip install --upgrade pip
+
+# Install core requirements
 echo -e "${GREEN}Installing dependencies from requirements.txt...${NC}"
 pip install -r requirements.txt
 
-# Also install test requirements if they exist
-if [ -f "Requirements/requirements.txt" ]; then
-    echo -e "${GREEN}Installing test dependencies from Requirements/requirements.txt...${NC}"
-    pip install -r Requirements/requirements.txt
-fi
-
-# Update pip
-echo -e "${GREEN}Updating pip to latest version...${NC}"
-pip install --upgrade pip
+# Install development and test dependencies
+echo -e "${GREEN}Installing development dependencies...${NC}"
+pip install pytest pytest-cov pytest-mock
 
 # Check for .env file and inform user
 if [ -f ".env" ]; then
@@ -44,8 +42,8 @@ else
     echo -e "${YELLOW}Create a .env file with the following variables:${NC}"
     echo -e "OPENAI_API_KEY=your_key_here"
     echo -e "ANTHROPIC_API_KEY=your_key_here"
-    echo -e "DEEPSEEK_API_KEY=your_key_here (optional)"
-    echo -e "GOOGLE_API_KEY=your_key_here (optional for Gemini)"
+    echo -e "DEEPSEEK_API_KEY=your_key_here"
+    echo -e "GOOGLE_API_KEY=your_key_here (for Gemini)"
 fi
 
 # Make run.py executable
@@ -61,4 +59,4 @@ echo -e "    source .venv/bin/activate"
 echo -e "${YELLOW}To run the agent, use:${NC}"
 echo -e "    ./run.py                                # Interactive provider/model selection"
 echo -e "    ./run.py --provider anthropic           # Select model interactively"
-echo -e "    ./run.py --provider openai --model gpt-4 # Specify both provider and model" 
+echo -e "    ./run.py --provider openai --model gpt-4 # Specify both provider and model"

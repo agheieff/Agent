@@ -3,7 +3,8 @@ Tools package for agent operations.
 """
 
 # Import base components
-from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType
+from Tools.base import Tool, Argument, ToolConfig, ArgumentType
+from Tools.error_codes import ErrorCodes
 
 # Import File tools
 from Tools.File.read import ReadFile
@@ -26,4 +27,4 @@ __all__ = [
     
     # Special tools
     'Message', 'Pause', 'End'
-] 
+]

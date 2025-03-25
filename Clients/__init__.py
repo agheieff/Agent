@@ -10,8 +10,8 @@ from Clients.base import (
     BaseClient,
     Message,
     ModelConfig,
-    PromptStyle,
     PricingTier,
+    ProviderConfig,
     UsageStats
 )
 
@@ -32,18 +32,17 @@ except ImportError:
     GeminiClient = None
 
 try:
-    from Clients.API.deepseek import DeepSeekClient, ReasoningExtractor
+    from Clients.API.deepseek import DeepSeekClient
 except ImportError:
     DeepSeekClient = None
-    ReasoningExtractor = None
 
 __all__ = [
     # Base classes
     "BaseClient",
     "Message",
     "ModelConfig",
-    "PromptStyle",
     "PricingTier",
+    "ProviderConfig",
     "UsageStats",
     
     # Client implementations
@@ -51,7 +50,4 @@ __all__ = [
     "AnthropicClient",
     "GeminiClient",
     "DeepSeekClient",
-    
-    # Utility classes
-    "ReasoningExtractor",
-] 
+]

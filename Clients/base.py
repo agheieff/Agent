@@ -8,10 +8,15 @@ class Message:
     content: str
 
 @dataclass
+class PricingTier:
+    input: float  # cost per 1000 input tokens
+    output: float  # cost per 1000 output tokens
+
+@dataclass
 class ModelConfig:
     name: str
     context_length: int
-    pricing: Dict[str, float]  # input/output costs per token
+    pricing: PricingTier
 
 @dataclass
 class ProviderConfig:
@@ -20,24 +25,39 @@ class ProviderConfig:
     api_key_env: str
     models: Dict[str, ModelConfig]
     default_model: str
+    requires_import: Optional[str] = None
+
+@dataclass
+class UsageStats:
+    input_tokens: int
+    output_tokens: int
+    cost: float
 
 class BaseClient:
     def __init__(self, config: ProviderConfig):
         self.config = config
         self.api_key = os.getenv(config.api_key_env)
-        self.client = self._initialize_client() if self.api_key else None
+        if self.api_key:
+            self.client = self._initialize_client()
+        else:
+            self.client = None
 
     def _initialize_client(self):
         raise NotImplementedError
 
     def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
+        if not self.client:
+            raise ValueError(f"No API key found for {self.config.name}. Set {self.config.api_key_env} environment variable.")
+        
         model_config = self._get_model_config(model)
-        formatted = self._format_messages(messages)
-        response = self._call_api(messages=formatted, model=model_config.name, **kwargs)
+        response = self._call_api(messages=messages, model=model_config.name, **kwargs)
         return self._process_response(response)
 
     def _get_model_config(self, model_name: str) -> ModelConfig:
-        return self.config.models.get(model_name or self.config.default_model)
+        model = model_name or self.config.default_model
+        if model not in self.config.models:
+            raise ValueError(f"Model {model} not found in {self.config.name} config")
+        return self.config.models[model]
 
     def _format_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
         return [{"role": msg.role, "content": msg.content} for msg in messages]

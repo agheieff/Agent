@@ -2,7 +2,8 @@ import os
 import tempfile
 import shutil
 import unittest
-from Tools.base import ToolResult, ErrorCode
+from Tools.base import ToolResult
+from Tools.error_codes import ErrorCodes
 
 class FileTestCase(unittest.TestCase):
     """Base class for tests that need file operations"""
@@ -20,11 +21,13 @@ class FileTestCase(unittest.TestCase):
     
     def assertToolSuccess(self, result: ToolResult):
         self.assertTrue(result.ok, 
-                       f"Expected success but got error: {result.code.name} - {result.message}")
+                       f"Expected success but got error: {result.code} - {result.message}")
+        self.assertEqual(result.code, ErrorCodes.SUCCESS)
     
-    def assertToolFailure(self, result: ToolResult, expected_code: ErrorCode):
+    def assertToolFailure(self, result: ToolResult, expected_code: ErrorCodes):
+        self.assertFalse(result.ok)
         self.assertEqual(result.code, expected_code,
-                       f"Expected {expected_code.name} but got {result.code.name}")
+                       f"Expected {expected_code.name} but got {result.code}")
 
 class ProviderTestCase(unittest.TestCase):
     """Base class for provider API tests"""

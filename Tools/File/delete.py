@@ -34,9 +34,12 @@ class DeleteFile(Tool):
             os.remove(args['filename'])
             return ToolResult(success=True, code=ErrorCodes.SUCCESS,
                               message=f"File '{args['filename']}' deleted successfully")
-        except PermissionError:
+        except PermissionError as pe:
             return ToolResult(success=False, code=ErrorCodes.PERMISSION_DENIED,
-                              message="No write permission")
+                              message=str(pe))
+        except OSError as oe:
+            return ToolResult(success=False, code=ErrorCodes.OPERATION_FAILED,
+                              message=str(oe))
         except Exception as e:
             return ToolResult(success=False, code=ErrorCodes.UNKNOWN_ERROR,
                               message=str(e))

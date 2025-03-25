@@ -16,17 +16,19 @@ def parse_tool_call(text: str) -> Dict[str, Any]:
         line = line.strip()
         if not line:
             continue
-            
+
         if ': ' in line:
-            if current_key:  # Save previous multi-line value
+            if current_key and current_value:
                 args[current_key] = '\n'.join(current_value).strip()
                 current_value = []
             key, val = line.split(': ', 1)
             current_key = key.strip()
             val = val.strip()
             if val == '<<<':
-                continue  # Start multi-line
+                # Start multi-line mode; keep current_key for accumulation.
+                continue
             args[current_key] = val
+            current_key = None  # Clear current_key after a single-line assignment.
         elif line == '>>>':
             if current_key:
                 args[current_key] = '\n'.join(current_value).strip()
@@ -35,7 +37,7 @@ def parse_tool_call(text: str) -> Dict[str, Any]:
         elif current_key:
             current_value.append(line)
     
-    if current_key:  # Save any remaining multi-line value
+    if current_key and current_value:
         args[current_key] = '\n'.join(current_value).strip()
     
     return {'tool': match.group('name'), 'args': args}
@@ -56,7 +58,7 @@ class Executor:
             tool = self.tools.get(parsed['tool'])
             
             if not tool:
-                return format_result(parsed['tool'], 1, f"Tool not found")
+                return format_result(parsed['tool'], 1, "Tool not found")
                 
             result = tool.execute(**parsed['args'])
             

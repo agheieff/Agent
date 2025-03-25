@@ -26,7 +26,7 @@ class WriteFile(Tool):
                               message=f"No write permission in '{dirname}'")
         if os.path.exists(args['path']) and not args['overwrite']:
             return ToolResult(success=False, code=ErrorCodes.RESOURCE_EXISTS,
-                              message=f"File '{args['path']}' exists and overwrite=False")
+                              message=f"File '{args['path']}' already exists and overwrite=False")
         try:
             with open(args['path'], 'w') as f:
                 f.write(args['content'])

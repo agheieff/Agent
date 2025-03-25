@@ -1,4 +1,3 @@
-
 import os
 import json
 from dataclasses import dataclass
@@ -32,7 +31,6 @@ class PromptGenerator:
 
 def get_tool_info(tool_instance: Tool) -> ToolInfo:
     """Extracts metadata from a Tool instance."""
-    # Convert each Argument into a dictionary
     arg_list = []
     if hasattr(tool_instance, "args"):
         for arg in tool_instance.args:
@@ -41,7 +39,6 @@ def get_tool_info(tool_instance: Tool) -> ToolInfo:
                 "type": arg.arg_type.name,
                 "description": arg.description
             })
-    # If the tool has any usage examples, capture them (or skip if not present).
     examples = getattr(tool_instance, "examples", [])
     return ToolInfo(
         name=tool_instance.name,
@@ -56,10 +53,44 @@ def discover_tools() -> List[Tool]:
     Returns a list of Tool instances.
     """
     registry = ToolRegistry()
-    # Trigger actual discovery so registry is populated
+    # Trigger discovery so that the registry is populated
     registry.discover_tools()
-    # Return the list of tool instances
-    return list(registry.get_all().values())
+    # Sort the tools alphabetically by name for consistency
+    return sorted(list(registry.get_all().values()), key=lambda t: t.name)
+
+def generate_tools_overview() -> str:
+    """
+    Generate an overview of available tools including the file structure
+    of the Tools directory, tool names, and their short descriptions.
+    """
+    # Determine the path to the Tools directory (assuming this file is in Prompts/)
+    tools_dir = os.path.join(os.path.dirname(__file__), "..", "Tools")
+    
+    tree_lines = []
+    for root, dirs, files in os.walk(tools_dir):
+        # Skip hidden directories and __pycache__
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d != '__pycache__']
+        files = [f for f in files if not f.startswith('.') and not f.startswith('__')]
+        level = root.replace(tools_dir, "").count(os.sep)
+        indent = "    " * level
+        tree_lines.append(f"{indent}{os.path.basename(root)}/")
+        sub_indent = "    " * (level + 1)
+        for f in files:
+            tree_lines.append(f"{sub_indent}{f}")
+    file_structure = "\n".join(tree_lines)
+    
+    # Get a simple overview of tools from the registry
+    tools = discover_tools()
+    tool_overview_lines = ["Available Tools:"]
+    for tool in tools:
+        tool_overview_lines.append(f"- {tool.name}: {tool.description}")
+    
+    overview = (
+        "File Structure of Tools Directory:\n"
+        f"{file_structure}\n\n"
+        + "\n".join(tool_overview_lines)
+    )
+    return overview
 
 def generate_system_prompt(provider: str) -> str:
     """
@@ -91,14 +122,14 @@ def generate_system_prompt(provider: str) -> str:
         "- Paths are case-sensitive"
     )
     
-    # Add provider-specific formatting note (optional)
+    # Provider-specific formatting note (if applicable)
     if provider == "anthropic":
         builder.add_section("Formatting",
             "For Anthropic, please note that special XML-like tags might be used, "
             "but you should still prefer the @tool ... @end style in your responses."
         )
     
-    # Document all discovered tools
+    # Detailed Tools Documentation Section
     tools_section = ["## Available Tools"]
     for tool_instance in discover_tools():
         info = get_tool_info(tool_instance)
@@ -114,4 +145,12 @@ def generate_system_prompt(provider: str) -> str:
     
     builder.add_section("Tools", "\n".join(tools_section))
     
+    # Add the tools overview (file structure and simple list of tool names)
+    tools_overview = generate_tools_overview()
+    builder.add_section("Tool Overview", tools_overview)
+    
     return builder.generate()
+
+# For testing purposes you could uncomment the following lines to print the system prompt:
+# if __name__ == "__main__":
+#     print(generate_system_prompt("anthropic"))

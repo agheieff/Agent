@@ -30,7 +30,7 @@ class AnthropicClient(BaseClient):
         self.max_retries = 3
         config = config or ANTHROPIC_CONFIG
         super().__init__(config)
-        self.client = None  # Initialize client attribute
+        # Removed setting self.client = None so that BaseClient._initialize() properly creates it
 
     def _initialize_client(self):
         self.client = anthropic.AsyncAnthropic(
@@ -55,15 +55,18 @@ class AnthropicClient(BaseClient):
 
     async def _call_api(self, messages, model, **kwargs):
         formatted_msgs, system = self._format_messages(messages)
+        # Build parameters and only include system if it is not None
+        params = {
+            "messages": formatted_msgs,
+            "model": model,
+            "max_tokens": kwargs.get('max_tokens', 500),
+            "temperature": kwargs.get('temperature', 0.7),
+        }
+        if system is not None:
+            params["system"] = system
         
         try:
-            response = await self.client.messages.create(
-                messages=formatted_msgs,
-                model=model,
-                system=system,
-                max_tokens=kwargs.get('max_tokens', 500),
-                temperature=kwargs.get('temperature', 0.7),
-            )
+            response = await self.client.messages.create(**params)
             return response
         except anthropic.APIConnectionError as e:
             raise ConnectionError(f"Connection error: {e}") from e

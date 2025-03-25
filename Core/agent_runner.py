@@ -1,7 +1,9 @@
+
 from dataclasses import dataclass
 from typing import List, Dict
 from Clients import BaseClient, Message
 import asyncio
+from Core.utils import get_multiline_input  # <-- Added import here
 
 @dataclass
 class AgentMessage:
@@ -73,7 +75,7 @@ class AgentRunner:
                     print(f"\nAssistant: {response}")
                     
                     if any(end_word in response.lower() 
-                          for end_word in ['goodbye', 'farewell', 'exit']):
+                           for end_word in ['goodbye', 'farewell', 'exit']):
                         break
                 except EOFError:
                     break

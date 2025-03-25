@@ -40,7 +40,7 @@ class DeepSeekClient(BaseClient):
         config = config or DEEPSEEK_CONFIG
         super().__init__(config)
         self.timeout = 30.0
-        self.client = None
+        # Removed: self.client = None
         self.default_model = config.default_model
 
     def _initialize_client(self):

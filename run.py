@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import sys
 import argparse
@@ -6,8 +5,10 @@ import importlib
 import inspect
 import dotenv
 from typing import Dict, List, Tuple, Any
+
 from Core.agent_runner import AgentRunner
 from Core.utils import get_multiline_input
+from Prompts.main import generate_system_prompt
 
 def load_env_variables():
     """
@@ -29,9 +30,6 @@ def discover_providers() -> Dict[str, Any]:
     """
     Discover available providers by scanning the Clients/API directory.
     Only returns providers that have API keys set in the environment.
-    
-    Returns:
-        Dict mapping provider names to their client classes
     """
     providers = {}
     clients_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Clients", "API")
@@ -41,12 +39,11 @@ def discover_providers() -> Dict[str, Any]:
         if filename.endswith('.py') and not filename.startswith('__'):
             module_name = filename[:-3]  # Remove .py extension
             try:
-                # Import the module
                 module = importlib.import_module(f"Clients.API.{module_name}")
                 provider_name = module_name.lower()
                 env_var_name = f"{provider_name.upper()}_API_KEY"
                 
-                # Look for client classes that are defined in this module
+                # Look for a client class in that module
                 for name, obj in inspect.getmembers(module):
                     if (inspect.isclass(obj) and 
                         name.endswith('Client') and 
@@ -61,7 +58,7 @@ def discover_providers() -> Dict[str, Any]:
 
 def get_available_models(provider_class: Any) -> List[str]:
     try:
-        # Create an instance of the provider client without hardcoding configs
+        # Create an instance of the provider client
         provider_instance = provider_class()
         return sorted(provider_instance.get_available_models())
     except Exception as e:
@@ -94,7 +91,6 @@ def interactive_provider_selection(providers: Dict[str, Any]) -> Tuple[str, Any]
                     return provider_name, providers[provider_name]
                 else:
                     print(f"Invalid selection. Please enter 1-{len(provider_names)}.")
-            # Check if input is a provider name
             elif choice.lower() in providers:
                 return choice.lower(), providers[choice.lower()]
             else:
@@ -104,16 +100,6 @@ def interactive_provider_selection(providers: Dict[str, Any]) -> Tuple[str, Any]
             print("Invalid selection. Please try again.")
 
 def interactive_model_selection(provider_name: str, provider_class: Any) -> str:
-    """
-    Interactively select a model from the available options for a provider.
-    
-    Args:
-        provider_name: Name of the selected provider
-        provider_class: The provider client class
-    
-    Returns:
-        Selected model name
-    """
     models = get_available_models(provider_class)
     
     if not models:
@@ -127,117 +113,66 @@ def interactive_model_selection(provider_name: str, provider_class: Any) -> str:
     while True:
         try:
             choice = input("\nSelect a model (number or name): ")
-            
-            # Check if input is a number
             if choice.isdigit():
                 idx = int(choice) - 1
                 if 0 <= idx < len(models):
                     return models[idx]
                 else:
                     print(f"Invalid selection. Please enter 1-{len(models)}.")
-            # Check if input is a model name
             elif choice in models:
                 return choice
             else:
                 print(f"Model '{choice}' not found. Please try again.")
-        
         except (ValueError, KeyError, IndexError):
             print("Invalid selection. Please try again.")
 
 def main():
-    """
-    Main function to run the agent with command-line arguments or interactive selection.
-    """
-    # Load environment variables from .env file
     load_env_variables()
     
-    # Discover available providers
-    try:
-        providers = discover_providers()
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        sys.exit(1)
+    # Discover providers
+    providers = discover_providers()
     
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Run an AI agent with tool execution capabilities")
-    
-    # Model arguments
     parser.add_argument("--provider", "-p", type=str, default=None,
                         help="The model provider to use (e.g., openai, anthropic, gemini)")
     parser.add_argument("--model", "-m", type=str, default=None,
                         help="The model name to use")
-    
-    # Input arguments
     parser.add_argument("--prompt", type=str, default=None,
                         help="Initial prompt to send to the agent")
     parser.add_argument("--prompt-file", type=str, default=None,
                         help="File containing the initial prompt")
-    
-    # Parse arguments
     args = parser.parse_args()
     
-    # Process provider
-    provider_name = args.provider
-    if not provider_name:
-        provider_name, provider_class = interactive_provider_selection(providers)
-    elif provider_name.lower() in providers:
-        provider_name = provider_name.lower()
-        provider_class = providers[provider_name]
-    else:
-        print(f"Error: Provider '{provider_name}' not found.")
-        print(f"Available providers: {', '.join(providers.keys())}")
-        sys.exit(1)
-    
-    # Process model selection
-    try:
-        # Get available models for this provider
-        available_models = get_available_models(provider_class)
-        
-        if not available_models:
-            print(f"\nError: No models available for provider '{provider_name}'")
-            sys.exit(1)
-            
-        # If model was specified in args
-        if args.model:
-            if args.model in available_models:
-                model_name = args.model
-            else:
-                print(f"\nError: Model '{args.model}' not found for provider '{provider_name}'")
-                print(f"Available models: {', '.join(available_models)}")
-                sys.exit(1)
+    # Provider selection
+    if args.provider:
+        if args.provider.lower() in providers:
+            provider_name = args.provider.lower()
+            provider_class = providers[provider_name]
         else:
-            # Interactive model selection
-            print(f"\nAvailable {provider_name} models:")
-            for i, model in enumerate(available_models, 1):
-                print(f"  {i}. {model}")
-            
-            while True:
-                choice = input("\nSelect a model (number or name, or 'q' to quit): ").strip()
-                if choice.lower() == 'q':
-                    sys.exit(0)
-                
-                # Check if input is a number
-                if choice.isdigit():
-                    idx = int(choice) - 1
-                    if 0 <= idx < len(available_models):
-                        model_name = available_models[idx]
-                        break
-                    print(f"Please enter a number between 1 and {len(available_models)}")
-                # Check if input is a model name
-                elif choice in available_models:
-                    model_name = choice
-                    break
-                else:
-                    print(f"Model '{choice}' not found. Please try again.")
-        
-    except Exception as e:
-        print(f"\nError: Failed to get models for provider '{provider_name}': {str(e)}")
-        sys.exit(1)
-        
-    # Get initial prompt
+            print(f"Error: Provider '{args.provider}' not found.")
+            print(f"Available providers: {', '.join(providers.keys())}")
+            sys.exit(1)
+    else:
+        provider_name, provider_class = interactive_provider_selection(providers)
+    
+    # Model selection
+    if args.model:
+        # If the user passed a model, verify it's valid
+        available = get_available_models(provider_class)
+        if args.model in available:
+            model_name = args.model
+        else:
+            print(f"Error: Model '{args.model}' not found for provider '{provider_name}'.")
+            print(f"Available models: {', '.join(available)}")
+            sys.exit(1)
+    else:
+        model_name = interactive_model_selection(provider_name, provider_class)
+    
+    # Determine initial prompt
     initial_prompt = ""
     if args.prompt:
-        initial_prompt = args.prompt
+        initial_prompt = args.prompt.strip()
     elif args.prompt_file:
         try:
             with open(args.prompt_file, 'r') as f:
@@ -248,9 +183,14 @@ def main():
     else:
         initial_prompt = get_multiline_input("Enter your prompt (press Enter twice to submit): ")
     
-    # Initialize and run the agent
-    print(f"\nInitializing agent with {provider_name} provider and {model_name} model...")
+    # Create and configure the agent
     agent = AgentRunner(provider_name, model_name)
+    
+    # Insert system prompt so that the model has instructions about tool usage
+    system_prompt = generate_system_prompt(provider_name)
+    agent.add_message("system", system_prompt)
+    
+    # Start conversation loop
     agent.run(initial_prompt)
 
 if __name__ == "__main__":

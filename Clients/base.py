@@ -9,8 +9,12 @@ class Message:
 
 @dataclass
 class PricingTier:
-    input: float  # cost per 1000 input tokens
-    output: float  # cost per 1000 output tokens
+    input: float  # cost per 1,000,000 input tokens
+    output: float  # cost per 1,000,000 output tokens
+    input_cache_miss: float = 0.0  # additional cost per 1,000,000 tokens for cache miss (if applicable)
+    output_cache_miss: float = 0.0  # additional cost per 1,000,000 tokens for cache miss (if applicable)
+    discount_hours: Optional[tuple] = None  # tuple (start_hour, end_hour) in UTC for discount hours
+    discount_rate: float = 0.0  # discount rate as a decimal (e.g., 0.50 for 50% discount)
 
 @dataclass
 class ModelConfig:

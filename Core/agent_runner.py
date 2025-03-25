@@ -15,9 +15,7 @@ class AgentRunner:
 
     def _init_client(self, provider: str) -> BaseClient:
         provider_map = {
-            'openai': 'OpenAIClient',
-            'anthropic': 'AnthropicClient', 
-            'gemini': 'GeminiClient',
+            'anthropic': 'AnthropicClient',
             'deepseek': 'DeepSeekClient'
         }
         

@@ -13,12 +13,12 @@ ANTHROPIC_CONFIG = ProviderConfig(
         "claude-3-7-sonnet": ModelConfig(
             name="claude-3-7-sonnet-latest",
             context_length=200000,
-            pricing=PricingTier(input=3, output=15)
+            pricing=PricingTier(input=3.00, output=15.00)
         ),
         "claude-3-5sonnet": ModelConfig(
             name="claude-3-5-sonnet-latest",
             context_length=200000,
-            pricing=PricingTier(input=3.0, output=15.0)
+            pricing=PricingTier(input=3.00, output=15.00)
         ),
     }
 )
@@ -31,7 +31,7 @@ class AnthropicClient(BaseClient):
         import anthropic
         return anthropic.Anthropic(api_key=self.api_key)
 
-    def _format_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
+    def _format_messages(self, messages: List[Message]) -> (List[Dict[str, str]], Optional[str]):
         formatted = []
         system = None
         
@@ -46,6 +46,9 @@ class AnthropicClient(BaseClient):
 
     def _call_api(self, messages, model, **kwargs):
         formatted_msgs, system = self._format_messages(messages)
+        # Supply a default max_tokens if not provided (adjust as needed)
+        if 'max_tokens' not in kwargs:
+            kwargs['max_tokens'] = 500
         return self.client.messages.create(
             messages=formatted_msgs,
             model=model,

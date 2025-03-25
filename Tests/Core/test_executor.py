@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from Core.executor import Executor, parse_tool_call, format_tool_result
+from Core.executor import Executor, parse_tool_call, format_result
 from Tools.base import ToolResult
 
 class TestExecutor(unittest.TestCase):
@@ -8,7 +8,7 @@ class TestExecutor(unittest.TestCase):
         self.executor = Executor()
         self.mock_tool = MagicMock()
         self.mock_tool.name = "mock_tool"
-        self.mock_tool.execute.return_value = ToolResult(ok=True, code=0, message="Success")
+        self.mock_tool.execute.return_value = ToolResult(success=True, code=0, message="Success")
         self.executor.tools = {'mock_tool': self.mock_tool}
 
     def test_parse_tool_call_single_line(self):
@@ -35,16 +35,16 @@ arg2: value2
         self.assertEqual(result['args']['multi'], expected_content)
         self.assertEqual(result['args']['arg2'], 'value2')
 
-    def test_format_tool_result_success(self):
-        result = format_tool_result("test_tool", True, "Success message")
+    def test_format_result_success(self):
+        result = format_result("test_tool", True, "Success message")
         expected = """@result test_tool
 status: success
 output: Success message
 @end"""
         self.assertEqual(result.strip(), expected.strip())
 
-    def test_format_tool_result_error(self):
-        result = format_tool_result("test_tool", False, "Error message")
+    def test_format_result_error(self):
+        result = format_result("test_tool", False, "Error message")
         expected = """@result test_tool
 status: error
 output: Error message
@@ -67,7 +67,7 @@ arg1: value1
 @end"""
         result = self.executor.execute(call_text)
         self.assertIn("status: error", result)
-        self.assertIn("Tool 'unknown_tool' not found", result)
+        self.assertIn("Tool not found", result)
 
     def test_execute_tool_error(self):
         self.mock_tool.execute.side_effect = Exception("Test error")

@@ -1,7 +1,6 @@
 from dataclasses import dataclass
-from typing import List, Dict, Optional
+from typing import List, Dict
 from Clients import BaseClient, Message
-from Tools.base import Tool
 
 @dataclass
 class AgentMessage:
@@ -13,32 +12,25 @@ class AgentRunner:
         self.client = self._init_client(provider)
         self.model = model or self.client.config.default_model
         self.messages: List[AgentMessage] = []
-        self.tools: Dict[str, Tool] = {}
 
     def _init_client(self, provider: str) -> BaseClient:
-        """Initialize the appropriate client based on provider name"""
         provider_map = {
             'openai': 'OpenAIClient',
-            'anthropic': 'AnthropicClient',
+            'anthropic': 'AnthropicClient', 
             'gemini': 'GeminiClient',
             'deepseek': 'DeepSeekClient'
         }
         
-        try:
-            module = __import__(f'Clients.API.{provider}', fromlist=[provider_map[provider]])
-            return getattr(module, provider_map[provider])()
-        except (ImportError, AttributeError) as e:
-            raise ValueError(f"Unsupported provider: {provider}") from e
+        module = __import__(f'Clients.API.{provider}', fromlist=[provider_map[provider]])
+        return getattr(module, provider_map[provider])()
 
     def add_message(self, role: str, content: str):
         self.messages.append(AgentMessage(role, content))
 
     def run(self, prompt: str):
-        """Main execution loop"""
         self.add_message('user', prompt)
         
         while True:
-            # Format messages for the client
             client_messages = [
                 Message(role=msg.role, content=msg.content)
                 for msg in self.messages
@@ -51,10 +43,6 @@ class AgentRunner:
             
             self.add_message('assistant', response)
             
-            if self._should_end(response):
+            if any(end_word in response.lower() 
+                  for end_word in ['goodbye', 'farewell', 'exit']):
                 break
-
-    def _should_end(self, response: str) -> bool:
-        """Check if conversation should terminate"""
-        return any(end_word in response.lower() 
-                 for end_word in ['goodbye', 'farewell', 'exit'])

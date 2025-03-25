@@ -1,55 +1,41 @@
 import os
-from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType, ToolResult
+from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ToolResult, ArgumentType
 
 class DeleteFile(Tool):
     def __init__(self):
-        config = ToolConfig(
-            allowed_in_test_mode=True,
-            requires_sudo=False
-        )
-        
         super().__init__(
             name="delete_file",
             description="Deletes a file",
-            help_text="Deletes a file from the filesystem.",
-            arguments=[
-                Argument(
-                    name="filename", 
-                    arg_type=ArgumentType.FILEPATH,
-                    description="Path to the file to delete"
-                ),
-                Argument(
-                    name="force", 
-                    arg_type=ArgumentType.BOOLEAN,
-                    is_optional=True, 
-                    default_value=False,
-                    description="If true, suppresses confirmation prompt"
-                )
+            args=[
+                Argument("filename", ArgumentType.FILEPATH, "File path"),
+                Argument("force", ArgumentType.BOOLEAN, "Force delete", optional=True, default=False)
             ],
-            config=config
+            config=ToolConfig(test_mode=True, needs_sudo=False)
         )
 
-    def _execute(self, filename=None, force=False):
-        # Validate file existence
-        if not os.path.exists(filename):
-            return ToolResult(ok=False, code=ErrorCodes.RESOURCE_NOT_FOUND, message=f"File '{filename}' does not exist.")
-            
-        # Validate file is not a directory
-        if os.path.isdir(filename):
-            return ToolResult(ok=False, code=ErrorCodes.RESOURCE_EXISTS, message=f"'{filename}' is a directory, not a file. Use a directory removal tool instead.")
-            
-        # Validate write permission on the directory (needed to delete)
-        directory = os.path.dirname(filename) or '.'
-        if not os.access(directory, os.W_OK):
-            return ToolResult(ok=False, code=ErrorCodes.PERMISSION_DENIED, message=f"No write permission in directory '{directory}'.")
-        
+    def execute(self, **kwargs):
         try:
-            # Delete the file
-            os.remove(filename)
-            return ToolResult(ok=True, code=ErrorCodes.SUCCESS, message=f"File '{filename}' deleted successfully.")
-        except PermissionError:
-            return ToolResult(ok=False, code=ErrorCodes.PERMISSION_DENIED, message=f"Permission denied when deleting file '{filename}'.")
-        except OSError as e:
-            return ToolResult(ok=False, code=ErrorCodes.OPERATION_FAILED, message=f"OS error when deleting file '{filename}': {e.strerror}")
+            args = self._validate_args(kwargs)
+            return self._run(args)
         except Exception as e:
-            return ToolResult(ok=False, code=ErrorCodes.UNKNOWN_ERROR, message=f"Unexpected error: {str(e)}")
+            return ToolResult(success=False, code=ErrorCodes.UNKNOWN_ERROR, message=str(e))
+
+    def _run(self, args):
+        if not os.path.exists(args['filename']):
+            return ToolResult(success=False, code=ErrorCodes.RESOURCE_NOT_FOUND, 
+                            message=f"File '{args['filename']}' not found")
+            
+        if os.path.isdir(args['filename']):
+            return ToolResult(success=False, code=ErrorCodes.RESOURCE_EXISTS,
+                            message=f"'{args['filename']}' is a directory")
+            
+        try:
+            os.remove(args['filename'])
+            return ToolResult(success=True, code=ErrorCodes.SUCCESS,
+                            message=f"File '{args['filename']}' deleted")
+        except PermissionError:
+            return ToolResult(success=False, code=ErrorCodes.PERMISSION_DENIED,
+                            message="Permission denied")
+        except Exception as e:
+            return ToolResult(success=False, code=ErrorCodes.OPERATION_FAILED,
+                            message=str(e))

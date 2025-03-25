@@ -1,7 +1,6 @@
 import re
 from typing import Dict, Any
 from Tools.base import ToolResult
-from Tools.error_codes import ErrorCodes
 
 def parse_tool_call(text: str) -> Dict[str, Any]:
     tool_pattern = r'@tool\s+(?P<name>\w+)(?P<body>.*?)@end'
@@ -9,78 +8,62 @@ def parse_tool_call(text: str) -> Dict[str, Any]:
     if not match:
         raise ValueError("Invalid tool call format")
     
-    body = match.group('body').strip()
     args = {}
-    lines = body.split('\n')
-
     current_key = None
-    current_value_lines = []
-    in_multiline = False
-
-    for line in lines:
-        line = line.rstrip()
-        if not in_multiline:
-            # Attempt to parse "key: value" or "key: <<<"
-            if ': ' in line:
-                key, val = line.split(': ', 1)
-                key = key.strip()
-                val = val.strip()
-                if val == '<<<':
-                    # Start multiline
-                    current_key = key
-                    in_multiline = True
-                    current_value_lines = []
-                else:
-                    args[key] = val
-        else:
-            # We are inside a multi-line block
-            if line == '>>>':
-                # End multiline
-                args[current_key] = "\n".join(current_value_lines)
-                in_multiline = False
+    current_value = []
+    
+    for line in match.group('body').strip().split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+            
+        if ': ' in line:
+            if current_key:  # Save previous multi-line value
+                args[current_key] = '\n'.join(current_value).strip()
+                current_value = []
+            key, val = line.split(': ', 1)
+            current_key = key.strip()
+            val = val.strip()
+            if val == '<<<':
+                continue  # Start multi-line
+            args[current_key] = val
+        elif line == '>>>':
+            if current_key:
+                args[current_key] = '\n'.join(current_value).strip()
                 current_key = None
-                current_value_lines = []
-            else:
-                current_value_lines.append(line)
+                current_value = []
+        elif current_key:
+            current_value.append(line)
+    
+    if current_key:  # Save any remaining multi-line value
+        args[current_key] = '\n'.join(current_value).strip()
+    
+    return {'tool': match.group('name'), 'args': args}
 
-    return {
-        'tool': match.group('name'),
-        'args': args
-    }
-
-def format_tool_result(name: str, success: bool, output: str) -> str:
-    """Format tool result for LLM consumption"""
+def format_result(name: str, success: bool, output: str) -> str:
     status = "success" if success else "error"
     return f"@result {name}\nstatus: {status}\noutput: {output}\n@end"
 
 class Executor:
     def __init__(self):
-        self.tools = {}  # name -> Tool instance
+        self.tools = {}
 
     def register_tool(self, tool):
         self.tools[tool.name] = tool
 
-    def execute(self, tool_call_text: str) -> str:
+    def execute(self, tool_call: str) -> str:
         try:
-            parsed = parse_tool_call(tool_call_text)
-            tool_name = parsed['tool']
-            args = parsed['args']
+            parsed = parse_tool_call(tool_call)
+            tool = self.tools.get(parsed['tool'])
             
-            if tool_name not in self.tools:
-                return format_tool_result(tool_name, False, f"Tool '{tool_name}' not found")
-            
-            tool = self.tools[tool_name]
-            result = tool.execute(**args)
-            
-            if isinstance(result, ToolResult):
-                success = result.ok
-                output = result.message or str(result.data)
-            else:
-                success = True
-                output = str(result)
+            if not tool:
+                return format_result(parsed['tool'], False, f"Tool not found")
                 
-            return format_tool_result(tool_name, success, output if output else "")
-            
+            result = tool.execute(**parsed['args'])
+            return format_result(
+                parsed['tool'], 
+                result.success,
+                result.message if isinstance(result, ToolResult) else str(result)
+            )
         except Exception as e:
-            # We might not know the tool name if parse_tool_call failed
-            return format_tool_result("unknown_tool", False, str(e))
+            return format_result("unknown", False, str(e))

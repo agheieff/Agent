@@ -1,49 +1,32 @@
-from Tools.base import Tool, Argument, ArgumentType, ToolConfig, ErrorCodes
+import os
+from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType
 
 class ReadFile(Tool):
     def __init__(self):
-        config = ToolConfig()
-        
         super().__init__(
             name="read_file",
             description="Reads file contents",
-            help_text="Reads lines from a text file. Tracks last file read for editing.",
-            arguments=[
+            args=[
                 Argument("path", ArgumentType.FILEPATH, "File path"),
-                Argument("lines", ArgumentType.INT, "Lines to read", is_optional=True, default_value=100)
-            ],
-            config=config
+                Argument("lines", ArgumentType.INT, "Lines to read", optional=True, default=100)
+            ]
         )
-        self.last_read_file = None
+        self.last_file = None
 
-    def _execute(self, path, lines=100):
-        import os
-        
-        # Validate existence
-        if not os.path.exists(path):
-            return ErrorCodes.RESOURCE_NOT_FOUND, f"File '{path}' does not exist."
-        
-        # Validate that it's a file (not directory)
-        if not os.path.isfile(path):
-            return ErrorCodes.INVALID_ARGUMENT_VALUE, f"Path '{path}' is not a file."
-        
-        # Validate read permission
-        if not os.access(path, os.R_OK):
-            return ErrorCodes.PERMISSION_DENIED, f"No read permission for '{path}'."
-        
-        # Validate lines is int
-        if not isinstance(lines, int):
-            return ErrorCodes.INVALID_ARGUMENT_VALUE, f"Lines must be an integer, got {lines}."
-        
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content_lines = f.readlines()
-            # Update last_read_file
-            self.last_read_file = path
+    def _run(self, args):
+        if not os.path.exists(args['path']):
+            return ErrorCodes.RESOURCE_NOT_FOUND, "File not found"
             
-            content = "".join(content_lines[:lines])
+        if not os.path.isfile(args['path']):
+            return ErrorCodes.INVALID_ARGUMENT_VALUE, "Path is not a file"
+            
+        if not os.access(args['path'], os.R_OK):
+            return ErrorCodes.PERMISSION_DENIED, "No read permission"
+            
+        try:
+            with open(args['path'], 'r') as f:
+                content = "".join(f.readlines()[:args['lines']])
+            self.last_file = args['path']
             return ErrorCodes.SUCCESS, content
-        except PermissionError as e:
-            return ErrorCodes.PERMISSION_DENIED, f"Permission denied reading file '{path}': {str(e)}"
         except Exception as e:
-            return ErrorCodes.UNKNOWN_ERROR, f"Unable to read file '{path}': {str(e)}"
+            return ErrorCodes.UNKNOWN_ERROR, str(e)

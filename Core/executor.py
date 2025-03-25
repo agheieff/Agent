@@ -4,18 +4,45 @@ from Tools.base import ToolResult
 from Tools.error_codes import ErrorCodes
 
 def parse_tool_call(text: str) -> Dict[str, Any]:
-    """Parse tool call with multi-line support"""
-    tool_pattern = r'@tool\s+(?P<name>\w+)\s+(?P<args>.*?)@end'
+    tool_pattern = r'@tool\s+(?P<name>\w+)(?P<body>.*?)@end'
     match = re.search(tool_pattern, text, re.DOTALL)
     if not match:
         raise ValueError("Invalid tool call format")
     
+    body = match.group('body').strip()
     args = {}
-    for line in match.group('args').strip().split('\n'):
-        if ': ' in line:
-            key, value = line.split(': ', 1)
-            args[key.strip()] = value.strip()
-    
+    lines = body.split('\n')
+
+    current_key = None
+    current_value_lines = []
+    in_multiline = False
+
+    for line in lines:
+        line = line.rstrip()
+        if not in_multiline:
+            # Attempt to parse "key: value" or "key: <<<"
+            if ': ' in line:
+                key, val = line.split(': ', 1)
+                key = key.strip()
+                val = val.strip()
+                if val == '<<<':
+                    # Start multiline
+                    current_key = key
+                    in_multiline = True
+                    current_value_lines = []
+                else:
+                    args[key] = val
+        else:
+            # We are inside a multi-line block
+            if line == '>>>':
+                # End multiline
+                args[current_key] = "\n".join(current_value_lines)
+                in_multiline = False
+                current_key = None
+                current_value_lines = []
+            else:
+                current_value_lines.append(line)
+
     return {
         'tool': match.group('name'),
         'args': args
@@ -52,7 +79,8 @@ class Executor:
                 success = True
                 output = str(result)
                 
-            return format_tool_result(tool_name, success, output)
+            return format_tool_result(tool_name, success, output if output else "")
             
         except Exception as e:
-            return format_tool_result(tool_name, False, str(e))
+            # We might not know the tool name if parse_tool_call failed
+            return format_tool_result("unknown_tool", False, str(e))

@@ -14,7 +14,7 @@ class EditFile(Tool):
         super().__init__(
             name="edit_file",
             description="Edits a file by replacing patterns",
-            help_text="Edits a file by replacing one or more patterns. The file must have been read first using read_file.",
+            help_text="Edits a file by replacing patterns. The file must have been read first using read_file.",
             arguments=[
                 Argument(
                     name="filename", 
@@ -24,7 +24,7 @@ class EditFile(Tool):
                 Argument(
                     name="replacements", 
                     arg_type=ArgumentType.STRING,
-                    description="JSON string with patterns and replacements in format {\"pattern1\": \"replacement1\", ...}"
+                    description="JSON string with patterns and replacements, e.g. {\"pattern\": \"replacement\"}"
                 ),
                 Argument(
                     name="encoding", 
@@ -79,33 +79,28 @@ class EditFile(Tool):
             changes_made = 0
             change_summary = []
             
-            # Process each replacement
             for pattern, replacement in replacement_dict.items():
-                # Find all occurrences of the pattern
                 matches = list(re.finditer(re.escape(pattern), content, re.MULTILINE))
                 
-                # Validate exactly one match
                 if len(matches) == 0:
                     return ErrorCodes.RESOURCE_NOT_FOUND, f"Pattern not found: '{pattern}'"
                 elif len(matches) > 1:
-                    return ErrorCodes.INVALID_OPERATION, f"Pattern '{pattern}' found multiple times ({len(matches)}). Each pattern must match exactly once."
+                    return ErrorCodes.INVALID_OPERATION, f"Pattern '{pattern}' found multiple times ({len(matches)})."
                 
-                # Replace the pattern
+                # Replace
                 content = content.replace(pattern, replacement)
                 changes_made += 1
                 
-                # Track the change
                 match = matches[0]
                 line_num = content[:match.start()].count('\n') + 1
                 change_summary.append(f"Line {line_num}: '{pattern}' -> '{replacement}'")
             
-            # Write the modified content back to the file
+            # Write back
             with open(filename, 'w', encoding=encoding) as file:
                 file.write(content)
             
-            # Return success message with summary
             summary = "\n".join(change_summary)
             return ErrorCodes.SUCCESS, f"Successfully made {changes_made} replacements:\n{summary}"
             
         except Exception as e:
-            return ErrorCodes.UNKNOWN_ERROR, f"Error editing file: {str(e)}" 
+            return ErrorCodes.UNKNOWN_ERROR, f"Error editing file: {str(e)}"

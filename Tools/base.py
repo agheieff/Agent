@@ -31,7 +31,7 @@ class ToolResult:
     data: Optional[Dict[str, Any]] = None
 
 class Tool:
-    def __init__(self, name: str, description: str, help_text: str, 
+    def __init__(self, name: str, description: str, help_text: str,
                  arguments: List[Argument], config: ToolConfig = None):
         self.name = name
         self.description = description
@@ -44,8 +44,13 @@ class Tool:
             validated = self._validate_args(kwargs)
             result = self._execute(**validated)
             if isinstance(result, tuple) and len(result) == 2:
-                return ToolResult(ok=True, code=result[0], message=result[1])
-            return ToolResult(ok=True, code=ErrorCodes.SUCCESS, data=result)
+                code, message = result
+                # If code != SUCCESS, set ok=False
+                ok = (code == ErrorCodes.SUCCESS)
+                return ToolResult(ok=ok, code=code, message=message)
+            else:
+                # If it's not a 2-tuple, treat as success with data
+                return ToolResult(ok=True, code=ErrorCodes.SUCCESS, data=result)
         except Exception as e:
             return ToolResult(ok=False, code=ErrorCodes.UNKNOWN_ERROR, message=str(e))
 
@@ -59,4 +64,9 @@ class Tool:
         return validated
 
     def _execute(self, **kwargs):
+        """
+        Subclasses must override this method. Should return either:
+          - (ErrorCodes.X, "Message") tuple
+          - Or any other object indicating success
+        """
         raise NotImplementedError

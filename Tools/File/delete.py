@@ -47,7 +47,6 @@ class DeleteFile(Tool):
             # Delete the file
             os.remove(filename)
             return ErrorCodes.SUCCESS, f"File '{filename}' deleted successfully."
-            
         except PermissionError:
             return ErrorCodes.PERMISSION_DENIED, f"Permission denied when deleting file '{filename}'."
         except OSError as e:

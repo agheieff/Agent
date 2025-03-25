@@ -1,5 +1,5 @@
-from Tools.base import Tool, Argument, ArgumentType, ToolConfig, ToolResult, ErrorCode
 import os
+from Tools.base import Tool, Argument, ArgumentType
 
 class ReadFile(Tool):
     def __init__(self):
@@ -8,14 +8,10 @@ class ReadFile(Tool):
             description="Reads contents of a file",
             args=[
                 Argument("path", ArgumentType.FILEPATH, "Path to file"),
-                Argument("lines", ArgumentType.INT, "Number of lines to read", 
-                        is_optional=True, default=100)
-            ],
-            config=ToolConfig()
+                Argument("lines", ArgumentType.INT, "Lines to read", optional=True, default=100)
+            ]
         )
-    
-    def _run(self, args) -> ToolResult:
-        path = os.path.expanduser(args['path'])
-        with open(path, 'r') as f:
-            content = ''.join(f.readlines()[:args['lines']])
-        return ToolResult(ErrorCode.SUCCESS, content)
+
+    def _run(self, args):
+        with open(args["path"], 'r') as f:
+            return ''.join(f.readlines()[:args["lines"]])

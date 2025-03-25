@@ -58,8 +58,8 @@ class ReadFile(Tool):
                             line = f.readline()
                             if not line:  # End of file
                                 break
-                            content.append(line)
-                        content = ''.join(content)
+                            content.append(line.rstrip('\n'))  # Remove newline characters
+                        content = '\n'.join(content)
                     except ValueError:
                         return ToolResult(
                             success=False,
@@ -68,7 +68,7 @@ class ReadFile(Tool):
                         )
                 else:
                     # Full file read
-                    content = f.read()
+                    content = f.read().rstrip('\n')  # Remove trailing newline
             
             self.last_file = args['path']
             return ToolResult(

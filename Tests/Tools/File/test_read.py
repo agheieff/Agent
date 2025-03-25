@@ -31,7 +31,7 @@ class TestReadFile(unittest.TestCase):
     def test_read_partial_file(self):
         result = self.tool.execute(path=self.test_file, lines=1)
         self.assertEqual(result.code, ErrorCodes.SUCCESS)
-        self.assertEqual(result.message, "Test content\n")
+        self.assertEqual(result.message, "Test content")
 
     def test_file_not_found(self):
         result = self.tool.execute(path="nonexistent.txt")

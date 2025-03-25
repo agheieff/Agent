@@ -23,6 +23,7 @@ class DeleteFile(Tool):
     def _execute(self, **kwargs):
         return self._run(kwargs)
 
+
     def _run(self, args):
         if not os.path.exists(args['filename']):
             return ToolResult(success=False, code=ErrorCodes.RESOURCE_NOT_FOUND, 
@@ -30,14 +31,20 @@ class DeleteFile(Tool):
         if os.path.isdir(args['filename']):
             return ToolResult(success=False, code=ErrorCodes.RESOURCE_EXISTS,
                               message=f"'{args['filename']}' is a directory")
+        
+        # Check if the parent directory is writable
+        parent_dir = os.path.dirname(args['filename'])
+        if not os.access(parent_dir, os.W_OK):
+            return ToolResult(success=False, code=ErrorCodes.PERMISSION_DENIED,
+                              message=f"No write permission for '{args['filename']}'")
+        
         try:
             os.remove(args['filename'])
             return ToolResult(success=True, code=ErrorCodes.SUCCESS,
                               message=f"File '{args['filename']}' deleted successfully")
         except PermissionError as pe:
-            # Return a custom message that includes "No write permission"
             return ToolResult(success=False, code=ErrorCodes.PERMISSION_DENIED,
-                              message=f"No write permission for '{args['filename']}'")
+                              message=str(pe))
         except OSError as oe:
             return ToolResult(success=False, code=ErrorCodes.OPERATION_FAILED,
                               message=str(oe))

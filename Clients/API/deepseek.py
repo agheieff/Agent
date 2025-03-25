@@ -13,12 +13,16 @@ DEEPSEEK_CONFIG = ProviderConfig(
         "deepseek-chat": ModelConfig(
             name="deepseek-chat",
             context_length=32768,
-            pricing=PricingTier(input=0.0005, output=0.0025)
+            pricing=PricingTier(input=0.07, output=1.10)
+            # TODO add input cache miss at 0.027
+            # TODO add discount 50% between 16:30 and 00:30 UTC
         ),
         "deepseek-reasoner": ModelConfig(
             name="deepseek-reasoner",
             context_length=32768,
-            pricing=PricingTier(input=0.0015, output=0.006))
+            pricing=PricingTier(input=0.14, output=2.19))
+            # TODO add input cache miss at 0.55
+            # TODO add discount 75% between 16:30 and 00:30 UTC
     }
 )
 

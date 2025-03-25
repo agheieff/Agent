@@ -7,16 +7,16 @@ ANTHROPIC_CONFIG = ProviderConfig(
     name="anthropic",
     api_base="https://api.anthropic.com",
     api_key_env="ANTHROPIC_API_KEY",
-    default_model="claude-3-haiku",
+    default_model="claude-3-7-sonnet",
     requires_import="anthropic",
     models={
-        "claude-3-haiku": ModelConfig(
-            name="claude-3-haiku-20240307",
+        "claude-3-7-sonnet": ModelConfig(
+            name="claude-3-7-sonnet-latest",
             context_length=200000,
-            pricing=PricingTier(input=0.25, output=1.25)
+            pricing=PricingTier(input=3, output=15)
         ),
-        "claude-3-sonnet": ModelConfig(
-            name="claude-3-sonnet-20240229",
+        "claude-3-5sonnet": ModelConfig(
+            name="claude-3-5-sonnet-latest",
             context_length=200000,
             pricing=PricingTier(input=3.0, output=15.0)
         ),

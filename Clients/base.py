@@ -45,6 +45,9 @@ class BaseClient:
     def _initialize_client(self):
         raise NotImplementedError
 
+    def get_available_models(self):
+        return list(self.config.models.keys())
+
     def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
         if not self.client:
             raise ValueError(f"No API key found for {self.config.name}. Set {self.config.api_key_env} environment variable.")

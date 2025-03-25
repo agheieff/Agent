@@ -34,7 +34,12 @@ class EditFile(Tool):
         
         # Normalize file path for comparison
         filename_norm = os.path.abspath(args['filename'])
-        last_read = os.path.abspath(getattr(self.read_tool, 'last_read_file', ''))
+        last_read = self.read_tool.last_read_file
+        # Handle case where last_read_file is None
+        if last_read:
+            last_read = os.path.abspath(last_read)
+        else:
+            last_read = ""
         if last_read != filename_norm:
             return ToolResult(success=False, code=ErrorCodes.INVALID_OPERATION,
                               message=f"File '{args['filename']}' must be read first using read_file")

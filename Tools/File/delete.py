@@ -35,8 +35,9 @@ class DeleteFile(Tool):
             return ToolResult(success=True, code=ErrorCodes.SUCCESS,
                               message=f"File '{args['filename']}' deleted successfully")
         except PermissionError as pe:
+            # Return a custom message that includes "No write permission"
             return ToolResult(success=False, code=ErrorCodes.PERMISSION_DENIED,
-                              message=str(pe))
+                              message=f"No write permission for '{args['filename']}'")
         except OSError as oe:
             return ToolResult(success=False, code=ErrorCodes.OPERATION_FAILED,
                               message=str(oe))

@@ -22,6 +22,9 @@ class TestAnthropicInterface(unittest.TestCase):
         # Create an async function to run the test
         async def run_test():
             client = AnthropicClient()
+            # Force client initialization since we're testing with mocks
+            client.client = mock_client
+            
             # Verify attributes are set
             self.assertEqual(client.timeout, 30.0)
             self.assertEqual(client.max_retries, 3)

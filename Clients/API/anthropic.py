@@ -26,9 +26,9 @@ ANTHROPIC_CONFIG = ProviderConfig(
 
 class AnthropicClient(BaseClient):
     def __init__(self, config=ANTHROPIC_CONFIG):
-        super().__init__(config)
         self.timeout = 30.0  # seconds (use float for timeout)
         self.max_retries = 3
+        super().__init__(config)
         self.client = None  # Initialize client attribute
 
     def _initialize_client(self):

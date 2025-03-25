@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Dict
 from Clients import BaseClient, Message
+import asyncio
 
 @dataclass
 class AgentMessage:
@@ -25,22 +26,32 @@ class AgentRunner:
     def add_message(self, role: str, content: str):
         self.messages.append(AgentMessage(role, content))
 
-    def run(self, prompt: str):
+    async def _run_chat_cycle(self, prompt: str):
         self.add_message('user', prompt)
         
-        while True:
-            client_messages = [
-                Message(role=msg.role, content=msg.content)
-                for msg in self.messages
-            ]
-            
-            response = self.client.chat_completion(
-                messages=client_messages,
-                model=self.model
-            )
-            
-            self.add_message('assistant', response)
-            
-            if any(end_word in response.lower() 
-                  for end_word in ['goodbye', 'farewell', 'exit']):
-                break
+        client_messages = [
+            Message(role=msg.role, content=msg.content)
+            for msg in self.messages
+        ]
+        
+        response = await self.client.chat_completion(
+            messages=client_messages,
+            model=self.model
+        )
+        
+        self.add_message('assistant', response)
+        return response
+
+    def run(self, prompt: str):
+        loop = asyncio.get_event_loop()
+        try:
+            while True:
+                response = loop.run_until_complete(self._run_chat_cycle(prompt))
+                
+                if any(end_word in response.lower() 
+                      for end_word in ['goodbye', 'farewell', 'exit']):
+                    break
+        except KeyboardInterrupt:
+            print("\nSession ended by user")
+        finally:
+            loop.close()

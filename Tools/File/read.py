@@ -43,5 +43,7 @@ class ReadFile(Tool):
             
             content = "".join(content_lines[:lines])
             return ErrorCodes.SUCCESS, content
+        except PermissionError as e:
+            return ErrorCodes.PERMISSION_DENIED, f"Permission denied reading file '{path}': {str(e)}"
         except Exception as e:
             return ErrorCodes.UNKNOWN_ERROR, f"Unable to read file '{path}': {str(e)}"

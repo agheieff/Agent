@@ -1,5 +1,6 @@
 import os
 import re
+import json
 from typing import List, Dict, Tuple
 from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType
 from Tools.File.read import ReadFile
@@ -36,10 +37,9 @@ class EditFile(Tool):
             ],
             config=config
         )
+        self.read_tool = ReadFile()
 
-    def _execute(self, filename, replacements, encoding="utf-8"):
-        import json
-        
+    def _execute(self, filename=None, replacements=None, encoding="utf-8"):
         # Validate file existence
         if not os.path.exists(filename):
             return ErrorCodes.RESOURCE_NOT_FOUND, f"File '{filename}' does not exist."
@@ -55,9 +55,9 @@ class EditFile(Tool):
             return ErrorCodes.PERMISSION_DENIED, f"No write permission for file '{filename}'."
         
         # Check if the file has been read first
-        read_tool = ReadFile()
-        if read_tool.last_read_file != filename:
-            return ErrorCodes.INVALID_OPERATION, f"File '{filename}' has not been read first. Use read_file tool before editing."
+        if self.read_tool.last_read_file != filename:
+            # Return error - file must be read first
+            return ErrorCodes.INVALID_OPERATION, f"File '{filename}' has not been read first. Use read_file tool first."
         
         try:
             # Parse the replacements JSON
@@ -73,7 +73,7 @@ class EditFile(Tool):
                 with open(filename, 'r', encoding=encoding) as file:
                     content = file.read()
             except UnicodeDecodeError:
-                return ErrorCodes.INVALID_ARGUMENT_VALUE, f"Unable to decode file with encoding '{encoding}'."
+                return ErrorCodes.INVALID_OPERATION, f"Unable to decode file with encoding '{encoding}'."
             
             # Track changes and ensure each pattern matches exactly once
             changes_made = 0

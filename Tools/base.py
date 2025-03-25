@@ -29,6 +29,10 @@ class ToolResult:
     code: int
     message: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
+    
+    def __iter__(self):
+        # Allow unpacking like a tuple (code, message)
+        return iter((self.code, self.message))
 
 class Tool:
     def __init__(self, name: str, description: str, help_text: str,
@@ -39,17 +43,25 @@ class Tool:
         self.arguments = arguments
         self.config = config or ToolConfig()
 
-    def execute(self, **kwargs) -> ToolResult:
+    def execute(self, *args, **kwargs):
         try:
+            # Convert positional args to keyword args based on argument names
+            for i, arg in enumerate(args):
+                if i < len(self.arguments):
+                    kwargs[self.arguments[i].name] = arg
+                    
             validated = self._validate_args(kwargs)
             result = self._execute(**validated)
+            
+            # Convert tuple (code, message) to ToolResult for test compatibility
             if isinstance(result, tuple) and len(result) == 2:
                 code, message = result
-                # If code != SUCCESS, set ok=False
                 ok = (code == ErrorCodes.SUCCESS)
                 return ToolResult(ok=ok, code=code, message=message)
+            elif isinstance(result, ToolResult):
+                return result
             else:
-                # If it's not a 2-tuple, treat as success with data
+                # If it's not a 2-tuple or ToolResult, treat as success with data
                 return ToolResult(ok=True, code=ErrorCodes.SUCCESS, data=result)
         except Exception as e:
             return ToolResult(ok=False, code=ErrorCodes.UNKNOWN_ERROR, message=str(e))
@@ -67,6 +79,7 @@ class Tool:
         """
         Subclasses must override this method. Should return either:
           - (ErrorCodes.X, "Message") tuple
+          - Or a ToolResult object
           - Or any other object indicating success
         """
         raise NotImplementedError

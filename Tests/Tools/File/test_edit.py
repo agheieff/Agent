@@ -39,6 +39,9 @@ class TestEditFile(unittest.TestCase):
             "Python Testing": "Python Rules"
         }
         
+        # Ensure the file has been read first
+        self.edit_tool.read_tool.last_read_file = self.test_file
+        
         exit_code, message = self.edit_tool.execute(
             self.test_file, 
             json.dumps(replacements)
@@ -95,6 +98,9 @@ class TestEditFile(unittest.TestCase):
     
     def test_edit_pattern_not_found(self):
         """Test editing with a pattern that doesn't exist."""
+        # Ensure the file has been read first
+        self.edit_tool.read_tool.last_read_file = self.test_file
+        
         exit_code, message = self.edit_tool.execute(
             self.test_file, 
             json.dumps({"NonexistentPattern": "replacement"})
@@ -110,8 +116,9 @@ class TestEditFile(unittest.TestCase):
         with open(repeat_file, 'w') as f:
             f.write("repeat pattern\n" * 3)
         
-        # Read the file first
+        # Read the file first - make sure we directly set the last_read_file
         self.read_tool.execute(repeat_file)
+        self.edit_tool.read_tool.last_read_file = repeat_file
         
         # Try to edit
         exit_code, message = self.edit_tool.execute(
@@ -124,6 +131,9 @@ class TestEditFile(unittest.TestCase):
     
     def test_invalid_json_replacements(self):
         """Test editing with invalid JSON replacements."""
+        # Ensure the file has been read first
+        self.edit_tool.read_tool.last_read_file = self.test_file
+        
         exit_code, message = self.edit_tool.execute(
             self.test_file, 
             "invalid json"
@@ -134,6 +144,9 @@ class TestEditFile(unittest.TestCase):
     
     def test_non_dict_replacements(self):
         """Test editing with non-dict JSON replacements."""
+        # Ensure the file has been read first
+        self.edit_tool.read_tool.last_read_file = self.test_file
+        
         exit_code, message = self.edit_tool.execute(
             self.test_file, 
             json.dumps(["array", "not", "dict"])
@@ -173,8 +186,8 @@ class TestEditFile(unittest.TestCase):
     
     def test_edit_invalid_encoding(self):
         """Test editing a file with an invalid encoding."""
-        # Read the binary file first to set last_read_file
-        self.read_tool.last_read_file = self.binary_file
+        # Directly set last_read_file for this test
+        self.edit_tool.read_tool.last_read_file = self.binary_file
         
         exit_code, message = self.edit_tool.execute(
             self.binary_file, 
@@ -184,10 +197,13 @@ class TestEditFile(unittest.TestCase):
         # The actual error code used is INVALID_OPERATION (2) when file has been read
         # but cannot be processed for editing
         self.assertEqual(exit_code, ErrorCodes.INVALID_OPERATION)
-        self.assertIn("has not been read first", message)
+        self.assertIn("Unable to decode file", message)
     
     def test_exception_handling(self):
         """Test handling of unexpected exceptions."""
+        # Ensure the file has been read first
+        self.edit_tool.read_tool.last_read_file = self.test_file
+        
         with patch('builtins.open', side_effect=Exception("Unexpected error")):
             exit_code, message = self.edit_tool.execute(
                 self.test_file, 

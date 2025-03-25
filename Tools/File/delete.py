@@ -1,5 +1,5 @@
 import os
-from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType
+from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType, ToolResult
 
 class DeleteFile(Tool):
     def __init__(self):
@@ -29,27 +29,27 @@ class DeleteFile(Tool):
             config=config
         )
 
-    def _execute(self, filename, force=False):
+    def _execute(self, filename=None, force=False):
         # Validate file existence
         if not os.path.exists(filename):
-            return ErrorCodes.RESOURCE_NOT_FOUND, f"File '{filename}' does not exist."
+            return ToolResult(ok=False, code=ErrorCodes.RESOURCE_NOT_FOUND, message=f"File '{filename}' does not exist.")
             
         # Validate file is not a directory
         if os.path.isdir(filename):
-            return ErrorCodes.RESOURCE_EXISTS, f"'{filename}' is a directory, not a file. Use a directory removal tool instead."
+            return ToolResult(ok=False, code=ErrorCodes.RESOURCE_EXISTS, message=f"'{filename}' is a directory, not a file. Use a directory removal tool instead.")
             
         # Validate write permission on the directory (needed to delete)
         directory = os.path.dirname(filename) or '.'
         if not os.access(directory, os.W_OK):
-            return ErrorCodes.PERMISSION_DENIED, f"No write permission in directory '{directory}'."
+            return ToolResult(ok=False, code=ErrorCodes.PERMISSION_DENIED, message=f"No write permission in directory '{directory}'.")
         
         try:
             # Delete the file
             os.remove(filename)
-            return ErrorCodes.SUCCESS, f"File '{filename}' deleted successfully."
+            return ToolResult(ok=True, code=ErrorCodes.SUCCESS, message=f"File '{filename}' deleted successfully.")
         except PermissionError:
-            return ErrorCodes.PERMISSION_DENIED, f"Permission denied when deleting file '{filename}'."
+            return ToolResult(ok=False, code=ErrorCodes.PERMISSION_DENIED, message=f"Permission denied when deleting file '{filename}'.")
         except OSError as e:
-            return ErrorCodes.OPERATION_FAILED, f"OS error when deleting file '{filename}': {e.strerror}"
+            return ToolResult(ok=False, code=ErrorCodes.OPERATION_FAILED, message=f"OS error when deleting file '{filename}': {e.strerror}")
         except Exception as e:
-            return ErrorCodes.UNKNOWN_ERROR, f"Unexpected error: {str(e)}"
+            return ToolResult(ok=False, code=ErrorCodes.UNKNOWN_ERROR, message=f"Unexpected error: {str(e)}")

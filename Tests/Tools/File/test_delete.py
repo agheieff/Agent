@@ -103,7 +103,8 @@ class TestDeleteFile(unittest.TestCase):
         with patch.object(self.tool, '_execute', wraps=self.tool._execute) as mock_execute:
             self.tool.execute(filename=self.test_file, force=True)
             # Check that _execute was called with the right parameters
-            self.assertEqual(mock_execute.call_args.args[0], self.test_file)
+            # _execute gets the parameters as kwargs only, not as args
+            self.assertEqual(mock_execute.call_args.kwargs['filename'], self.test_file)
             self.assertEqual(mock_execute.call_args.kwargs['force'], True)
 
 if __name__ == '__main__':

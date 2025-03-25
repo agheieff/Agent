@@ -1,5 +1,5 @@
 import os
-from Tools.base import Tool, Argument, ArgumentType, ToolConfig, ErrorCodes
+from Tools.base import Tool, Argument, ArgumentType, ToolConfig, ErrorCodes, ToolResult
 
 class WriteFile(Tool):
     def __init__(self):
@@ -17,7 +17,7 @@ class WriteFile(Tool):
             config=config
         )
 
-    def _execute(self, path, content, overwrite=False):
+    def _execute(self, path=None, content=None, overwrite=False):
         # Check if path is a directory
         if os.path.isdir(path):
             return ErrorCodes.RESOURCE_EXISTS, f"'{path}' is a directory, not a file."

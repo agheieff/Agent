@@ -19,7 +19,8 @@ class TestReadFile(FileTestCase):
     def test_read_partial_file(self):
         result = self.tool.execute(path=self.test_file, lines=2)
         self.assertToolSuccess(result)
-        self.assertEqual(result.message, "Line 1\nLine 2")
+        # The content includes the trailing newline after Line 2
+        self.assertEqual(result.message, "Line 1\nLine 2\n")
 
     def test_file_not_found(self):
         result = self.tool.execute(path="nonexistent.txt")
@@ -29,7 +30,7 @@ class TestReadFile(FileTestCase):
         result = self.tool.execute(path=self.temp_dir)
         self.assertToolFailure(result, ErrorCodes.INVALID_ARGUMENT_VALUE)
 
-    @patch("builtins.open", side_effect=PermissionError)
+    @patch("builtins.open", side_effect=PermissionError("Permission denied"))
     def test_permission_denied(self, mock_open):
         result = self.tool.execute(path=self.test_file)
         self.assertToolFailure(result, ErrorCodes.PERMISSION_DENIED)

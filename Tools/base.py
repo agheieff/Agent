@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Dict, Any, Optional
@@ -60,7 +59,8 @@ class Tool:
             return ToolResult(success=False, code=ErrorCodes.UNKNOWN_ERROR, message=str(e))
 
     def _validate_args(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
-        return {arg.name: kwargs.get(arg.name, arg.default) for arg in self.args if not arg.optional or arg.name in kwargs}
+        # Include all arguments, using the default value when not provided.
+        return {arg.name: kwargs.get(arg.name, arg.default) for arg in self.args}
 
     def _run(self, args: Dict[str, Any]) -> Any:
         raise NotImplementedError

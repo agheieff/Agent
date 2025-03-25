@@ -1,4 +1,3 @@
-
 import os
 from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ToolResult, ArgumentType
 
@@ -32,6 +31,9 @@ class WriteFile(Tool):
             with open(args['path'], 'w') as f:
                 f.write(args['content'])
             return ToolResult(success=True, code=ErrorCodes.SUCCESS)
+        except PermissionError as pe:
+            return ToolResult(success=False, code=ErrorCodes.PERMISSION_DENIED,
+                              message=str(pe))
         except Exception as e:
             return ToolResult(success=False, code=ErrorCodes.OPERATION_FAILED,
                               message=str(e))

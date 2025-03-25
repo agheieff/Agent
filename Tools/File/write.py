@@ -1,5 +1,5 @@
 import os
-from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType
+from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType, ToolResult
 
 class WriteFile(Tool):
     def __init__(self):

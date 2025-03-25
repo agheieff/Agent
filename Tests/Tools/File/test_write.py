@@ -18,10 +18,9 @@ class TestWriteFile(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_write_file_success(self):
-        exit_code, message = self.tool.execute(self.test_file, self.test_content)
-
-        self.assertEqual(exit_code, ErrorCodes.SUCCESS)
-        self.assertIsNone(message)
+        result = self.tool.execute(path=self.test_file, content=self.test_content)
+        self.assertEqual(result.code, ErrorCodes.SUCCESS)
+        self.assertTrue(result.success)
 
         with open(self.test_file, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -31,10 +30,10 @@ class TestWriteFile(unittest.TestCase):
         with open(self.test_file, 'w', encoding='utf-8') as f:
             f.write("Existing content")
 
-        exit_code, message = self.tool.execute(self.test_file, self.test_content)
-
-        self.assertEqual(exit_code, ErrorCodes.RESOURCE_EXISTS)
-        self.assertIn("already exists", message)
+        result = self.tool.execute(path=self.test_file, content=self.test_content)
+        self.assertEqual(result.code, ErrorCodes.RESOURCE_EXISTS)
+        self.assertFalse(result.success)
+        self.assertIn("already exists", result.message)
 
         with open(self.test_file, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -44,47 +43,49 @@ class TestWriteFile(unittest.TestCase):
         directory_path = os.path.join(self.temp_dir, "test_dir")
         os.mkdir(directory_path)
 
-        exit_code, message = self.tool.execute(directory_path, self.test_content)
-
-        self.assertEqual(exit_code, ErrorCodes.RESOURCE_EXISTS)
-        self.assertIn("is a directory", message)
+        result = self.tool.execute(path=directory_path, content=self.test_content)
+        self.assertEqual(result.code, ErrorCodes.RESOURCE_EXISTS)
+        self.assertFalse(result.success)
+        self.assertIn("is a directory", result.message)
 
     def test_permission_denied_directory(self):
         with patch('os.access', return_value=False):
-            exit_code, message = self.tool.execute(self.test_file, self.test_content)
-
-        self.assertEqual(exit_code, ErrorCodes.PERMISSION_DENIED)
-        self.assertIn("No write permission", message)
+            result = self.tool.execute(path=self.test_file, content=self.test_content)
+        
+        self.assertEqual(result.code, ErrorCodes.PERMISSION_DENIED)
+        self.assertFalse(result.success)
+        self.assertIn("No write permission", result.message)
 
     @patch('builtins.open', side_effect=PermissionError("Permission denied"))
     def test_permission_denied_file(self, mock_open):
-        exit_code, message = self.tool.execute(self.test_file, self.test_content)
-
-        self.assertEqual(exit_code, ErrorCodes.PERMISSION_DENIED)
-        self.assertIn("Permission denied", message)
+        result = self.tool.execute(path=self.test_file, content=self.test_content)
+        
+        self.assertEqual(result.code, ErrorCodes.PERMISSION_DENIED)
+        self.assertFalse(result.success)
+        self.assertIn("Permission denied", result.message)
 
     def test_directory_does_not_exist(self):
         nonexistent_path = os.path.join(self.temp_dir, "nonexistent_dir", "test_file.txt")
 
-        exit_code, message = self.tool.execute(nonexistent_path, self.test_content)
-
-        self.assertEqual(exit_code, ErrorCodes.RESOURCE_NOT_FOUND)
-        self.assertIn("does not exist", message)
+        result = self.tool.execute(path=nonexistent_path, content=self.test_content)
+        self.assertEqual(result.code, ErrorCodes.RESOURCE_NOT_FOUND)
+        self.assertFalse(result.success)
+        self.assertIn("does not exist", result.message)
 
     @patch('builtins.open', side_effect=OSError("Mock OS error"))
     def test_os_error(self, mock_open):
-        exit_code, message = self.tool.execute(self.test_file, self.test_content)
-
-        self.assertEqual(exit_code, ErrorCodes.OPERATION_FAILED)
-        self.assertIn("OS error", message)
+        result = self.tool.execute(path=self.test_file, content=self.test_content)
+        
+        self.assertEqual(result.code, ErrorCodes.OPERATION_FAILED)
+        self.assertFalse(result.success)
+        self.assertIn("OS error", result.message)
 
     def test_large_file_content(self):
         large_content = "Test line\n" * 10000
 
-        exit_code, message = self.tool.execute(self.test_file, large_content)
-
-        self.assertEqual(exit_code, ErrorCodes.SUCCESS)
-        self.assertIsNone(message)
+        result = self.tool.execute(path=self.test_file, content=large_content)
+        self.assertEqual(result.code, ErrorCodes.SUCCESS)
+        self.assertTrue(result.success)
 
         self.assertTrue(os.path.getsize(self.test_file) > 90000)
 

@@ -19,15 +19,15 @@ class FileTestCase(unittest.TestCase):
             f.write(content)
         return path
     
-    def assertToolSuccess(self, result: ToolResult):
-        self.assertTrue(result.success, 
-                       f"Expected success but got error: {result.code} - {result.message}")
-        self.assertEqual(result.code, ErrorCodes.SUCCESS)
+def assertToolSuccess(self, result: ToolResult):
+    self.assertTrue(result.success, 
+                   f"Expected success but got error: {result.code} - {result.message}")
+    self.assertEqual(result.code, ErrorCodes.SUCCESS)
 
-    def assertToolFailure(self, result: ToolResult, expected_code: ErrorCodes):
-        self.assertFalse(result.success)
-        self.assertEqual(result.code, expected_code,
-                        f"Expected {expected_code.name} but got {result.code}")
+def assertToolFailure(self, result: ToolResult, expected_code: ErrorCodes):
+    self.assertFalse(result.success)
+    self.assertEqual(result.code, expected_code,
+                    f"Expected {expected_code.name} but got {result.code.name}")
 
 class ProviderTestCase(unittest.TestCase):
     """Base class for provider API tests"""

@@ -43,9 +43,12 @@ class EditFile(Tool):
             try:
                 with open(args['filename'], 'r', encoding=args['encoding']) as file:
                     content = file.read()
-            except UnicodeDecodeError:
-                return ToolResult(success=False, code=ErrorCodes.INVALID_OPERATION,
-                                  message=f"Unable to decode file with encoding '{args['encoding']}'")
+            except Exception as e:
+                if isinstance(e, UnicodeDecodeError):
+                    return ToolResult(success=False, code=ErrorCodes.INVALID_OPERATION,
+                                      message=f"Unable to decode file with encoding '{args['encoding']}'")
+                else:
+                    raise e
             
             changes_made = 0
             change_summary = []
@@ -60,17 +63,19 @@ class EditFile(Tool):
                                   message="Invalid JSON format for replacements")
             
             for pattern, replacement in replacement_dict.items():
-                matches = list(re.finditer(re.escape(pattern), content, re.MULTILINE))
+                # Save a copy of the current content for matching
+                original_content = content
+                matches = list(re.finditer(re.escape(pattern), original_content, re.MULTILINE))
                 if len(matches) == 0:
                     return ToolResult(success=False, code=ErrorCodes.RESOURCE_NOT_FOUND,
                                       message=f"Pattern not found: '{pattern}'")
                 elif len(matches) > 1:
                     return ToolResult(success=False, code=ErrorCodes.INVALID_OPERATION,
                                       message=f"Pattern '{pattern}' found multiple times ({len(matches)})")
+                # Compute line number from the original content before replacing
+                line_num = original_content[:matches[0].start()].count('\n') + 1
                 content = content.replace(pattern, replacement)
                 changes_made += 1
-                match = matches[0]
-                line_num = content[:match.start()].count('\n') + 1
                 change_summary.append(f"Line {line_num}: '{pattern}' -> '{replacement}'")
             
             try:

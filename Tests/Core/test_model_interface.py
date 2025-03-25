@@ -1,18 +1,16 @@
 import unittest
-from unittest.mock import patch, MagicMock, PropertyMock
-from Tests.test_utils import ProviderTestCase
+import asyncio
+from unittest.mock import patch, MagicMock, AsyncMock
 from Clients.API.anthropic import AnthropicClient, ANTHROPIC_CONFIG
-from Clients.base import BaseClient
+from Clients.base import Message
 
-class TestAnthropicInterface(ProviderTestCase):
-    provider = "anthropic"
-    
+class TestAnthropicInterface(unittest.TestCase):
     @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'})
-    @patch.object(BaseClient, '_initialize_client')
-    def test_generate_response(self, mock_init_client):
+    @patch('anthropic.AsyncAnthropic')
+    def test_generate_response(self, mock_anthropic):
         # Setup mock client and response
-        mock_client = MagicMock()
-        mock_init_client.return_value = mock_client
+        mock_client = AsyncMock()
+        mock_anthropic.return_value = mock_client
         
         mock_message = MagicMock()
         mock_message.text = "Mock response"
@@ -21,12 +19,26 @@ class TestAnthropicInterface(ProviderTestCase):
         mock_response.content = [mock_message]
         mock_client.messages.create.return_value = mock_response
         
-        # Test
-        client = AnthropicClient()
-        response = client.chat_completion(
-            messages=[{"role": "user", "content": "Test"}],
-            model=ANTHROPIC_CONFIG.default_model
-        )
+        # Create an async function to run the test
+        async def run_test():
+            client = AnthropicClient()
+            # Verify attributes are set
+            self.assertEqual(client.timeout, 30.0)
+            self.assertEqual(client.max_retries, 3)
+            
+            messages = [Message(role="user", content="Test")]
+            
+            response = await client._call_api(
+                messages=messages, 
+                model=ANTHROPIC_CONFIG.default_model
+            )
+            processed = client._process_response(response)
+            
+            self.assertEqual(processed, "Mock response")
+            mock_client.messages.create.assert_called_once()
         
-        self.assertEqual(response, "Mock response")
-        mock_client.messages.create.assert_called_once()
+        # Run the async test
+        asyncio.run(run_test())
+
+if __name__ == '__main__':
+    unittest.main()

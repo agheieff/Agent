@@ -4,7 +4,7 @@ from Clients.base import (
     ModelConfig,
     PricingTier,
     ProviderConfig,
-    UsageStats
+    UsageStats,
 )
 
 # Import clients

@@ -1,5 +1,6 @@
 import importlib
 import os
+import time
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Any
 
@@ -12,10 +13,10 @@ class Message:
 class PricingTier:
     input: float  # cost per 1,000,000 input tokens
     output: float  # cost per 1,000,000 output tokens
-    input_cache_miss: float = 0.0  # additional cost per 1,000,000 tokens for cache miss (if applicable)
-    output_cache_miss: float = 0.0  # additional cost per 1,000,000 tokens for cache miss (if applicable)
+    input_cache_miss: float = 0.0  # additional cost per 1,000,000 tokens for cache miss
+    output_cache_miss: float = 0.0  # additional cost per 1,000,000 tokens for cache miss
     discount_hours: Optional[tuple] = None  # tuple (start_hour, end_hour) in UTC for discount hours
-    discount_rate: float = 0.0  # discount rate as a decimal (e.g., 0.50 for 50% discount)
+    discount_rate: float = 0.0  # discount rate as a decimal
 
 @dataclass
 class ModelConfig:
@@ -58,21 +59,8 @@ class BaseClient:
         except Exception as e:
             raise RuntimeError(f"Client initialization failed: {str(e)}") from e
 
-    def get_available_models(self):
+    def get_available_models(self) -> List[str]:
         return list(self.config.models.keys())
-
-    def chat_completion(self, messages: List[Message], model: str = None, max_retries=3, **kwargs):
-        for attempt in range(max_retries):
-            try:
-                return self._chat_completion(messages, model, **kwargs)
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    raise
-                time.sleep(2 ** attempt)
-        
-        model_config = self._get_model_config(model)
-        response = self._call_api(messages=messages, model=model_config.name, **kwargs)
-        return self._process_response(response)
 
     def _get_model_config(self, model_name: str) -> ModelConfig:
         model = model_name or self.config.default_model
@@ -80,11 +68,14 @@ class BaseClient:
             raise ValueError(f"Model {model} not found in {self.config.name} config")
         return self.config.models[model]
 
-    def _format_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
-        return [{"role": msg.role, "content": msg.content} for msg in messages]
+    def _initialize_client(self):
+        raise NotImplementedError("Subclasses must implement _initialize_client")
 
     def _call_api(self, **kwargs):
-        raise NotImplementedError
+        raise NotImplementedError("Subclasses must implement _call_api")
 
     def _process_response(self, response):
-        raise NotImplementedError
+        raise NotImplementedError("Subclasses must implement _process_response")
+
+    def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
+        raise NotImplementedError("Subclasses must implement chat_completion")

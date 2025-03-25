@@ -2,6 +2,7 @@ import os
 import logging
 from typing import Dict, List, Optional, Any
 from Clients.base import BaseClient, ProviderConfig, ModelConfig, PricingTier, Message
+import anthropic
 
 ANTHROPIC_CONFIG = ProviderConfig(
     name="anthropic",
@@ -15,7 +16,7 @@ ANTHROPIC_CONFIG = ProviderConfig(
             context_length=200000,
             pricing=PricingTier(input=3.00, output=15.00)
         ),
-        "claude-3-5sonnet": ModelConfig(
+        "claude-3-5-sonnet": ModelConfig(
             name="claude-3-5-sonnet-latest",
             context_length=200000,
             pricing=PricingTier(input=3.00, output=15.00)
@@ -26,11 +27,11 @@ ANTHROPIC_CONFIG = ProviderConfig(
 class AnthropicClient(BaseClient):
     def __init__(self, config=ANTHROPIC_CONFIG):
         super().__init__(config)
+        self.timeout = 30.0  # seconds (use float for timeout)
         self.max_retries = 3
-        self.timeout = 30  # seconds
+        self.client = None  # Initialize client attribute
 
     def _initialize_client(self):
-        import anthropic
         return anthropic.AsyncAnthropic(
             api_key=self.api_key,
             timeout=self.timeout,
@@ -66,6 +67,15 @@ class AnthropicClient(BaseClient):
             raise ConnectionError(f"Connection error: {e}") from e
         except anthropic.APIStatusError as e:
             raise RuntimeError(f"API error: {e.status_code} - {e.message}") from e
+        except Exception as e:
+            raise RuntimeError(f"Unexpected error: {str(e)}") from e
 
     def _process_response(self, response):
+        if not response.content:
+            return ""
         return response.content[0].text
+
+    async def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
+        model_config = self._get_model_config(model)
+        response = await self._call_api(messages=messages, model=model_config.name, **kwargs)
+        return self._process_response(response)

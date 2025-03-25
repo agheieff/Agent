@@ -38,64 +38,60 @@ DEEPSEEK_CONFIG = ProviderConfig(
 class DeepSeekClient(BaseClient):
     def __init__(self, config=DEEPSEEK_CONFIG):
         super().__init__(config)
+        self.timeout = 30.0
+        self.client = None
 
     def _initialize_client(self):
-        # Dummy implementation of the DeepSeek client.
-        class DummyDeepSeekClient:
-            def __init__(self, api_key, base_url):
-                self.api_key = api_key
-                self.base_url = base_url
+        import openai
+        return openai.AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.config.api_base,
+            timeout=self.timeout
+        )
 
-            class Chat:
-                @staticmethod
-                def completions_create(**kwargs):
-                    # Dummy response structure
-                    class Choice:
-                        message = type("Message", (), {"content": "Dummy deepseek response"})
-                    class Response:
-                        choices = [Choice()]
-                    return Response()
+    def _format_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
+        return [{"role": msg.role, "content": msg.content} for msg in messages]
 
-            @property
-            def chat(self):
-                return self.Chat()
-        return DummyDeepSeekClient(api_key=self.api_key, base_url=self.config.api_base)
-
-    def _call_api(self, **kwargs):
-        return self.client.chat.completions_create(**kwargs)
+    async def _call_api(self, messages, model, **kwargs):
+        formatted_msgs = self._format_messages(messages)
+        
+        try:
+            response = await self.client.chat.completions.create(
+                messages=formatted_msgs,
+                model=model,
+                max_tokens=kwargs.get('max_tokens', 1024),
+                temperature=kwargs.get('temperature', 0.7),
+            )
+            return response
+        except Exception as e:
+            raise RuntimeError(f"API error: {str(e)}") from e
 
     def _process_response(self, response):
+        if not response.choices:
+            return ""
         return response.choices[0].message.content
+
+    def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
+        model_config = self._get_model_config(model)
+        response = self._call_api(messages=messages, model=model_config.name, **kwargs)
+        return self._process_response(response)
 
     def calculate_cost(self, model_name: str, input_tokens: int, output_tokens: int, cache_hit: bool = True) -> float:
         """
         Calculate the cost of a request based on token counts and model pricing.
-
-        Args:
-            model_name (str): The model being used.
-            input_tokens (int): Number of input tokens.
-            output_tokens (int): Number of output tokens.
-            cache_hit (bool): If True, no additional cost for cache miss is applied.
-
-        Returns:
-            float: Total cost for the request.
         """
-        # Get the model configuration
         if model_name not in self.config.models:
             raise ValueError(f"Model '{model_name}' not found in configuration.")
         pricing = self.config.models[model_name].pricing
 
-        # Calculate base cost per million tokens.
         input_cost = (input_tokens / 1_000_000) * (pricing.input + (0 if cache_hit else pricing.input_cache_miss))
         output_cost = (output_tokens / 1_000_000) * pricing.output
         total_cost = input_cost + output_cost
 
-        # Determine if discount applies (based on UTC time).
         now = datetime.utcnow()
         current_hour = now.hour + now.minute / 60.0
         start, end = pricing.discount_hours
 
-        # Handle discount period that may cross midnight.
         if start < end:
             discount_applicable = start <= current_hour < end
         else:

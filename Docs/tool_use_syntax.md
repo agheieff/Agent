@@ -33,10 +33,10 @@ mode: overwrite
 ### Success Case
 ```
 @result <tool_name>
-status: success
+exit_code: 0
 output: |
-  The operation succeeded
-  with this output
+The operation succeeded
+with this output
 @end
 ```
 
@@ -44,8 +44,8 @@ output: |
 ### Error Case
 ```
 @result <tool_name>
-status: error
-error: Error description
+exit_code: 1
+output: Error description
 @end
 ```
 
@@ -64,7 +64,7 @@ op: add
 2. System executes and responds:
 ```
 @result calculator
-status: success
+exit_code: 0
 output: 8
 @end
 ```

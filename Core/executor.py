@@ -40,9 +40,8 @@ def parse_tool_call(text: str) -> Dict[str, Any]:
     
     return {'tool': match.group('name'), 'args': args}
 
-def format_result(name: str, success: bool, output: str) -> str:
-    status = "success" if success else "error"
-    return f"@result {name}\nstatus: {status}\noutput: {output}\n@end"
+def format_result(name: str, exit_code: int, output: str) -> str:
+    return f"@result {name}\nexit_code: {exit_code}\noutput: {output}\n@end"
 
 class Executor:
     def __init__(self):
@@ -57,13 +56,22 @@ class Executor:
             tool = self.tools.get(parsed['tool'])
             
             if not tool:
-                return format_result(parsed['tool'], False, f"Tool not found")
+                return format_result(parsed['tool'], 1, f"Tool not found")
                 
             result = tool.execute(**parsed['args'])
-            return format_result(
-                parsed['tool'], 
-                result.success,
-                result.message if isinstance(result, ToolResult) else str(result)
-            )
+            
+            # Handle different return types
+            if isinstance(result, tuple) and len(result) == 2:
+                exit_code, message = result
+                return format_result(parsed['tool'], exit_code, str(message))
+            elif isinstance(result, ToolResult):
+                return format_result(
+                    parsed['tool'], 
+                    0 if result.success else 1,
+                    result.message if result.message else str(result.data)
+                )
+            else:
+                return format_result(parsed['tool'], 0, str(result))
+                
         except Exception as e:
-            return format_result("unknown", False, str(e))
+            return format_result("unknown", 1, str(e))

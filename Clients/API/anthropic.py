@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, AsyncIterator
 from Clients.base import BaseClient, ProviderConfig, ModelConfig, PricingTier, Message
 import anthropic
 
@@ -84,3 +84,33 @@ class AnthropicClient(BaseClient):
         model_config = self._get_model_config(model)
         response = await self._call_api(messages=messages, model=model_config.name, **kwargs)
         return self._process_response(response)
+
+    async def stream_chat_completion(self, messages: List[Message], model: str = None, **kwargs) -> AsyncIterator[str]:
+        """
+        Stream chat completions by yielding text pieces as they arrive.
+        This basic implementation sets "stream": True and yields chunks from the response.
+        It assumes the underlying client supports an async iterator on the `text_stream` attribute.
+        """
+        model_config = self._get_model_config(model)
+        formatted_msgs, system = self._format_messages(messages)
+        params = {
+            "messages": formatted_msgs,
+            "model": model_config.name,
+            "max_tokens": kwargs.get('max_tokens', 500),
+            "temperature": kwargs.get('temperature', 0.7),
+            "stream": True,
+        }
+        if system is not None:
+            params["system"] = system
+        
+        try:
+            stream = await self.client.messages.stream(**params)
+            # Assume the stream provides an async iterator named `text_stream`
+            async for chunk in stream.text_stream:
+                yield chunk
+        except anthropic.APIConnectionError as e:
+            raise ConnectionError(f"Connection error during streaming: {e}") from e
+        except anthropic.APIStatusError as e:
+            raise RuntimeError(f"API error during streaming: {e.status_code} - {e.message}") from e
+        except Exception as e:
+            raise RuntimeError(f"Unexpected streaming error: {str(e)}") from e

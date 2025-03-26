@@ -79,3 +79,6 @@ class BaseClient:
 
     async def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
         raise NotImplementedError("Subclasses must implement chat_completion")
+        
+    async def stream_chat_completion(self, messages: List[Message], model: str = None, **kwargs):
+        raise NotImplementedError("Subclasses must implement stream_chat_completion")

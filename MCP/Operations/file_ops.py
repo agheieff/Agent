@@ -99,20 +99,18 @@ class WriteFile(Operation):
         if not os.access(dir_path, os.W_OK):
              raise MCPError(ErrorCode.OS_PERMISSION_DENIED, f"OS-level write permission denied for directory: {dir_path}")
 
-        # Now handle the target file path resolution and existence check
-        try:
-            resolved_target_path = dir_path / target_path.name # Combine resolved dir with target filename
-            if resolved_target_path.exists():
-                if resolved_target_path.is_dir():
-                    raise MCPError(ErrorCode.RESOURCE_EXISTS, f"Path exists and is a directory: {path_str}")
-                if not overwrite:
-                    raise MCPError(ErrorCode.RESOURCE_EXISTS, f"File exists and overwrite is False: {path_str}")
-                # Check OS write permission on the existing file if overwriting
-                if not os.access(resolved_target_path, os.W_OK):
-                     raise MCPError(ErrorCode.OS_PERMISSION_DENIED, f"OS-level write permission denied for existing file: {path_str}")
-            # If it doesn't exist, we already checked directory write permission.
-        except Exception as e: # Catch potential issues during existence checks
-             raise MCPError(ErrorCode.OPERATION_FAILED, f"Error checking target path '{path_str}': {e}")
+        # Handle target file path resolution and existence check
+        resolved_target_path = dir_path / target_path.name  # Combine resolved dir with target filename
+        
+        # Check if target exists and handle accordingly
+        if resolved_target_path.exists():
+            if resolved_target_path.is_dir():
+                raise MCPError(ErrorCode.RESOURCE_EXISTS, f"Path exists and is a directory: {path_str}")
+            if not overwrite:
+                raise MCPError(ErrorCode.RESOURCE_EXISTS, f"File exists and overwrite is False: {path_str}")
+            # Check OS write permission for existing file
+            if not os.access(resolved_target_path, os.W_OK):
+                raise MCPError(ErrorCode.OS_PERMISSION_DENIED, f"Write permission denied for existing file: {path_str}")
         # --- End Validation ---
 
         try:

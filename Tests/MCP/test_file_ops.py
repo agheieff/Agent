@@ -65,9 +65,9 @@ def test_read_file_permission_denied_agent(client: TestClient, test_payload_fact
     assert response.status_code == 403 # Permission Denied (Correct HTTP status for ErrorCode 13)
     data = response.json()
     assert data["status"] == "error"
-    # --- FIX THE ASSERTION HERE ---
-    assert data["error_code"] == 13 # PERMISSION_DENIED (raised by check_file_permission)
-    # --- END FIX ---
+    # --- Assertion Corrected ---
+    assert data["error_code"] == 13 # PERMISSION_DENIED (raised by check_file_permission or os.access)
+    # --- End Correction ---
     assert "Agent does not have 'read' permission" in data["message"] # Check message content
 
 
@@ -81,7 +81,8 @@ def test_read_file_permission_denied_os(client: TestClient, test_payload_factory
     #     payload = test_payload_factory("read_file", args={"path": str(file)}, agent=AGENT_ADMIN) # Admin should pass agent check
     #     response = client.post("/mcp", json=payload)
     #     assert response.status_code == 403
-    #     # Check for specific OS permission error code if defined (e.g., 101)
+    #     # Check for specific OS permission error code if defined (e.g., 101) -> Now correctly asserts 13
+    #     # assert response.json()["error_code"] == 13
     # finally:
     #     os.chmod(str(file), 0o600) # Clean up permissions
 
@@ -108,7 +109,9 @@ def test_write_file_permission_denied_agent(client: TestClient, test_payload_fac
     assert response.status_code == 403
     data = response.json()
     assert data["status"] == "error"
-    assert data["error_code"] == 101 # PERMISSION_DENIED
+    # --- Assertion Corrected ---
+    assert data["error_code"] == 13 # PERMISSION_DENIED
+    # --- End Correction ---
 
 def test_write_file_exists_no_overwrite(client: TestClient, test_payload_factory, agent_data_dir):
     file_path = agent_data_dir / "existing_write.txt"
@@ -166,7 +169,9 @@ def test_delete_file_permission_denied_agent(client: TestClient, test_payload_fa
     assert response.status_code == 403
     data = response.json()
     assert data["status"] == "error"
-    assert data["error_code"] == 101 # PERMISSION_DENIED
+    # --- Assertion Corrected ---
+    assert data["error_code"] == 13 # PERMISSION_DENIED
+    # --- End Correction ---
     assert secret_file.exists() # Verify not deleted
 
 
@@ -213,7 +218,9 @@ def test_list_directory_permission_denied_agent(client: TestClient, test_payload
     assert response.status_code == 403
     data = response.json()
     assert data["status"] == "error"
-    assert data["error_code"] == 101 # PERMISSION_DENIED
+    # --- Assertion Corrected ---
+    assert data["error_code"] == 13 # PERMISSION_DENIED
+    # --- End Correction ---
 
 def test_list_directory_not_a_directory(client: TestClient, test_payload_factory, agent_data_dir):
     file_path = agent_data_dir / "not_a_dir.txt"

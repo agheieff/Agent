@@ -63,6 +63,17 @@ def agent_data_dir(tmp_path):
     # --- Patching Logic ---
     original_config = copy.deepcopy(PERMISSIONS_CONFIG) # Keep a clean copy
     patched_config = copy.deepcopy(PERMISSIONS_CONFIG)
+
+    # **FIX**: Normalize the target path we want to patch for robust comparison
+    target_prefix_to_patch_str = "/tmp/agent_data/"
+    try:
+        normalized_target_prefix = os.path.abspath(target_prefix_to_patch_str)
+        if not normalized_target_prefix.endswith(os.sep):
+             normalized_target_prefix += os.sep
+    except Exception as e:
+        print(f"Warning: Could not normalize target prefix '{target_prefix_to_patch_str}': {e}. Patching might fail.")
+        normalized_target_prefix = target_prefix_to_patch_str # Fallback
+
     # Use the dynamically created data_dir path, ensuring it ends with a separator
     dynamic_path_prefix = str(data_dir.resolve()) + os.sep
 
@@ -70,15 +81,26 @@ def agent_data_dir(tmp_path):
     # Find and update the relevant rule(s) in the copied config
     for group, config in patched_config.get("groups", {}).items():
         for rule in config.get("file_permissions", []):
-            # Be specific to avoid patching unrelated rules if config grows
-            if rule.get("path_prefix") == "/tmp/agent_data/":
-                rule["path_prefix"] = dynamic_path_prefix
-                updated = True
-                print(f"Patching rule in group '{group}' to use prefix: {dynamic_path_prefix}") # Debug print
+            rule_prefix_str = rule.get("path_prefix")
+            if rule_prefix_str:
+                try:
+                    # **FIX**: Normalize the rule's current path for comparison
+                    current_normalized_rule_prefix = os.path.abspath(rule_prefix_str)
+                    if not current_normalized_rule_prefix.endswith(os.sep):
+                         current_normalized_rule_prefix += os.sep
+
+                    # **FIX**: Compare normalized paths
+                    if current_normalized_rule_prefix == normalized_target_prefix:
+                        rule["path_prefix"] = dynamic_path_prefix
+                        updated = True
+                        print(f"Patching rule in group '{group}' to use prefix: {dynamic_path_prefix}") # Debug print
+                except Exception as e:
+                     print(f"Warning: Could not normalize rule prefix '{rule_prefix_str}' in group '{group}': {e}. Skipping.")
+
 
     if not updated:
-        # This warning helps catch issues if the base config changes
-        print(f"Warning: Did not find rule with path_prefix='/tmp/agent_data/' to patch in PERMISSIONS_CONFIG.")
+        # This warning helps catch issues if the base config changes or normalization fails
+        print(f"Warning: Did not find or patch rule matching normalized '{normalized_target_prefix}' in PERMISSIONS_CONFIG.")
 
     # Use patch context manager to apply the change for the test's duration
     # The string 'MCP.permissions.PERMISSIONS_CONFIG' tells patch where to find the object to replace.

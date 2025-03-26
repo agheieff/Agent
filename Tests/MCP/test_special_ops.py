@@ -53,26 +53,19 @@ def test_get_server_time(client: TestClient, test_payload_factory):
     assert data["status"] == "success"
     assert "utc_time" in data["result"]
     try:
-        # Attempt to parse the returned time string
-        # Adjust format if GetServerTime uses a different one, but ISO 8601 with Z is good
+        # Attempt to parse the returned time string using fromisoformat
+        # which handles 'Z' and '+00:00' correctly.
         server_time_str = data["result"]["utc_time"]
-        # Handle both Z and +00:00 for UTC representation robustness
-        if server_time_str.endswith('Z'):
-            server_time_str_parsed = server_time_str[:-1] + '+00:00' # datetime understands +00:00 better
-        elif '+' not in server_time_str: # Assume UTC if no timezone info and not Z
-             server_time_str_parsed = server_time_str + '+00:00'
-        else:
-             server_time_str_parsed = server_time_str
+        server_ts = datetime.datetime.fromisoformat(server_time_str)
 
-        server_ts = datetime.datetime.fromisoformat(server_time_str_parsed)
         # Ensure the parsed timestamp is timezone-aware (UTC)
         assert server_ts.tzinfo is not None and server_ts.tzinfo.utcoffset(server_ts) == datetime.timedelta(0)
 
         # Check if the server time is within the bounds of the test execution time
         # Allow a slightly larger window due to potential delays
         assert (before_ts - datetime.timedelta(seconds=1)) <= server_ts <= (after_ts + datetime.timedelta(seconds=1))
-    except ValueError:
-        pytest.fail(f"Could not parse server time string: {data['result']['utc_time']}")
+    except ValueError as e:
+        pytest.fail(f"Could not parse server time string '{data['result']['utc_time']}': {e}")
     except Exception as e:
         pytest.fail(f"Error comparing timestamps: {e}")
     assert data["id"] == payload["id"]
@@ -86,11 +79,8 @@ def test_list_operations_default_agent(client: TestClient, test_payload_factory)
     assert data["status"] == "success"
     assert "operations" in data["result"]
     ops = {op["name"] for op in data["result"]["operations"]}
-    # --- Assertion Corrected ---
     # Based on MCP/permissions.py default_permissions
-    # Should NOT include get_server_time by default
     assert ops == {"echo", "ping", "list_operations"}
-    # --- End Correction ---
 
 
 def test_list_operations_agent_001(client: TestClient, test_payload_factory):
@@ -133,9 +123,7 @@ def test_operation_permission_denied(client: TestClient, test_payload_factory):
     assert response.status_code == 403 # Forbidden
     data = response.json()
     assert data["status"] == "error"
-    # --- Assertion Corrected ---
     # Server permission check for the operation itself returns PERMISSION_DENIED (13)
     assert data["error_code"] == 13 # PERMISSION_DENIED
-    # --- End Correction ---
     assert "does not have permission" in data["message"]
     assert "read_file" in data["message"]

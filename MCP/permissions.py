@@ -37,24 +37,23 @@ PERMISSIONS_CONFIG = {
             "file_permissions": []
         },
         "tmp_readers_writers": {
-             "allowed_operations": [ # Explicitly list allowed file ops for this group
-                 "read_file",
-                 "write_file",
-                 "delete_file",
-                 "list_directory"
-             ],
+            "allowed_operations": [ # Explicitly list allowed file ops for this group
+                "read_file",
+                "write_file",
+                "delete_file",
+                "list_directory"
+            ],
             "file_permissions": [
                 # Grant R/W/D/L access within /tmp/agent_data/ (or OS equivalent)
+                # **IMPORTANT**: Path normalization is CRUCIAL for security.
                 {"path_prefix": "/tmp/agent_data/", "permissions": ["read", "write", "delete", "list"]}
-                # Note: VERY basic prefix match. Security depends heavily on path normalization
-                # and preventing traversal attacks (e.g., "../.."). os.path.abspath helps but isn't foolproof alone.
             ]
         },
          "doc_readers": {
-             "allowed_operations": [
-                 "read_file",
-                 "list_directory"
-             ],
+            "allowed_operations": [
+                "read_file",
+                "list_directory"
+            ],
             "file_permissions": [
                 {"path_prefix": "/shared/docs/", "permissions": ["read", "list"]}
             ]
@@ -62,7 +61,7 @@ PERMISSIONS_CONFIG = {
         "admin": {
             "allowed_operations": ["*"], # Wildcard for all operations
             "file_permissions": [
-                 {"path_prefix": "/", "permissions": ["read", "write", "delete", "list"]} # Full access (use with extreme caution!)
+                {"path_prefix": "/", "permissions": ["read", "write", "delete", "list"]} # Full access (use with extreme caution!)
             ]
         },
     },
@@ -128,11 +127,11 @@ def check_file_permission(
     Checks if the required permission is granted for the requested path
     based on the agent's file permission rules (list of dictionaries).
 
-    Basic Implementation: Iterates through rules, finds the most specific
-    matching prefix, and checks if the permission is granted by that rule.
-    Does NOT currently handle deny rules or complex overlaps.
+    Revised Implementation: Normalizes paths robustly and finds the most specific
+    matching prefix rule. Handles directory/file distinctions better.
     """
     if not requested_path_str: # Prevent matching root '/' on empty path
+        logger.debug("Permission check: Denied due to empty requested path.")
         return False
 
     try:
@@ -154,35 +153,55 @@ def check_file_permission(
         try:
             # Normalize the rule prefix as well
             normalized_rule_path = os.path.abspath(rule_path_prefix_str)
-            # Ensure directory prefixes end with a separator for proper matching
-            if not normalized_rule_path.endswith(os.sep) and normalized_rule_path != os.sep:
-                normalized_rule_path += os.sep
+
+            # Ensure directory prefixes end with a separator for proper containment check
+            # but handle the root '/' case correctly.
+            is_rule_dir_like = rule_path_prefix_str.endswith('/') or rule_path_prefix_str == '/'
+            if is_rule_dir_like and not normalized_rule_path.endswith(os.sep):
+                 # Check if it's the root path, avoid adding extra slash if it is
+                 if normalized_rule_path != os.path.abspath(os.sep):
+                     normalized_rule_path += os.sep
 
             current_prefix_len = len(normalized_rule_path)
 
-            # Check if the requested path starts with the rule path
-            # Also handle exact match for file rules if rule path doesn't end with sep
-            is_exact_match = normalized_req_path == os.path.abspath(rule_path_prefix_str)
-            is_prefix_match = normalized_req_path.startswith(normalized_rule_path)
+            # Check if the normalized requested path IS EXACTLY the normalized rule path
+            is_exact_match = normalized_req_path == normalized_rule_path
 
-            if is_prefix_match or is_exact_match:
-                 # Find the most specific rule (longest prefix) that applies
-                 if current_prefix_len > longest_prefix_len:
-                      longest_prefix_len = current_prefix_len
-                      best_match_rule = rule
+            # Check if the normalized requested path STARTS WITH the normalized rule path (for directory rules)
+            # Also ensure that if the rule is a directory, the match isn't just partial
+            # e.g. rule /tmp/abc/, req /tmp/abcd -> NO match
+            # e.g. rule /tmp/abc/, req /tmp/abc/file -> YES match
+            # e.g. rule /tmp/abc/, req /tmp/abc -> NO match (needs trailing slash)
+            is_prefix_match = False
+            if is_rule_dir_like and normalized_req_path.startswith(normalized_rule_path):
+                 is_prefix_match = True
+            # If rule is not dir-like (e.g. /tmp/file), only exact match applies
+            elif not is_rule_dir_like and is_exact_match:
+                 is_prefix_match = True # Treat exact match of a file rule as a prefix match for selection
+
+
+            if is_prefix_match:
+                # Find the most specific rule (longest prefix) that applies
+                if current_prefix_len > longest_prefix_len:
+                    longest_prefix_len = current_prefix_len
+                    best_match_rule = rule
+                # If lengths are equal, potentially handle precedence (e.g., deny > allow),
+                # but current logic just takes the last one found of equal length.
 
         except Exception as e:
-            logger.warning(f"Could not normalize rule path '{rule_path_prefix_str}': {e}")
+            logger.warning(f"Could not process rule path '{rule_path_prefix_str}': {e}")
             continue # Skip invalid rules
 
     # Now check the permissions of the best matching rule found
     is_allowed = False
     if best_match_rule:
-        if required_permission in best_match_rule.get("permissions", []):
+        allowed_perms_for_rule = best_match_rule.get("permissions", [])
+        if required_permission in allowed_perms_for_rule:
             is_allowed = True
 
+    # Add more detailed logging
     logger.debug(
-        f"Permission check: path='{normalized_req_path}' (orig='{requested_path_str}'), "
+        f"Permission check: req_path='{normalized_req_path}' (orig='{requested_path_str}'), "
         f"required='{required_permission}', "
         f"best_match_rule={best_match_rule}, allowed={is_allowed}"
     )

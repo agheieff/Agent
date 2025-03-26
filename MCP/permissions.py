@@ -1,5 +1,6 @@
 import logging
-import os # Import needed for path normalization
+import os
+from pathlib import Path # Import Path
 from typing import Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ PERMISSIONS_CONFIG = {
             "file_permissions": [
                 # Grant R/W/D/L access within /tmp/agent_data/ (or OS equivalent)
                 # **IMPORTANT**: Path normalization is CRUCIAL for security.
+                # **NOTE**: This exact string "/tmp/agent_data/" is patched in tests.
                 {"path_prefix": "/tmp/agent_data/", "permissions": ["read", "write", "delete", "list"]}
             ]
         },
@@ -127,20 +129,20 @@ def check_file_permission(
     Checks if the required permission is granted for the requested path
     based on the agent's file permission rules (list of dictionaries).
 
-    Revised Implementation: Normalizes paths robustly and finds the most specific
-    matching prefix rule. Handles directory/file distinctions better.
+    Revised Implementation: Uses pathlib.Path.resolve() for robust normalization
+    and finds the most specific matching prefix rule.
     """
-    if not requested_path_str: # Prevent matching root '/' on empty path
+    if not requested_path_str: # Prevent issues with empty path
         logger.debug("Permission check: Denied due to empty requested path.")
         return False
 
     try:
-        # Normalize the requested path to resolve '..' etc. and make absolute
-        # This is crucial for security to prevent traversal.
-        normalized_req_path = os.path.abspath(requested_path_str)
+        # Resolve the requested path to get a canonical absolute path
+        # This handles '..', symlinks, etc.
+        resolved_req_path = Path(requested_path_str).resolve()
     except Exception as e:
-        logger.warning(f"Could not normalize requested path '{requested_path_str}': {e}")
-        return False # Treat un-normalizable paths as denied
+        logger.warning(f"Could not resolve requested path '{requested_path_str}': {e}")
+        return False # Treat un-resolvable paths as denied
 
     best_match_rule = None
     longest_prefix_len = -1
@@ -151,45 +153,27 @@ def check_file_permission(
             continue
 
         try:
-            # Normalize the rule prefix as well
-            normalized_rule_path = os.path.abspath(rule_path_prefix_str)
+            # Resolve the rule prefix path as well for consistent comparison
+            resolved_rule_path = Path(rule_path_prefix_str).resolve()
+            current_prefix_len = len(str(resolved_rule_path))
 
-            # Ensure directory prefixes end with a separator for proper containment check
-            # but handle the root '/' case correctly.
-            is_rule_dir_like = rule_path_prefix_str.endswith('/') or rule_path_prefix_str == '/'
-            if is_rule_dir_like and not normalized_rule_path.endswith(os.sep):
-                 # Check if it's the root path, avoid adding extra slash if it is
-                 if normalized_rule_path != os.path.abspath(os.sep):
-                     normalized_rule_path += os.sep
-
-            current_prefix_len = len(normalized_rule_path)
-
-            # Check if the normalized requested path IS EXACTLY the normalized rule path
-            is_exact_match = normalized_req_path == normalized_rule_path
-
-            # Check if the normalized requested path STARTS WITH the normalized rule path (for directory rules)
-            # Also ensure that if the rule is a directory, the match isn't just partial
-            # e.g. rule /tmp/abc/, req /tmp/abcd -> NO match
-            # e.g. rule /tmp/abc/, req /tmp/abc/file -> YES match
-            # e.g. rule /tmp/abc/, req /tmp/abc -> NO match (needs trailing slash)
-            is_prefix_match = False
-            if is_rule_dir_like and normalized_req_path.startswith(normalized_rule_path):
-                 is_prefix_match = True
-            # If rule is not dir-like (e.g. /tmp/file), only exact match applies
-            elif not is_rule_dir_like and is_exact_match:
-                 is_prefix_match = True # Treat exact match of a file rule as a prefix match for selection
-
-
-            if is_prefix_match:
-                # Find the most specific rule (longest prefix) that applies
+            # Check if the resolved requested path IS or IS WITHIN the resolved rule path
+            # This works for both file and directory rules naturally with pathlib
+            # resolved_req_path == resolved_rule_path handles exact matches (file or dir)
+            # resolved_rule_path in resolved_req_path.parents handles containment
+            # e.g., rule /a/b/, req /a/b/c -> Path('/a/b') in Path('/a/b/c').parents -> True
+            # e.g., rule /a/b, req /a/b -> Path('/a/b') == Path('/a/b') -> True
+            # e.g., rule /a/b/, req /a/b -> Path('/a/b') == Path('/a/b') -> True (resolve handles trailing slash)
+            if resolved_req_path == resolved_rule_path or resolved_rule_path in resolved_req_path.parents:
+                # Find the most specific rule (longest prefix path string) that applies
                 if current_prefix_len > longest_prefix_len:
                     longest_prefix_len = current_prefix_len
                     best_match_rule = rule
-                # If lengths are equal, potentially handle precedence (e.g., deny > allow),
-                # but current logic just takes the last one found of equal length.
+                # If lengths are equal, current logic takes the last one found.
+                # Could implement deny > allow precedence here if needed later.
 
         except Exception as e:
-            logger.warning(f"Could not process rule path '{rule_path_prefix_str}': {e}")
+            logger.warning(f"Could not resolve rule path '{rule_path_prefix_str}': {e}")
             continue # Skip invalid rules
 
     # Now check the permissions of the best matching rule found
@@ -201,8 +185,9 @@ def check_file_permission(
 
     # Add more detailed logging
     logger.debug(
-        f"Permission check: req_path='{normalized_req_path}' (orig='{requested_path_str}'), "
+        f"Permission check: req_path='{resolved_req_path}' (orig='{requested_path_str}'), "
         f"required='{required_permission}', "
-        f"best_match_rule={best_match_rule}, allowed={is_allowed}"
+        f"best_match_rule={best_match_rule} (matched prefix='{str(Path(best_match_rule['path_prefix']).resolve()) if best_match_rule else 'None'}'), "
+        f"allowed={is_allowed}"
     )
     return is_allowed

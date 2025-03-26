@@ -20,7 +20,7 @@ class ReadFile(Operation):
     def execute(self, args: BaseModel, agent_permissions: Optional[Dict] = None) -> OperationResult:
         path = args.path
         lines_to_read = args.lines
-        file_perm_rules = agent_permissions.get('file', []) if agent_permissions else []
+        file_perm_rules = agent_permissions.get('file_permissions', []) if agent_permissions else []
         content_lines = []
 
         logger.debug(f"Executing read_file: path='{path}', lines={lines_to_read}, agent='{agent_permissions.get('agent_id', 'default') if agent_permissions else 'default'}'")
@@ -74,7 +74,7 @@ class WriteFile(Operation):
         path = args.path
         content = args.content
         overwrite = args.overwrite
-        file_perm_rules = agent_permissions.get('file', []) if agent_permissions else []
+        file_perm_rules = agent_permissions.get('file_permissions', []) if agent_permissions else []
 
         logger.debug(f"Executing write_file: path='{path}', overwrite={overwrite}, agent='{agent_permissions.get('agent_id', 'default') if agent_permissions else 'default'}'")
 
@@ -121,7 +121,7 @@ class DeleteFile(Operation):
 
     def execute(self, args: BaseModel, agent_permissions: Optional[Dict] = None) -> OperationResult:
         path = args.path
-        file_perm_rules = agent_permissions.get('file', []) if agent_permissions else []
+        file_perm_rules = agent_permissions.get('file_permissions', []) if agent_permissions else []
 
         logger.debug(f"Executing delete_file: path='{path}', agent='{agent_permissions.get('agent_id', 'default') if agent_permissions else 'default'}'")
 
@@ -163,7 +163,7 @@ class ListDirectory(Operation):
     def execute(self, args: BaseModel, agent_permissions: Optional[Dict] = None) -> OperationResult:
         path = args.path
         show_hidden = args.show_hidden
-        file_perm_rules = agent_permissions.get('file', []) if agent_permissions else []
+        file_perm_rules = agent_permissions.get('file_permissions', []) if agent_permissions else []
 
         logger.debug(f"Executing list_directory: path='{path}', show_hidden={show_hidden}, agent='{agent_permissions.get('agent_id', 'default') if agent_permissions else 'default'}'")
 

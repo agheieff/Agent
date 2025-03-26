@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 import sys, os
-from pathlib import Path
+from pathlib import Path # Import Path
 from unittest.mock import patch # Import patch
 import copy # Import copy
 
@@ -54,60 +54,45 @@ def test_payload_factory():
 def agent_data_dir(tmp_path):
     """
     Creates a temporary agent_data directory AND patches the
-    PERMISSIONS_CONFIG to use this dynamic path for the test duration.
+    PERMISSIONS_CONFIG to use this dynamic path for the test duration,
+    using pathlib.Path.resolve() for robust path handling.
     """
     data_dir = tmp_path / "agent_data"
     data_dir.mkdir(exist_ok=True)
-    print(f"Created test agent_data_dir: {data_dir}") # Debug print
+    resolved_data_dir = data_dir.resolve() # Resolve once
+    print(f"Created test agent_data_dir: {resolved_data_dir}") # Debug print
 
     # --- Patching Logic ---
     original_config = copy.deepcopy(PERMISSIONS_CONFIG) # Keep a clean copy
     patched_config = copy.deepcopy(PERMISSIONS_CONFIG)
 
-    # **FIX**: Normalize the target path we want to patch for robust comparison
+    # The specific string prefix we want to replace in the config
     target_prefix_to_patch_str = "/tmp/agent_data/"
-    try:
-        normalized_target_prefix = os.path.abspath(target_prefix_to_patch_str)
-        if not normalized_target_prefix.endswith(os.sep):
-             normalized_target_prefix += os.sep
-    except Exception as e:
-        print(f"Warning: Could not normalize target prefix '{target_prefix_to_patch_str}': {e}. Patching might fail.")
-        normalized_target_prefix = target_prefix_to_patch_str # Fallback
 
-    # Use the dynamically created data_dir path, ensuring it ends with a separator
-    dynamic_path_prefix = str(data_dir.resolve()) + os.sep
+    # Use the dynamically created and resolved data_dir path as a string for the new rule value
+    dynamic_path_prefix_str = str(resolved_data_dir) # String representation for JSON-like config
 
     updated = False
     # Find and update the relevant rule(s) in the copied config
     for group, config in patched_config.get("groups", {}).items():
         for rule in config.get("file_permissions", []):
             rule_prefix_str = rule.get("path_prefix")
-            if rule_prefix_str:
-                try:
-                    # **FIX**: Normalize the rule's current path for comparison
-                    current_normalized_rule_prefix = os.path.abspath(rule_prefix_str)
-                    if not current_normalized_rule_prefix.endswith(os.sep):
-                         current_normalized_rule_prefix += os.sep
-
-                    # **FIX**: Compare normalized paths
-                    if current_normalized_rule_prefix == normalized_target_prefix:
-                        rule["path_prefix"] = dynamic_path_prefix
-                        updated = True
-                        print(f"Patching rule in group '{group}' to use prefix: {dynamic_path_prefix}") # Debug print
-                except Exception as e:
-                     print(f"Warning: Could not normalize rule prefix '{rule_prefix_str}' in group '{group}': {e}. Skipping.")
-
+            # Compare the original rule string directly
+            if rule_prefix_str == target_prefix_to_patch_str:
+                rule["path_prefix"] = dynamic_path_prefix_str # Replace with the resolved dynamic path string
+                updated = True
+                print(f"Patching rule in group '{group}' to use prefix: {dynamic_path_prefix_str}") # Debug print
 
     if not updated:
-        # This warning helps catch issues if the base config changes or normalization fails
-        print(f"Warning: Did not find or patch rule matching normalized '{normalized_target_prefix}' in PERMISSIONS_CONFIG.")
+        # This warning helps catch issues if the base config changes
+        print(f"Warning: Did not find or patch rule matching exact string '{target_prefix_to_patch_str}' in PERMISSIONS_CONFIG.")
 
     # Use patch context manager to apply the change for the test's duration
     # The string 'MCP.permissions.PERMISSIONS_CONFIG' tells patch where to find the object to replace.
     with patch('MCP.permissions.PERMISSIONS_CONFIG', patched_config):
-        print("Applied patched PERMISSIONS_CONFIG") # Debug print
-        yield data_dir # The test runs here with the patched config
+        print(f"Applied patched PERMISSIONS_CONFIG targeting '{dynamic_path_prefix_str}'") # Debug print
+        yield resolved_data_dir # The test runs here with the patched config and resolved path
 
     # --- End Patching Logic ---
     # Patch is automatically reverted after yield
-    print(f"Restored original PERMISSIONS_CONFIG after test using {data_dir}") # Debug print
+    print(f"Restored original PERMISSIONS_CONFIG after test using {resolved_data_dir}") # Debug print

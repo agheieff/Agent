@@ -129,7 +129,6 @@ def interactive_model_selection(provider_name: str, provider_class: Any) -> str:
 
 def main():
     load_env_variables()
-    print("a")
     
     # Discover providers
     providers = discover_providers()

@@ -2,14 +2,14 @@ import os
 import logging
 from pathlib import Path
 from typing import Optional, List # Added List for list_directory
-from .base import Capability, CapabilityResult, ArgumentDefinition
+from .base import Operation, OperationResult, ArgumentDefinition
 from ..errors import MCPError, ErrorCode
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 # --- ReadFile (from previous step) ---
-class ReadFile(Capability):
+class ReadFile(Operation):
     name = "read_file"
     description = "Reads content from a specified file."
     arguments = [
@@ -17,7 +17,7 @@ class ReadFile(Capability):
         ArgumentDefinition(name="lines", type="integer", required=False, description="Number of lines to read (optional)")
     ]
 
-    def execute(self, args: BaseModel) -> CapabilityResult:
+    def execute(self, args: BaseModel, agent_permissions: Optional[Dict] = None) -> OperationResult:
         path = args.path
         lines_to_read = args.lines
         content_lines = [] # Define outside try block
@@ -53,8 +53,8 @@ class ReadFile(Capability):
         except Exception as e:
             logger.error(f"Error reading file '{path}': {e}", exc_info=True)
             raise MCPError(ErrorCode.OPERATION_FAILED, f"Failed to read file '{path}': {str(e)}") from e
+        return OperationResult(success=True, data={"content": content})
 
-# --- WriteFile ---
 class WriteFile(Capability):
     name = "write_file"
     description = "Writes content to a specified file."

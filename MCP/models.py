@@ -1,27 +1,26 @@
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, Literal, Union
 
-# Using Literal for fixed 'type' and 'status' fields improves validation
 class MCPRequest(BaseModel):
-    mcp_version: str = Field(default="1.0", description="MCP Protocol Version", examples=["1.0"])
+    mcp_version: str = Field(default="1.0", ...)
     type: Literal["request"] = "request"
-    id: str = Field(..., description="Unique request identifier", examples=["req-abc-123"])
-    capability: str = Field(..., description="The name of the capability to execute", examples=["read_file"])
-    arguments: Dict[str, Any] = Field(default_factory=dict, description="Arguments for the capability", examples=[{"path": "/etc/hosts"}])
+    id: str = Field(..., examples=["req-abc-123"])
+    operation: str = Field(..., description="The name of the operation to execute", examples=["read_file"]) # RENAMED
+    arguments: Dict[str, Any] = Field(default_factory=dict, ...)
+    agent_id: Optional[str] = Field(None, description="Identifier for the agent making the request (optional)") # ADDED for Phase 2
 
 class MCPResponseBase(BaseModel):
-    mcp_version: str = Field(default="1.0", description="MCP Protocol Version")
+    mcp_version: str = Field(default="1.0", ...)
     type: Literal["response"] = "response"
-    id: str = Field(..., description="Corresponds to the request ID")
+    id: str = Field(...)
 
 class MCPSuccessResponse(MCPResponseBase):
     status: Literal["success"] = "success"
-    result: Optional[Any] = Field(None, description="The successful result data from the capability")
+    result: Optional[Any] = Field(None, ...)
 
 class MCPErrorResponse(MCPResponseBase):
     status: Literal["error"] = "error"
-    error_code: int = Field(..., description="Numeric error code")
-    message: str = Field(..., description="Human-readable error message")
+    error_code: int = Field(...)
+    message: str = Field(...)
 
-# Union type for response model in FastAPI documentation (optional)
 MCPResponse = Union[MCPSuccessResponse, MCPErrorResponse]

@@ -4,16 +4,16 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 try:
-    from .models import MCPRequest, MCPSuccessResponse, MCPErrorResponse, MCPResponse
-    from .registry import operation_registry
-    from .errors import MCPError, ErrorCode, DEFAULT_MESSAGES
-    from .operations.base import OperationResult
-    from .permissions import get_agent_permissions
+    from MCP.models import MCPRequest, MCPSuccessResponse, MCPErrorResponse, MCPResponse
+    from MCP.registry import operation_registry
+    from MCP.errors import MCPError, ErrorCode, DEFAULT_MESSAGES
+    from MCP.Operations.base import OperationResult
+    from MCP.permissions import get_agent_permissions
 except ImportError:
     from models import MCPRequest, MCPSuccessResponse, MCPErrorResponse, MCPResponse
     from registry import operation_registry
     from errors import MCPError, ErrorCode, DEFAULT_MESSAGES
-    from operations.base import OperationResult
+    from Operations.base import OperationResult
     from permissions import get_agent_permissions
 
 
@@ -34,9 +34,9 @@ async def startup_event():
     logger.info(f"Available operations: {list(operation_registry.get_all().keys())}")
 
 @app.post("/mcp",
-           response_model=None, # We manually create JSON responses based on success/error
-           summary="Handle MCP Requests",
-           tags=["MCP"])
+          response_model=None, # We manually create JSON responses based on success/error
+          summary="Handle MCP Requests",
+          tags=["MCP"])
 async def handle_mcp_request(request: MCPRequest):
     """
     Receives an MCP request, checks permissions, validates arguments,
@@ -89,13 +89,13 @@ async def handle_mcp_request(request: MCPRequest):
         )
         return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=error_resp.dict())
     except Exception as e: # Catch errors during model creation or other validation prep
-         logger.error(f"{log_prefix}Error preparing arguments for '{requested_op_name}': {e}", exc_info=True)
-         error_resp = MCPErrorResponse(
+        logger.error(f"{log_prefix}Error preparing arguments for '{requested_op_name}': {e}", exc_info=True)
+        error_resp = MCPErrorResponse(
             id=request.id,
             error_code=ErrorCode.INVALID_ARGUMENTS, # Or maybe UNKNOWN_ERROR
             message=f"Internal error processing arguments: {str(e)}"
-         )
-         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_resp.dict())
+        )
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_resp.dict())
 
     # 3. Execute Operation
     try:

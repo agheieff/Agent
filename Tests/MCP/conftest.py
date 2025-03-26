@@ -44,7 +44,7 @@ def test_payload_factory():
             "arguments": args if args is not None else {} # Ensure arguments is always present
         }
         if agent:
-             payload["agent_id"] = agent
+            payload["agent_id"] = agent
         return payload
     return _create_payload
 

@@ -1,99 +1,115 @@
 import importlib
 import inspect
-import os
 import pkgutil
 import logging
 from typing import Dict, Optional, Type
 from pathlib import Path
 
-# Ensure relative import works correctly
-try:
-    from .Operations.base import Operation
-except ImportError:
-    # Fallback for potential execution context issues (e.g., running tests directly)
-    from Operations.base import Operation
-
+# Use relative import assuming registry.py is inside MCP package
+from .Operations.base import Operation
 
 logger = logging.getLogger(__name__)
 
 class OperationRegistry:
+    """Singleton registry for discovering and accessing MCP Operations."""
     _instance = None
+    _operations: Dict[str, Operation]
+    _discovered: bool
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(OperationRegistry, cls).__new__(cls)
-            cls._instance._operations: Dict[str, Operation] = {}
+            cls._instance._operations = {}
             cls._instance._discovered = False
+            logger.debug("OperationRegistry singleton created.")
         return cls._instance
 
     def register(self, operation_instance: Operation) -> None:
-        if operation_instance.name in self._operations:
-            logger.warning(f"Overwriting operation registration for '{operation_instance.name}'")
-        self._operations[operation_instance.name] = operation_instance
-        logger.debug(f"Registered operation: {operation_instance.name}")
+        """Registers a single operation instance."""
+        op_name = operation_instance.name
+        if op_name in self._operations:
+            # Allows re-registration, potentially useful for hot-reloading in dev
+            logger.warning(f"Overwriting existing operation registration for '{op_name}'")
+        self._operations[op_name] = operation_instance
+        logger.debug(f"Registered operation: {op_name}")
 
     def get(self, name: str) -> Optional[Operation]:
+        """Gets a registered operation instance by name."""
         if not self._discovered:
             self.discover_operations()
         return self._operations.get(name)
 
     def get_all(self) -> Dict[str, Operation]:
+        """Gets a dictionary of all registered operation instances."""
         if not self._discovered:
             self.discover_operations()
-        return self._operations.copy() # Return a copy
+        return self._operations.copy() # Return a copy to prevent external modification
 
-    def discover_operations(self) -> None:
-        if self._discovered:
+    def discover_operations(self, force_rediscover: bool = False) -> None:
+        """
+        Automatically discovers and registers Operation classes from modules
+        within the 'MCP.Operations' directory (excluding 'base' and '__init__').
+        """
+        if self._discovered and not force_rediscover:
             return
 
-        self._operations.clear() # Clear previous entries if re-discovering
-        logger.info("Discovering MCP operations...")
-        operations_pkg_path = Path(__file__).parent / "Operations" # Corrected directory name case
-        package_name = "MCP.Operations" # Corrected import path case
+        if force_rediscover:
+             logger.info("Forcing re-discovery of MCP operations...")
+             self._operations.clear()
+        else:
+             logger.info("Discovering MCP operations...")
 
-        if not operations_pkg_path.is_dir():
-             logger.warning(f"Operations directory not found at: {operations_pkg_path}")
-             self._discovered = True
+        # Determine the path to the Operations package relative to this file
+        try:
+            # Assumes registry.py is in MCP/
+            operations_pkg_path_obj = Path(__file__).parent / "Operations"
+            package_name = "MCP.Operations" # The import path
+            # Dynamically import the base package to ensure it's loaded
+            operations_pkg = importlib.import_module(package_name)
+            operations_pkg_path = operations_pkg_path_obj.resolve() # Get absolute path for iter_modules
+        except (ImportError, FileNotFoundError) as e:
+             logger.error(f"Could not find or import the '{package_name}' package: {e}", exc_info=True)
+             self._discovered = True # Mark as discovered to avoid retrying constantly
              return
 
-        # Ensure the package itself is importable
-        try:
-             importlib.import_module(package_name)
-        except ImportError as e:
-             logger.error(f"Could not import base package '{package_name}': {e}", exc_info=True)
-             # Decide if this is fatal or if we should continue
-             # For now, let's assume it might be recoverable if submodules import differently
-             # but log a clear error.
+        if not operations_pkg_path.is_dir():
+            logger.error(f"Operations directory not found at resolved path: {operations_pkg_path}")
+            self._discovered = True
+            return
 
-        for _, module_name, is_pkg in pkgutil.iter_modules([str(operations_pkg_path)]):
-            # Skip __init__, base, and any sub-packages
-            if module_name.startswith("_") or module_name == "base" or is_pkg:
+        discovered_count = 0
+        # Iterate over modules in the Operations directory
+        for module_info in pkgutil.iter_modules([str(operations_pkg_path)]):
+            module_name = module_info.name
+            # Skip base class, private modules, and __init__
+            if module_name == "base" or module_name.startswith("_") or module_name == "__init__":
                 continue
 
             try:
                 module_import_path = f"{package_name}.{module_name}"
                 module = importlib.import_module(module_import_path)
 
+                # Inspect the module for classes inheriting from Operation
                 for name, obj in inspect.getmembers(module):
                     if (inspect.isclass(obj) and
                             issubclass(obj, Operation) and
-                            obj is not Operation and
-                            not inspect.isabstract(obj)):
+                            obj is not Operation and # Exclude the base class itself
+                            not inspect.isabstract(obj)): # Exclude abstract classes
                         try:
                             instance = obj() # Instantiate the operation
                             self.register(instance)
-                        except TypeError as te: # Catch errors during instantiation (e.g., missing args in __init__)
-                             logger.error(f"Failed to instantiate operation '{name}' from {module_import_path} - TypeError: {te}", exc_info=True)
+                            discovered_count += 1
                         except Exception as e:
-                            logger.error(f"Failed to instantiate operation '{name}' from {module_import_path}: {e}", exc_info=True)
+                             logger.error(f"Failed to instantiate operation '{name}' from {module_import_path}: {e}", exc_info=True)
 
             except ImportError as e:
                 logger.error(f"Failed to import operation module '{module_import_path}': {e}", exc_info=True)
             except Exception as e:
-                logger.error(f"Unexpected error discovering operations in '{module_name}': {e}", exc_info=True)
+                 logger.error(f"Unexpected error processing module '{module_name}': {e}", exc_info=True)
 
         self._discovered = True
-        logger.info(f"Operation discovery complete. Found: {list(self._operations.keys())}")
+        logger.info(f"Operation discovery complete. Found {discovered_count} operations: {list(self._operations.keys())}")
 
-# Initialize registry singleton instance
+
+# Initialize the singleton instance upon module load
 operation_registry = OperationRegistry()

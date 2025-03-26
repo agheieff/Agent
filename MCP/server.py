@@ -1,175 +1,185 @@
 import logging
-from contextlib import asynccontextmanager # Import for lifespan
-from fastapi import FastAPI, Request, status # Removed HTTPException as we use JSONResponse directly
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request, status as http_status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-try:
-    from MCP.models import MCPRequest, MCPSuccessResponse, MCPErrorResponse, MCPResponse
-    from MCP.registry import operation_registry
-    from MCP.errors import MCPError, ErrorCode, DEFAULT_MESSAGES
-    from MCP.Operations.base import OperationResult
-    from MCP.permissions import get_agent_permissions
-except ImportError:
-    # Allow running directly for simple tests if needed, though discouraged
-    from models import MCPRequest, MCPSuccessResponse, MCPErrorResponse, MCPResponse
-    from registry import operation_registry
-    from errors import MCPError, ErrorCode, DEFAULT_MESSAGES
-    from Operations.base import OperationResult
-    from permissions import get_agent_permissions
-
+# Use relative imports within the MCP package
+from .models import MCPRequest, MCPSuccessResponse, MCPErrorResponse, MCPResponse
+from .registry import operation_registry
+from .errors import MCPError, ErrorCode, DEFAULT_MESSAGES
+from .Operations.base import OperationResult
+from .permissions import get_agent_permissions
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Lifespan context manager for startup/shutdown events
+# --- Utility Functions ---
+
+def map_error_code_to_http_status(error_code: ErrorCode) -> int:
+    """Maps internal ErrorCodes enum to suitable HTTP status codes."""
+    status_map = {
+        ErrorCode.SUCCESS: http_status.HTTP_200_OK,
+        ErrorCode.OPERATION_NOT_FOUND: http_status.HTTP_404_NOT_FOUND,
+        ErrorCode.RESOURCE_NOT_FOUND: http_status.HTTP_404_NOT_FOUND,
+        ErrorCode.INVALID_REQUEST: http_status.HTTP_400_BAD_REQUEST,
+        ErrorCode.INVALID_ARGUMENTS: http_status.HTTP_400_BAD_REQUEST, # Or 422 if preferred
+        ErrorCode.VALIDATION_ERROR: http_status.HTTP_400_BAD_REQUEST, # Or 422
+        ErrorCode.PERMISSION_DENIED: http_status.HTTP_403_FORBIDDEN,
+        ErrorCode.OS_PERMISSION_DENIED: http_status.HTTP_403_FORBIDDEN,
+        ErrorCode.RESOURCE_EXISTS: http_status.HTTP_409_CONFLICT,
+        ErrorCode.RESOURCE_BUSY: http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        ErrorCode.TIMEOUT: http_status.HTTP_504_GATEWAY_TIMEOUT,
+        ErrorCode.NETWORK_ERROR: http_status.HTTP_502_BAD_GATEWAY, # Or 500/503
+        ErrorCode.OPERATION_FAILED: http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+        ErrorCode.INVALID_OPERATION_STATE: http_status.HTTP_409_CONFLICT, # Or 500
+        ErrorCode.UNKNOWN_ERROR: http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+    }
+    # Ensure input is an ErrorCode member if possible
+    try:
+        ec = ErrorCode(error_code)
+        return status_map.get(ec, http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except ValueError:
+        logger.warning(f"Mapping unknown error code {error_code} to HTTP status 500")
+        return http_status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+# --- FastAPI Application Setup ---
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Code to run on startup
+    """Handles application startup and shutdown events."""
+    # Startup: Discover operations
     operation_registry.discover_operations()
     logger.info("MCP Server started.")
     logger.info(f"Available operations: {list(operation_registry.get_all().keys())}")
     yield
-    # Code to run on shutdown (if any)
+    # Shutdown: (Add cleanup here if needed)
     logger.info("MCP Server shutting down.")
-
 
 app = FastAPI(
     title="MCP Operation Server",
-    description="Exposes registered operations via the Multifaceted Capability Protocol.",
+    description="Exposes registered MCP operations via a REST API.",
     version="1.0.0",
-    lifespan=lifespan # Use the lifespan context manager
+    lifespan=lifespan
 )
 
-# Removed the @app.on_event("startup") decorator
+# --- Exception Handlers ---
+
+@app.exception_handler(MCPError)
+async def mcp_exception_handler(request: Request, exc: MCPError):
+    """Handles controlled MCP errors raised by operations."""
+    request_id = getattr(request.state, "request_id", "unknown") # Get ID if set by middleware
+    logger.warning(f"[Req ID: {request_id}] Handled MCPError: Code={exc.code}, Msg='{exc.message}'")
+    http_code = map_error_code_to_http_status(exc.code)
+    error_resp = MCPErrorResponse(
+        id=request_id,
+        error_code=int(exc.code),
+        message=exc.message,
+        details=exc.details
+    )
+    return JSONResponse(status_code=http_code, content=error_resp.model_dump())
+
+@app.exception_handler(ValidationError)
+async def validation_exception_handler(request: Request, exc: ValidationError):
+    """Handles Pydantic validation errors during request parsing or argument validation."""
+    request_id = getattr(request.state, "request_id", "unknown")
+    logger.warning(f"[Req ID: {request_id}] Argument validation failed: {exc.errors()}")
+    error_resp = MCPErrorResponse(
+        id=request_id,
+        error_code=ErrorCode.VALIDATION_ERROR,
+        message="Argument validation failed.",
+        details=exc.errors() # Provide detailed Pydantic errors
+    )
+    # Use 400 for client-side validation errors
+    return JSONResponse(status_code=http_status.HTTP_400_BAD_REQUEST, content=error_resp.model_dump())
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    """Handles any other unexpected exceptions."""
+    request_id = getattr(request.state, "request_id", "unknown")
+    logger.exception(f"[Req ID: {request_id}] Unexpected internal server error: {exc}") # Log full traceback
+    error_resp = MCPErrorResponse(
+        id=request_id,
+        error_code=ErrorCode.UNKNOWN_ERROR,
+        message=f"An unexpected internal server error occurred: {type(exc).__name__}",
+        # Avoid leaking detailed internal error messages in production responses
+        # details=str(exc) # Optionally include basic error string in details
+    )
+    return JSONResponse(status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_resp.model_dump())
+
+
+# --- Middleware (Optional) ---
+# Example: Add request ID to state for logging/handlers
+@app.middleware("http")
+async def add_request_id_middleware(request: Request, call_next):
+    try:
+         # Try to parse request body early if needed, be cautious of large bodies
+         # For simplicity, just get ID from parsed MCPRequest later or generate one.
+         # Here, we'll set a placeholder until the request body is parsed.
+         request.state.request_id = "parsing..."
+    except Exception:
+         request.state.request_id = "invalid-request" # Handle cases where body parsing fails
+    response = await call_next(request)
+    return response
+
+
+# --- API Endpoint ---
 
 @app.post("/mcp",
-          response_model=None, # We manually create JSON responses based on success/error
+          response_model=None, # Responses are created manually by handlers/endpoint
           summary="Handle MCP Requests",
-          tags=["MCP"])
-async def handle_mcp_request(request: MCPRequest):
+          tags=["MCP"],
+          responses={ # Define potential responses for OpenAPI documentation
+              200: {"model": MCPSuccessResponse},
+              400: {"model": MCPErrorResponse, "description": "Invalid Request/Validation Error"},
+              403: {"model": MCPErrorResponse, "description": "Permission Denied"},
+              404: {"model": MCPErrorResponse, "description": "Operation/Resource Not Found"},
+              409: {"model": MCPErrorResponse, "description": "Conflict/Resource Exists"},
+              500: {"model": MCPErrorResponse, "description": "Internal Server Error"},
+          })
+async def handle_mcp_request(request_body: MCPRequest, request: Request): # Inject request for state access
     """
-    Receives an MCP request, checks permissions, validates arguments,
-    executes the operation, and returns an MCP response.
+    Receives an MCP request, validates permissions and arguments,
+    executes the requested operation, and returns an MCP response.
+    Error handling is primarily managed by exception handlers.
     """
-    # Use request ID in logs for better tracking
-    log_prefix = f"[Req ID: {request.id}] "
-    logger.info(f"{log_prefix}Received: Operation='{request.operation}', Agent='{request.agent_id}', Args={request.arguments}")
+    # Set request ID in state now that body is parsed
+    request.state.request_id = request_body.id
+    log_prefix = f"[Req ID: {request_body.id}] "
+    logger.info(f"{log_prefix}Received: Op='{request_body.operation}', Agent='{request_body.agent_id}', Args={request_body.arguments}")
 
-    # --- Permission Check ---
-    agent_perms = get_agent_permissions(request.agent_id)
-    requested_op_name = request.operation
-
+    # 1. Permission Check
+    agent_perms = get_agent_permissions(request_body.agent_id)
+    requested_op_name = request_body.operation
     allowed_ops = agent_perms.get('allowed_operations', [])
     is_op_allowed = "*" in allowed_ops or requested_op_name in allowed_ops
 
     if not is_op_allowed:
-        logger.warning(f"{log_prefix}Permission denied for agent '{request.agent_id}' to run operation '{requested_op_name}'.")
-        error_resp = MCPErrorResponse(
-            id=request.id,
-            error_code=ErrorCode.PERMISSION_DENIED,
-            message=f"Agent '{request.agent_id}' does not have permission to execute operation '{requested_op_name}'."
-        )
-        # Use model_dump instead of dict
-        return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content=error_resp.model_dump())
-    # --- End Permission Check ---
+        raise MCPError(ErrorCode.PERMISSION_DENIED,
+                       f"Agent '{request_body.agent_id}' lacks permission for operation '{requested_op_name}'.")
 
-    # 1. Find Operation
+    # 2. Find Operation
     operation = operation_registry.get(requested_op_name)
     if not operation:
-        logger.warning(f"{log_prefix}Operation '{requested_op_name}' not found.")
-        error_resp = MCPErrorResponse(
-            id=request.id,
-            error_code=ErrorCode.OPERATION_NOT_FOUND,
-            message=f"Operation '{requested_op_name}' not found."
-        )
-        # Use model_dump instead of dict
-        return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content=error_resp.model_dump())
+        raise MCPError(ErrorCode.OPERATION_NOT_FOUND, f"Operation '{requested_op_name}' not found.")
 
-    # 2. Validate Arguments
-    try:
-        ArgumentModel = operation.get_argument_model()
-        # Pydantic automatically ignores extra fields by default, which is usually desired.
-        validated_args = ArgumentModel(**request.arguments)
-        # Use model_dump instead of dict
-        logger.debug(f"{log_prefix}Validated arguments for '{requested_op_name}': {validated_args.model_dump()}")
-    except ValidationError as e:
-        logger.warning(f"{log_prefix}Argument validation failed for '{requested_op_name}': {e}")
-        error_resp = MCPErrorResponse(
-            id=request.id,
-            error_code=ErrorCode.VALIDATION_ERROR,
-            message=f"Argument validation failed: {str(e)}" # Provide Pydantic error details
-        )
-        # Use model_dump instead of dict
-        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=error_resp.model_dump())
-    except Exception as e: # Catch errors during model creation or other validation prep
-        logger.error(f"{log_prefix}Error preparing arguments for '{requested_op_name}': {e}", exc_info=True)
-        error_resp = MCPErrorResponse(
-            id=request.id,
-            error_code=ErrorCode.INVALID_ARGUMENTS, # Or maybe UNKNOWN_ERROR
-            message=f"Internal error processing arguments: {str(e)}"
-        )
-        # Use model_dump instead of dict
-        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_resp.model_dump())
+    # 3. Validate Arguments (using Pydantic's ValidationError handled by exception handler)
+    ArgumentModel = operation.get_argument_model()
+    validated_args = ArgumentModel(**request_body.arguments)
+    logger.debug(f"{log_prefix}Validated args for '{requested_op_name}': {validated_args.model_dump()}")
 
-    # 3. Execute Operation
-    try:
-        # Pass the agent's full permission context to the execute method
-        result: OperationResult = operation.execute(validated_args, agent_perms)
+    # 4. Execute Operation
+    # MCPError and other Exceptions raised here will be caught by handlers
+    result: OperationResult = operation.execute(validated_args, agent_perms)
 
-        if result.success:
-            logger.info(f"{log_prefix}Operation '{requested_op_name}' executed successfully.")
-            success_resp = MCPSuccessResponse(id=request.id, result=result.data)
-            # Use model_dump instead of dict
-            return JSONResponse(status_code=status.HTTP_200_OK, content=success_resp.model_dump())
-        else:
-            # This path implies the operation handled the error internally but didn't raise MCPError
-            # It returned OperationResult(success=False). We should encourage raising MCPError.
-            logger.error(f"{log_prefix}Operation '{requested_op_name}' returned failure: {result.message}")
-            # Use OPERATION_FAILED as a generic code if the operation didn't specify one implicitly
-            err_code = ErrorCode.OPERATION_FAILED
-            error_resp = MCPErrorResponse(
-                id=request.id,
-                error_code=int(err_code), # Ensure it's an int
-                message=result.message or DEFAULT_MESSAGES.get(err_code)
-            )
-            # Treat non-exception failures as internal server errors unless specified otherwise
-            # Use model_dump instead of dict
-            return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_resp.model_dump())
-
-    except MCPError as e:
-        # Handle controlled errors raised explicitly by operations
-        logger.warning(f"{log_prefix}Operation '{requested_op_name}' raised MCPError: Code={e.code}, Msg='{e.message}'")
-        error_resp = MCPErrorResponse(id=request.id, error_code=int(e.code), message=e.message)
-        http_status = map_error_code_to_http_status(e.code)
-        # Use model_dump instead of dict
-        return JSONResponse(status_code=http_status, content=error_resp.model_dump())
-    except Exception as e:
-        # Handle unexpected errors during execution
-        logger.exception(f"{log_prefix}Unexpected error executing '{requested_op_name}': {e}")
-        error_resp = MCPErrorResponse(
-            id=request.id,
-            error_code=ErrorCode.UNKNOWN_ERROR,
-            message=f"An unexpected internal server error occurred during operation execution: {str(e)}"
-        )
-        # Use model_dump instead of dict
-        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_resp.model_dump())
-
-def map_error_code_to_http_status(error_code: ErrorCode) -> int:
-    """Maps internal ErrorCodes enum to suitable HTTP status codes."""
-    # Ensure input is an ErrorCode member if possible
-    try:
-        ec = ErrorCode(error_code)
-    except ValueError:
-        logger.warning(f"Mapping unknown error code {error_code} to HTTP status 500")
-        return status.HTTP_500_INTERNAL_SERVER_ERROR
-
-    if ec == ErrorCode.SUCCESS: return status.HTTP_200_OK
-    elif ec == ErrorCode.OPERATION_NOT_FOUND or ec == ErrorCode.RESOURCE_NOT_FOUND: return status.HTTP_404_NOT_FOUND
-    elif ec in [ErrorCode.INVALID_ARGUMENTS, ErrorCode.VALIDATION_ERROR, ErrorCode.INVALID_REQUEST]: return status.HTTP_400_BAD_REQUEST
-    elif ec == ErrorCode.PERMISSION_DENIED or ec == ErrorCode.OS_PERMISSION_DENIED: return status.HTTP_403_FORBIDDEN
-    elif ec == ErrorCode.RESOURCE_EXISTS: return status.HTTP_409_CONFLICT
-    elif ec == ErrorCode.RESOURCE_BUSY: return status.HTTP_503_SERVICE_UNAVAILABLE
-    elif ec == ErrorCode.TIMEOUT: return status.HTTP_504_GATEWAY_TIMEOUT
-    # Default case for other errors (like OPERATION_FAILED, UNKNOWN_ERROR etc.)
-    else: return status.HTTP_500_INTERNAL_SERVER_ERROR
+    # 5. Handle Successful Execution (or explicit failure via OperationResult)
+    if result.success:
+        logger.info(f"{log_prefix}Operation '{requested_op_name}' executed successfully.")
+        success_resp = MCPSuccessResponse(id=request_body.id, result=result.data)
+        return JSONResponse(status_code=http_status.HTTP_200_OK, content=success_resp.model_dump())
+    else:
+        # If an operation returns success=False instead of raising MCPError
+        logger.error(f"{log_prefix}Operation '{requested_op_name}' returned explicit failure: {result.message}")
+        # Treat as a generic operation failure
+        raise MCPError(ErrorCode.OPERATION_FAILED, result.message or DEFAULT_MESSAGES[ErrorCode.OPERATION_FAILED])

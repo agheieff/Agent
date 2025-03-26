@@ -1,17 +1,17 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Type, Union
-from pydantic import BaseModel, ValidationError, create_model
+from pydantic import BaseModel, ValidationError, create_model, Field
 
 @dataclass
 class ArgumentDefinition:
-    """Describes an argument for an operation."""
+    """Describes an argument for an MCP operation."""
     name: str
     type: str  # e.g., 'string', 'integer', 'boolean', 'float', 'filepath', 'object', 'array'
     required: bool = True
     description: str = ""
     default: Any = None
-    # Optional: Add more validation constraints like enum, min/max, pattern
+    # Example: constraints: Optional[Dict[str, Any]] = None # {'enum': ['a', 'b'], 'min': 0}
 
 @dataclass
 class OperationResult:
@@ -23,74 +23,81 @@ class OperationResult:
 class Operation(ABC):
     """Abstract Base Class for all MCP operations."""
 
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Unique name of the operation."""
-        pass
+    # Using class attributes for metadata, enforced by abstract properties
+    name: str = NotImplemented
+    description: str = NotImplemented
+    arguments: List[ArgumentDefinition] = NotImplemented
 
-    @property
-    @abstractmethod
-    def description(self) -> str:
-        """Human-readable description of what the operation does."""
-        pass
+    def __init__(self):
+        # Basic validation on instantiation
+        if self.name is NotImplemented or not self.name:
+            raise NotImplementedError(f"Operation subclass {self.__class__.__name__} must define a 'name'.")
+        if self.description is NotImplemented:
+             raise NotImplementedError(f"Operation subclass {self.__class__.__name__} must define a 'description'.")
+        if self.arguments is NotImplemented:
+             raise NotImplementedError(f"Operation subclass {self.__class__.__name__} must define 'arguments'.")
 
-    @property
-    @abstractmethod
-    def arguments(self) -> List[ArgumentDefinition]:
-        """List defining the arguments the operation accepts."""
-        pass
+        # Cache the generated model type
+        self._argument_model: Optional[Type[BaseModel]] = None
 
     def get_argument_model(self) -> Type[BaseModel]:
-        """Dynamically creates a Pydantic model for argument validation."""
+        """
+        Dynamically creates and caches a Pydantic model for argument validation
+        based on the operation's 'arguments' definition.
+        """
+        if self._argument_model is not None:
+            return self._argument_model
+
         field_definitions = {}
+        type_mapping = {
+            'string': str,
+            'integer': int,
+            'boolean': bool,
+            'float': float,
+            'object': Dict[str, Any],
+            'array': List[Any],
+            'filepath': str, # Can add custom validation later if needed
+        }
+
         for arg in self.arguments:
-            # Map simple types to Python types for Pydantic
-            python_type: Type = str # Default to string
-            if arg.type == 'integer':
-                python_type = int
-            elif arg.type == 'boolean':
-                python_type = bool
-            elif arg.type == 'float':
-                python_type = float
-            elif arg.type == 'object':
-                python_type = Dict
-            elif arg.type == 'array':
-                python_type = List
-            # Add more complex types (like 'filepath') or custom validators if needed
+            python_type = type_mapping.get(arg.type)
+            if python_type is None:
+                 raise TypeError(f"Unsupported argument type '{arg.type}' defined for '{arg.name}' in operation '{self.name}'.")
 
             if arg.required:
-                field_definitions[arg.name] = (python_type, ...) # Ellipsis marks required fields
+                # Create a required field (no default value provided to create_model)
+                 field_definitions[arg.name] = (python_type, ...)
             else:
-                field_definitions[arg.name] = (Optional[python_type], arg.default)
+                # Create an optional field with a default value
+                # Pydantic needs 'Optional[type]' for optional fields unless default is None
+                field_definitions[arg.name] = (Optional[python_type], Field(default=arg.default))
 
-        # Create the model dynamically
-        model_name = f"{self.name.capitalize()}Arguments"
+
+        # Create the Pydantic model dynamically
+        model_name = f"{self.name.replace('_', ' ').title().replace(' ', '')}Arguments"
         try:
-            # Ensure Pydantic v2 compatibility if needed by checking BaseModel.__version__
-            # For now, assume this works for the installed version.
-            return create_model(model_name, **field_definitions) # type: ignore
+            self._argument_model = create_model(model_name, **field_definitions) # type: ignore
+            return self._argument_model
         except Exception as e:
-            # Handle potential errors during model creation, e.g., name conflicts
-            # This is less likely with unique operation names but good practice
-            raise RuntimeError(f"Failed to create argument model for {self.name}: {e}") from e
+            # Handle potential errors during model creation (e.g., invalid defaults)
+            raise RuntimeError(f"Failed to create Pydantic argument model for '{self.name}': {e}") from e
 
 
     @abstractmethod
     def execute(self, args: BaseModel, agent_permissions: Optional[Dict] = None) -> OperationResult:
         """
-        Executes the operation's logic.
+        Executes the core logic of the operation.
 
         Args:
             args: A Pydantic model instance containing validated arguments.
-            agent_permissions: Dictionary containing relevant permissions for the agent
-                               (e.g., {'file': [{'path_prefix': '/tmp/', 'permissions': ['read']}]}).
+            agent_permissions: Dictionary containing permissions context for the agent
+                               (e.g., {'file_permissions': [...]}).
 
         Returns:
             An OperationResult object.
 
         Raises:
-            MCPError: For expected, controlled errors during execution.
-            Exception: For unexpected errors.
+            MCPError: For expected, controlled errors during execution (e.g., permission denied, file not found).
+            Exception: For unexpected internal errors. The server should catch these.
         """
         pass

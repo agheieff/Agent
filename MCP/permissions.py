@@ -1,15 +1,19 @@
+# --- File: MCP/permissions.py ---
+
 import logging
 import os
-from pathlib import Path # Import Path
-from typing import Dict, List, Optional, Set
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Any
+import copy # For deep copying config during patching in tests
 
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
-# Define permissions here directly as a Python dictionary for simplicity.
-# In a real application, load this from a file (YAML, JSON, TOML).
+# Load from file (YAML/JSON) in production. Hardcoded here for simplicity.
+# IMPORTANT: Path normalization (resolve()) is crucial for security when checking prefixes.
+# The check_file_permission function performs this normalization.
 
-PERMISSIONS_CONFIG = {
+DEFAULT_PERMISSIONS_CONFIG = {
     "agents": {
         "agent-001": {
             "id": "agent-001",
@@ -35,18 +39,18 @@ PERMISSIONS_CONFIG = {
                 "get_server_time",
                 "list_operations" # Allow seeing available ops they have access to
             ],
-            "file_permissions": []
+            "file_permissions": [] # No file access by default
         },
         "tmp_readers_writers": {
-            "allowed_operations": [ # Explicitly list allowed file ops for this group
+            "allowed_operations": [ # Grant specific file op permissions
                 "read_file",
                 "write_file",
                 "delete_file",
                 "list_directory"
             ],
             "file_permissions": [
-                # Grant R/W/D/L access within /tmp/agent_data/ (or OS equivalent)
-                # **IMPORTANT**: Path normalization is CRUCIAL for security.
+                # Allows R/W/D/L within /tmp/agent_data/ (or OS equivalent).
+                # Path resolve() handles variations.
                 # **NOTE**: This exact string "/tmp/agent_data/" is patched in tests.
                 {"path_prefix": "/tmp/agent_data/", "permissions": ["read", "write", "delete", "list"]}
             ]
@@ -61,62 +65,74 @@ PERMISSIONS_CONFIG = {
             ]
         },
         "admin": {
-            "allowed_operations": ["*"], # Wildcard for all operations
+            "allowed_operations": ["*"], # Wildcard grants all operations
             "file_permissions": [
-                {"path_prefix": "/", "permissions": ["read", "write", "delete", "list"]} # Full access (use with extreme caution!)
+                # Grants full R/W/D/L access from root. Use with extreme caution!
+                {"path_prefix": "/", "permissions": ["read", "write", "delete", "list"]}
             ]
         },
     },
-    "default_permissions": { # Applied if agent_id is None or not found
-        "allowed_operations": ["echo", "ping", "list_operations"], # Very limited default
+    # Default permissions applied if agent_id is None or not found in 'agents'
+    "default_permissions": {
+        "allowed_operations": ["echo", "ping", "list_operations"], # Very limited
         "file_permissions": []
     }
 }
 
+# Use a variable that can be patched by tests
+PERMISSIONS_CONFIG = copy.deepcopy(DEFAULT_PERMISSIONS_CONFIG)
+
+
 # --- Helper Functions ---
 
-def _resolve_groups(agent_id: Optional[str]) -> Set[str]:
-    """Find all groups an agent belongs to."""
-    agent_conf = PERMISSIONS_CONFIG["agents"].get(agent_id) if agent_id else None
-    if agent_conf:
-        return set(agent_conf.get("groups", []))
-    return set()
+def _resolve_groups(agent_id: Optional[str], config: Dict) -> Set[str]:
+    """Finds all groups an agent belongs to based on the provided config."""
+    agent_conf = config.get("agents", {}).get(agent_id) if agent_id else None
+    return set(agent_conf.get("groups", [])) if agent_conf else set()
 
-def get_agent_permissions(agent_id: Optional[str]) -> Dict:
+
+def get_agent_permissions(agent_id: Optional[str]) -> Dict[str, Any]:
     """
-    Calculates the effective permissions for a given agent ID by merging
-    group permissions. Assumes no direct agent-specific permissions for now.
+    Calculates the effective permissions for an agent by merging permissions
+    from all groups they belong to. Handles wildcard '*' for operations.
+    Uses the current state of the global PERMISSIONS_CONFIG.
     """
-    if not agent_id or agent_id not in PERMISSIONS_CONFIG["agents"]:
-        logger.debug(f"Agent ID '{agent_id}' not found or not provided, using default permissions.")
+    # Use the current global config (which might be patched in tests)
+    current_config = PERMISSIONS_CONFIG
+
+    if not agent_id or agent_id not in current_config.get("agents", {}):
+        logger.debug(f"Agent ID '{agent_id}' not found or None, using default permissions.")
         # Return a copy to prevent modification of the original default config
-        return PERMISSIONS_CONFIG["default_permissions"].copy()
+        return current_config.get("default_permissions", {}).copy()
 
-    # agent_conf = PERMISSIONS_CONFIG["agents"][agent_id] # Not used directly for merging yet
-    agent_groups = _resolve_groups(agent_id)
+    agent_groups = _resolve_groups(agent_id, current_config)
+    if not agent_groups:
+         logger.warning(f"Agent '{agent_id}' found but belongs to no groups. Using default permissions.")
+         return current_config.get("default_permissions", {}).copy()
 
-    # Combine allowed operations from all groups
+    # Combine permissions from all assigned groups
     effective_allowed_ops: Set[str] = set()
-    for group_name in agent_groups:
-        group_conf = PERMISSIONS_CONFIG["groups"].get(group_name, {})
-        effective_allowed_ops.update(group_conf.get("allowed_operations", []))
-
-    # Combine file permissions (simple list concatenation for now)
     effective_file_perms: List[Dict] = []
+
     for group_name in agent_groups:
-        group_conf = PERMISSIONS_CONFIG["groups"].get(group_name, {})
+        group_conf = current_config.get("groups", {}).get(group_name, {})
+        if not group_conf:
+             logger.warning(f"Agent '{agent_id}' belongs to group '{group_name}' which is not defined in config.")
+             continue
+
+        effective_allowed_ops.update(group_conf.get("allowed_operations", []))
         effective_file_perms.extend(group_conf.get("file_permissions", []))
 
-    # Handle wildcard '*' in operations - if present, it overrides specific ops
+    # Handle wildcard '*' in operations - if present, it grants all ops.
     final_allowed_ops = ["*"] if "*" in effective_allowed_ops else sorted(list(effective_allowed_ops))
 
     effective_permissions = {
         "agent_id": agent_id,
         "groups": sorted(list(agent_groups)),
         "allowed_operations": final_allowed_ops,
-        "file_permissions": effective_file_perms # Keep potentially overlapping rules for check_file_permission
+        "file_permissions": effective_file_perms # Pass all rules; checking logic finds the best match
     }
-    logger.debug(f"Effective permissions for agent '{agent_id}': {effective_permissions}")
+    logger.debug(f"Effective permissions calculated for agent '{agent_id}': {effective_permissions}")
     return effective_permissions
 
 
@@ -126,23 +142,37 @@ def check_file_permission(
     file_permission_rules: List[Dict]
 ) -> bool:
     """
-    Checks if the required permission is granted for the requested path
-    based on the agent's file permission rules (list of dictionaries).
+    Checks if the required permission is granted for the requested path based
+    on the agent's merged file permission rules. Uses pathlib.Path.resolve()
+    for robust path normalization and finds the most specific matching rule.
 
-    Revised Implementation: Uses pathlib.Path.resolve() for robust normalization
-    and finds the most specific matching prefix rule.
+    Args:
+        requested_path_str: The file or directory path requested by the operation.
+        required_permission: The permission being checked ('read', 'write', etc.).
+        file_permission_rules: List of rule dictionaries [{'path_prefix': str, 'permissions': List[str]}].
+
+    Returns:
+        True if permission is granted, False otherwise.
     """
-    if not requested_path_str: # Prevent issues with empty path
-        logger.debug("Permission check: Denied due to empty requested path.")
+    if not requested_path_str:
+        logger.debug("Permission check denied: Requested path is empty.")
         return False
 
+    # --- Path Resolution ---
+    # Resolve the requested path to get a canonical absolute path.
+    # This handles '..', symlinks (by default), and OS-specific separators.
+    # We resolve *before* checking rules to ensure consistent comparisons.
     try:
-        # Resolve the requested path to get a canonical absolute path
-        # This handles '..', symlinks, etc.
-        resolved_req_path = Path(requested_path_str).resolve()
+        # Use strict=False initially to allow checking permissions on potentially
+        # non-existent paths (e.g., for a 'write' operation).
+        # We still need to handle errors if the path is fundamentally invalid.
+        resolved_req_path = Path(requested_path_str).resolve(strict=False)
     except Exception as e:
-        logger.warning(f"Could not resolve requested path '{requested_path_str}': {e}")
-        return False # Treat un-resolvable paths as denied
+        # Catch errors during resolution (e.g., path too long, invalid characters)
+        logger.warning(f"Permission check denied: Could not resolve requested path '{requested_path_str}': {e}")
+        return False
+    # --- End Path Resolution ---
+
 
     best_match_rule = None
     longest_prefix_len = -1
@@ -150,44 +180,48 @@ def check_file_permission(
     for rule in file_permission_rules:
         rule_path_prefix_str = rule.get("path_prefix")
         if not rule_path_prefix_str:
-            continue
+            continue # Skip rules without a path_prefix
 
         try:
-            # Resolve the rule prefix path as well for consistent comparison
-            resolved_rule_path = Path(rule_path_prefix_str).resolve()
+            # Resolve the rule prefix path as well for consistent comparison.
+            # Assume rule paths should generally exist. Use strict=False for flexibility?
+            resolved_rule_path = Path(rule_path_prefix_str).resolve(strict=False)
             current_prefix_len = len(str(resolved_rule_path))
 
-            # Check if the resolved requested path IS or IS WITHIN the resolved rule path
-            # This works for both file and directory rules naturally with pathlib
-            # resolved_req_path == resolved_rule_path handles exact matches (file or dir)
-            # resolved_rule_path in resolved_req_path.parents handles containment
-            # e.g., rule /a/b/, req /a/b/c -> Path('/a/b') in Path('/a/b/c').parents -> True
-            # e.g., rule /a/b, req /a/b -> Path('/a/b') == Path('/a/b') -> True
-            # e.g., rule /a/b/, req /a/b -> Path('/a/b') == Path('/a/b') -> True (resolve handles trailing slash)
-            if resolved_req_path == resolved_rule_path or resolved_rule_path in resolved_req_path.parents:
-                # Find the most specific rule (longest prefix path string) that applies
+            # Check if the resolved requested path IS or IS WITHIN the resolved rule path.
+            # Path.is_relative_to() is available in Python 3.9+ and is cleaner:
+            # if resolved_req_path.is_relative_to(resolved_rule_path): ...
+            # Fallback for < 3.9:
+            is_match = (resolved_req_path == resolved_rule_path or
+                        resolved_rule_path in resolved_req_path.parents)
+
+            if is_match:
+                 # Find the *most specific* rule (longest path prefix) that applies.
                 if current_prefix_len > longest_prefix_len:
                     longest_prefix_len = current_prefix_len
                     best_match_rule = rule
-                # If lengths are equal, current logic takes the last one found.
-                # Could implement deny > allow precedence here if needed later.
+                # TODO: Add precedence logic here if needed (e.g., deny rules override allow rules).
+                # For now, the longest prefix wins.
 
         except Exception as e:
-            logger.warning(f"Could not resolve rule path '{rule_path_prefix_str}': {e}")
+            logger.warning(f"Permission check skipped invalid rule: Could not resolve rule path '{rule_path_prefix_str}': {e}")
             continue # Skip invalid rules
 
-    # Now check the permissions of the best matching rule found
+    # --- Check Permissions of Best Match ---
     is_allowed = False
+    matched_prefix_debug = "None"
     if best_match_rule:
+        matched_prefix_debug = best_match_rule.get('path_prefix', 'Error')
         allowed_perms_for_rule = best_match_rule.get("permissions", [])
         if required_permission in allowed_perms_for_rule:
             is_allowed = True
+    # --- End Check ---
 
-    # Add more detailed logging
     logger.debug(
-        f"Permission check: req_path='{resolved_req_path}' (orig='{requested_path_str}'), "
-        f"required='{required_permission}', "
-        f"best_match_rule={best_match_rule} (matched prefix='{str(Path(best_match_rule['path_prefix']).resolve()) if best_match_rule else 'None'}'), "
+        f"Permission check: req='{requested_path_str}' (resolved='{resolved_req_path}'), "
+        f"perm='{required_permission}', "
+        f"best_match_prefix='{matched_prefix_debug}', "
+        f"rules_checked={len(file_permission_rules)}, "
         f"allowed={is_allowed}"
     )
     return is_allowed

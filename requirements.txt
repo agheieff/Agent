@@ -27,3 +27,4 @@ pydantic>=2.0.0
 typing-extensions>=4.8.0
 
 mcp
+fastapi

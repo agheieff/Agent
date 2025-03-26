@@ -155,39 +155,34 @@ class BaseClient:
         raise NotImplementedError("Subclasses must implement stream_chat_completion")
         yield "" # Required for AsyncIterator type hint satisfaction if not implemented
 
-    async def execute_mcp_operation(self, operation_name: str, arguments: Dict[str, Any], mcp_server_url: str, agent_id: Optional[str]) -> Union['MCPSuccessResponse', 'MCPErrorResponse']:
+    async def execute_mcp_operation(self, operation_name: str, arguments: Dict[str, Any], mcp_server_url: str, agent_id: Optional[str]) -> Any:
         """
         Helper to execute an operation on a remote MCP server.
         Relies on the shared self.http_client.
+        
+        Returns:
+            An MCPSuccessResponse if the operation succeeded, or an MCPErrorResponse if it failed.
+            Raises RuntimeError if MCP package is not available.
         """
-        # Avoid circular imports by defining dummy types or importing locally
+        # Import MCP modules - if they're not available, raise a clear error
         try:
             from MCP.models import MCPRequest, MCPSuccessResponse, MCPErrorResponse
-            from MCP.errors import ErrorCode
-            MCP_AVAILABLE = True
+            from MCP.errors import ErrorCode, MCPError
         except ImportError:
-            MCP_AVAILABLE = False
-            class MCPRequest: pass
-            class MCPSuccessResponse: pass
-            class MCPErrorResponse: pass
-            class ErrorCode:
-                UNKNOWN_ERROR = 1
-                NETWORK_ERROR = 105
-
-        if not MCP_AVAILABLE:
             logger.error("MCP package not available. Cannot execute MCP operation.")
-            # Construct a basic error dict if models aren't available
-            return {"id": "mcp-unavailable", "status": "error", "error_code": ErrorCode.UNKNOWN_ERROR, "message": "MCP package not available."} # type: ignore
+            raise RuntimeError("MCP package not available. This function requires the MCP module.")
 
+        # Validate prerequisites
         if not mcp_server_url:
-             logger.error("MCP_SERVER_URL not provided. Cannot execute MCP operation.")
-             return MCPErrorResponse(id="mcp-unconfigured", error_code=ErrorCode.UNKNOWN_ERROR, message="MCP server URL not provided.") # type: ignore
+            logger.error("MCP_SERVER_URL not provided. Cannot execute MCP operation.")
+            raise ValueError("MCP server URL not provided")
 
         if not self.http_client:
             logger.error("HTTP client not initialized. Cannot execute MCP operation.")
-            return MCPErrorResponse(id="http-client-unavailable", error_code=ErrorCode.UNKNOWN_ERROR, message="Internal HTTP client not available.") # type: ignore
+            raise RuntimeError("HTTP client not initialized")
 
-        request_id = f"mcp-req-{os.urandom(4).hex()}" # Simple unique ID
+        # Create request
+        request_id = f"mcp-req-{os.urandom(4).hex()}"
         payload = MCPRequest(
             id=request_id,
             operation=operation_name,
@@ -199,36 +194,53 @@ class BaseClient:
         logger.debug(f"MCP Request Payload: {payload.model_dump()}")
 
         try:
+            # Send request
             response = await self.http_client.post(mcp_server_url, json=payload.model_dump())
             response.raise_for_status()
             response_data = response.json()
             logger.debug(f"MCP Response Raw: {response_data}")
 
-            # Attempt to parse response using MCP models
+            # Parse response
             if response_data.get("status") == "success":
                 mcp_response = MCPSuccessResponse(**response_data)
                 logger.info(f"MCP operation '{operation_name}' successful (Req ID: {request_id}).")
+                return mcp_response
             elif response_data.get("status") == "error":
                 mcp_response = MCPErrorResponse(**response_data)
                 logger.warning(f"MCP operation '{operation_name}' failed (Req ID: {request_id}): Code={mcp_response.error_code}, Msg='{mcp_response.message}'")
+                return mcp_response
             else:
-                 logger.error(f"Invalid MCP response format received (Req ID: {request_id}): {response_data}")
-                 mcp_response = MCPErrorResponse(id=request_id, error_code=ErrorCode.UNKNOWN_ERROR, message="Invalid response format from MCP server.")
-
-            return mcp_response
+                logger.error(f"Invalid MCP response format received (Req ID: {request_id}): {response_data}")
+                return MCPErrorResponse(
+                    id=request_id, 
+                    error_code=ErrorCode.UNKNOWN_ERROR, 
+                    message="Invalid response format from MCP server."
+                )
 
         except httpx.RequestError as e:
             logger.error(f"Network error calling MCP server at {mcp_server_url}: {e}", exc_info=True)
-            return MCPErrorResponse(id=request_id, error_code=ErrorCode.NETWORK_ERROR, message=f"Network error connecting to MCP server: {e}") # type: ignore
+            return MCPErrorResponse(
+                id=request_id, 
+                error_code=ErrorCode.NETWORK_ERROR, 
+                message=f"Network error connecting to MCP server: {e}"
+            )
         except httpx.HTTPStatusError as e:
             logger.error(f"MCP server returned HTTP error {e.response.status_code}: {e.response.text}", exc_info=True)
-            try: # Try parsing MCP error from body
+            try:
                 error_data = e.response.json()
                 if error_data.get("status") == "error":
                     return MCPErrorResponse(**error_data)
             except Exception:
-                 pass # Fallback to generic message
-            return MCPErrorResponse(id=request_id, error_code=ErrorCode.NETWORK_ERROR, message=f"MCP server returned HTTP {e.response.status_code}") # type: ignore
+                pass  # Fallback to generic message
+            return MCPErrorResponse(
+                id=request_id, 
+                error_code=ErrorCode.NETWORK_ERROR, 
+                message=f"MCP server returned HTTP {e.response.status_code}"
+            )
         except Exception as e:
             logger.error(f"Unexpected error during MCP operation execution (Req ID: {request_id}): {e}", exc_info=True)
-            return MCPErrorResponse(id=request_id, error_code=ErrorCode.UNKNOWN_ERROR, message=f"An unexpected error occurred: {e}") # type: ignore
+            return MCPErrorResponse(
+                id=request_id, 
+                error_code=ErrorCode.UNKNOWN_ERROR, 
+                message=f"An unexpected error occurred: {e}"
+            )

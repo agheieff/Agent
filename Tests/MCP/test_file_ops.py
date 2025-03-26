@@ -58,12 +58,18 @@ def test_read_file_permission_denied_agent(client: TestClient, test_payload_fact
     secret_file = tmp_path / "secret.txt"
     secret_file.write_text("Cannot read this", encoding='utf-8')
 
+    # AGENT_001 only has tmp_readers_writers group, which is patched by agent_data_dir fixture
+    # This path is OUTSIDE the patched directory, so permission should be denied.
     payload = test_payload_factory("read_file", args={"path": str(secret_file)}, agent=AGENT_001)
     response = client.post("/mcp", json=payload)
-    assert response.status_code == 403 # Permission Denied
+    assert response.status_code == 403 # Permission Denied (Correct HTTP status for ErrorCode 13)
     data = response.json()
     assert data["status"] == "error"
-    assert data["error_code"] == 101 # PERMISSION_DENIED (adjust if using more specific codes)
+    # --- FIX THE ASSERTION HERE ---
+    assert data["error_code"] == 13 # PERMISSION_DENIED (raised by check_file_permission)
+    # --- END FIX ---
+    assert "Agent does not have 'read' permission" in data["message"] # Check message content
+
 
 def test_read_file_permission_denied_os(client: TestClient, test_payload_factory, agent_data_dir):
     # Test OS-level permissions (might be OS specific)

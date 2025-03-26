@@ -1,7 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
 import sys, os
-from pathlib import Path # Import Path
+from pathlib import Path
+from unittest.mock import patch # Import patch
+import copy # Import copy
 
 # Ensure MCP module is importable by adding project root to sys.path
 # Adjust depth as necessary based on where tests are run from
@@ -13,18 +15,17 @@ if str(root_dir) not in sys.path:
 # This assumes MCP/server.py defines 'app = FastAPI()'
 try:
     from MCP.server import app as fastAPI_app
+    # Import the original config *after* ensuring MCP is in path
+    from MCP.permissions import PERMISSIONS_CONFIG
 except ImportError as e:
-    pytest.fail(f"Failed to import FastAPI app from MCP.server: {e}\nEnsure PYTHONPATH includes project root and MCP/server.py defines 'app'.")
-
+    pytest.fail(f"Failed to import FastAPI app or PERMISSIONS_CONFIG: {e}\nEnsure PYTHONPATH includes project root and MCP/server.py/permissions.py exist.")
+except Exception as e:
+     pytest.fail(f"An unexpected error occurred during import: {e}")
 
 @pytest.fixture(scope="module")
 def client():
     """Provides a FastAPI TestClient instance for the MCP server."""
-    # Ensure operations are discovered before tests run (if startup event doesn't run in test client scope)
-    # from MCP.registry import operation_registry
-    # if not operation_registry.get_all(): # Check if already discovered
-    #     operation_registry.discover_operations()
-
+    # Startup event should run automatically with TestClient
     with TestClient(fastAPI_app) as c:
         yield c
 
@@ -48,12 +49,43 @@ def test_payload_factory():
         return payload
     return _create_payload
 
-# Optional fixture to manage the /tmp/agent_data directory for tests
-@pytest.fixture(scope="function") # Use function scope to ensure clean state per test
+# Updated fixture to manage the /tmp/agent_data directory AND patch permissions
+@pytest.fixture(scope="function")
 def agent_data_dir(tmp_path):
-    """Creates and returns the path to a temporary agent_data directory."""
+    """
+    Creates a temporary agent_data directory AND patches the
+    PERMISSIONS_CONFIG to use this dynamic path for the test duration.
+    """
     data_dir = tmp_path / "agent_data"
     data_dir.mkdir(exist_ok=True)
-    # You might want to set permissions here if relevant to tests,
-    # though tmp_path usually handles this well.
-    return data_dir
+    print(f"Created test agent_data_dir: {data_dir}") # Debug print
+
+    # --- Patching Logic ---
+    original_config = copy.deepcopy(PERMISSIONS_CONFIG) # Keep a clean copy
+    patched_config = copy.deepcopy(PERMISSIONS_CONFIG)
+    # Use the dynamically created data_dir path, ensuring it ends with a separator
+    dynamic_path_prefix = str(data_dir.resolve()) + os.sep
+
+    updated = False
+    # Find and update the relevant rule(s) in the copied config
+    for group, config in patched_config.get("groups", {}).items():
+        for rule in config.get("file_permissions", []):
+            # Be specific to avoid patching unrelated rules if config grows
+            if rule.get("path_prefix") == "/tmp/agent_data/":
+                rule["path_prefix"] = dynamic_path_prefix
+                updated = True
+                print(f"Patching rule in group '{group}' to use prefix: {dynamic_path_prefix}") # Debug print
+
+    if not updated:
+        # This warning helps catch issues if the base config changes
+        print(f"Warning: Did not find rule with path_prefix='/tmp/agent_data/' to patch in PERMISSIONS_CONFIG.")
+
+    # Use patch context manager to apply the change for the test's duration
+    # The string 'MCP.permissions.PERMISSIONS_CONFIG' tells patch where to find the object to replace.
+    with patch('MCP.permissions.PERMISSIONS_CONFIG', patched_config):
+        print("Applied patched PERMISSIONS_CONFIG") # Debug print
+        yield data_dir # The test runs here with the patched config
+
+    # --- End Patching Logic ---
+    # Patch is automatically reverted after yield
+    print(f"Restored original PERMISSIONS_CONFIG after test using {data_dir}") # Debug print

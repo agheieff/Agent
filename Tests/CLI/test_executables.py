@@ -1,86 +1,63 @@
-"""
-Tests for executable scripts in the project.
-Ensures they can be run without crashing.
-"""
 import os
 import sys
-import subprocess
 import pytest
 from pathlib import Path
 
+# Path setup is handled by the top-level Tests/conftest.py
+
+@pytest.fixture(scope="module")
+def project_root() -> Path:
+    """Return the project root directory as a Path object."""
+    return Path(__file__).parent.parent.parent.resolve()
+
+
 @pytest.fixture
-def executable_paths(project_root):
-    """Returns paths to the executable files in the project."""
+def expected_executable_scripts(project_root: Path) -> list[Path]:
+    """Returns paths to the expected executable script files in the project root."""
+    # Define scripts expected to be executable
+    # Exclude mcp_run.py if its permissions are tested elsewhere or not strictly required
     return [
         project_root / 'test.py',
-        project_root / 'api_test.py',
-        project_root / 'prompt_test.py',
-        project_root / 'mcp_run.py'
+        # project_root / 'api_test.py', # Moved to scripts/
+        # project_root / 'prompt_test.py', # Moved to scripts/
+        project_root / 'run.py',
+        project_root / 'mcp_run.py', # Include if it should be directly executable
     ]
 
-def test_executables_have_correct_permissions(executable_paths):
-    """Verify that executable files have executable permissions."""
-    for path in executable_paths:
-        assert path.exists(), f"Executable {path.name} not found"
-        is_executable = os.access(str(path), os.X_OK)
-        # Skip mcp_run.py which has a specific test for it
-        if path.name != 'mcp_run.py':
-            assert is_executable, f"{path.name} should have executable permission. Fix with: chmod +x {path}"
+def test_executables_exist(expected_executable_scripts: list[Path]):
+    """Verify that expected executable script files exist."""
+    missing = [path for path in expected_executable_scripts if not path.is_file()]
+    assert not missing, f"Expected executable script(s) not found: {missing}"
 
-def test_executables_have_shebang(executable_paths):
-    """Verify that executable files have a proper shebang line."""
-    for path in executable_paths:
-        assert path.exists(), f"Executable {path.name} not found"
-        with open(path, 'r') as f:
+# Parameterize tests over the expected scripts
+@pytest.mark.parametrize("script_path", [
+    pytest.param(p, id=p.name) for p in (Path(__file__).parent.parent.parent.resolve() / s for s in ['test.py', 'run.py', 'mcp_run.py'])
+    # Add other scripts from expected_executable_scripts here if needed
+])
+def test_script_has_executable_permission(script_path: Path):
+    """Verify that specific scripts have executable permissions."""
+    if not script_path.is_file(): # Skip if file doesn't exist (covered by other test)
+        pytest.skip(f"Script {script_path.name} not found, skipping permission check.")
+    assert os.access(str(script_path), os.X_OK), \
+        f"{script_path.name} should have executable permission. Fix with: chmod +x {script_path}"
+
+@pytest.mark.parametrize("script_path", [
+    pytest.param(p, id=p.name) for p in (Path(__file__).parent.parent.parent.resolve() / s for s in ['test.py', 'run.py', 'mcp_run.py'])
+    # Add other scripts here
+])
+def test_script_has_shebang(script_path: Path):
+    """Verify that specific executable scripts have a proper shebang line."""
+    if not script_path.is_file():
+        pytest.skip(f"Script {script_path.name} not found, skipping shebang check.")
+
+    try:
+        with open(script_path, 'r', encoding='utf-8') as f:
             first_line = f.readline().strip()
-            assert first_line.startswith('#!/'), f"{path.name} should start with a shebang (#!/usr/bin/env python3)"
+        # Check for common Python shebangs
+        assert first_line.startswith('#!') and 'python' in first_line, \
+            f"{script_path.name} should start with a valid Python shebang (e.g., '#!/usr/bin/env python3')"
+    except Exception as e:
+        pytest.fail(f"Error reading or checking shebang for {script_path.name}: {e}")
 
-def test_prompt_main_imports():
-    """Test that Prompts/main.py has the necessary import for 'Any'."""
-    # Fix the import in Prompts/main.py
-    prompt_main_path = Path(__file__).parent.parent.parent / 'Prompts' / 'main.py'
-    
-    with open(prompt_main_path, 'r') as f:
-        content = f.read()
-    
-    if 'from typing import Dict, List, Optional' in content and 'Any' not in content:
-        # Need to fix the import
-        fixed_content = content.replace(
-            'from typing import Dict, List, Optional',
-            'from typing import Dict, List, Optional, Any'
-        )
-        
-        with open(prompt_main_path, 'w') as f:
-            f.write(fixed_content)
-
-def test_client_api_imports():
-    """Test and fix the API client imports if needed."""
-    clients_dir = Path(__file__).parent.parent.parent / 'Clients' / 'API'
-    
-    for client_file in clients_dir.glob('*.py'):
-        if client_file.name == '__init__.py':
-            continue
-            
-        with open(client_file, 'r') as f:
-            content = f.read()
-            
-        # Check if 'Optional' is used but not imported properly
-        if 'Optional' in content and 'from typing import' in content:
-            if 'Optional' not in content.split('from typing import')[1].split('\n')[0]:
-                # Fix the import
-                if 'from typing import' in content:
-                    fixed_content = content.replace(
-                        'from typing import',
-                        'from typing import Optional, '
-                    )
-                    
-                    with open(client_file, 'w') as f:
-                        f.write(fixed_content)
-
-def test_mcp_run_executable():
-    """Make mcp_run.py executable if it's not already."""
-    mcp_run_path = Path(__file__).parent.parent.parent / 'mcp_run.py'
-    
-    if not os.access(str(mcp_run_path), os.X_OK):
-        # Make it executable
-        os.chmod(str(mcp_run_path), os.stat(str(mcp_run_path)).st_mode | 0o111)
+# Remove tests that modify files (test_prompt_main_imports, test_client_api_imports, test_mcp_run_executable)
+# Import checks are better handled in test_cli_modules.py

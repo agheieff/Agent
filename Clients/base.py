@@ -3,7 +3,7 @@ import os
 import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, AsyncIterator, Union
-import httpx
+import httpx # Keep httpx here if subclasses *might* use it for other things, otherwise remove
 
 logger = logging.getLogger(__name__)
 
@@ -47,200 +47,130 @@ class UsageStats:
 
 class BaseClient:
     """
-    Abstract base class for API clients.
+    Abstract base class for LLM API clients.
     Handles common initialization like API key loading, dependency checking,
-    and managing shared HTTP clients.
+    and managing provider-specific SDK clients.
     """
     def __init__(self, config: ProviderConfig):
+        """
+        Initializes the BaseClient.
+
+        Args:
+            config: The configuration specific to the LLM provider.
+        """
         self.config = config
         self.api_key = os.getenv(config.api_key_env)
-        self.timeout = getattr(self, 'timeout', config.default_timeout) # Allow subclasses to override
-        self.max_retries = getattr(self, 'max_retries', config.default_max_retries) # Allow subclasses to override
+        # Allow subclasses to override timeout/retries in their __init__ *before* calling super()
+        # or by setting the attributes before _initialize() is called.
+        # Defaulting here based on config.
+        self.timeout = getattr(self, 'timeout', config.default_timeout)
+        self.max_retries = getattr(self, 'max_retries', config.default_max_retries)
         self.default_model = config.default_model
-        self.client: Any = None # Primary provider SDK client
-        self.http_client: Optional[httpx.AsyncClient] = None # Shared client for other HTTP requests
+        self.client: Any = None # Primary provider SDK client (e.g., AsyncAnthropic)
 
+        # Perform initialization steps
         self._initialize()
 
     def _initialize(self):
+        """Performs common initialization steps."""
         if not self.api_key:
             raise ValueError(f"API key not found in environment variable {self.config.api_key_env}")
 
+        # Check for required Python package dependency
         try:
             if self.config.requires_import:
                 importlib.import_module(self.config.requires_import)
+                logger.debug(f"Successfully imported required package '{self.config.requires_import}' for {self.config.name}.")
         except ImportError as e:
             raise ImportError(f"Required package '{self.config.requires_import}' not installed for {self.config.name} client.") from e
 
+        # Initialize the provider-specific SDK client
         try:
             self.client = self._initialize_provider_client()
-            # Initialize a shared httpx client - useful for things like MCP calls
-            self.http_client = httpx.AsyncClient(timeout=self.timeout)
+            if self.client is None:
+                 raise RuntimeError(f"_initialize_provider_client for {self.config.name} returned None.")
             logger.info(f"{self.config.name} client initialized successfully.")
-
         except Exception as e:
-            logger.error(f"Failed to initialize {self.config.name} client: {e}", exc_info=True)
-            # Attempt cleanup if http_client was created before failure
-            # Note: Proper async closing should happen in `close` method
-            if self.http_client:
-                 # Cannot await here, rely on close() or GC
-                 pass
+            logger.error(f"Failed to initialize {self.config.name} provider client: {e}", exc_info=True)
+            # No http_client to clean up here anymore
             raise RuntimeError(f"{self.config.name} client initialization failed: {str(e)}") from e
 
     def _initialize_provider_client(self) -> Any:
         """
-        Initializes and returns the specific provider's SDK client (e.g., Anthropic, OpenAI).
+        Initializes and returns the specific provider's SDK client (e.g., AsyncAnthropic, AsyncOpenAI).
         Must be implemented by subclasses.
+        Should raise exceptions on failure.
         """
         raise NotImplementedError("Subclasses must implement _initialize_provider_client")
 
     async def close(self):
-        """Clean up resources, like HTTP clients and provider clients."""
-        closed_http = False
-        if self.http_client:
-            try:
-                await self.http_client.aclose()
-                self.http_client = None
-                closed_http = True
-            except Exception as e:
-                 logger.error(f"Error closing shared HTTP client: {e}", exc_info=True)
-
+        """Clean up resources, like the provider's SDK client if needed."""
         closed_provider = False
         if self.client:
             try:
+                # Prefer async close if available
                 if hasattr(self.client, 'aclose'):
                     await self.client.aclose()
                     closed_provider = True
+                # Fallback to sync close
                 elif hasattr(self.client, 'close'):
-                     # For synchronous close methods, consider running in thread pool if necessary
+                    # Consider running sync close in thread pool if it blocks
+                    # For simplicity here, just call it directly.
                     self.client.close()
                     closed_provider = True
+                # else: provider client has no close method
             except Exception as e:
-                 logger.error(f"Error closing provider ({self.config.name}) client: {e}", exc_info=True)
+                logger.error(f"Error closing provider ({self.config.name}) client: {e}", exc_info=True)
+            finally:
+                # Set client to None regardless of close success/failure
+                self.client = None
 
-        if closed_http or closed_provider:
+        if closed_provider:
             logger.info(f"{self.config.name} client resources closed.")
+        # else: logger.debug(f"{self.config.name} client had no close method or was already None.")
+
 
     def get_available_models(self) -> List[str]:
-        """Returns a list of model names available for this provider."""
+        """Returns a list of model names configured for this provider."""
         return list(self.config.models.keys())
 
     def get_model_config(self, model_name: Optional[str] = None) -> ModelConfig:
-        """Gets the configuration for a specific model."""
-        effective_model = model_name or self.default_model
-        config = self.config.models.get(effective_model)
-        if not config:
-            raise ValueError(f"Model '{effective_model}' not found in {self.config.name} configuration.")
-        return config
+        """Gets the configuration for a specific model by its key name."""
+        effective_model_key = model_name or self.default_model
+        model_conf = self.config.models.get(effective_model_key)
+        if not model_conf:
+            raise ValueError(f"Model key '{effective_model_key}' not found in {self.config.name} configuration. Available keys: {self.get_available_models()}")
+        # Ensure the returned object is indeed a ModelConfig instance (due to potential config structure issues)
+        if not isinstance(model_conf, ModelConfig):
+             # This might happen if the config dict wasn't structured correctly initially
+             logger.error(f"Configuration for model key '{effective_model_key}' in {self.config.name} is not a valid ModelConfig object. Found: {type(model_conf)}")
+             raise TypeError(f"Invalid configuration type for model key '{effective_model_key}'. Expected ModelConfig.")
+        return model_conf
 
     def _format_messages(self, messages: List[Message]) -> Any:
         """
-        Formats a list of Message objects into the structure expected by the provider's API.
+        Formats a list of Message objects into the structure expected by the specific provider's API.
         Must be implemented by subclasses.
         """
         raise NotImplementedError("Subclasses must implement _format_messages")
 
     async def chat_completion(self, messages: List[Message], model: Optional[str] = None, **kwargs) -> str:
         """
-        Gets a standard (non-streaming) chat completion.
+        Gets a standard (non-streaming) chat completion from the provider.
         Must be implemented by subclasses.
+        Should handle selecting the model (using get_model_config), formatting messages,
+        calling the API, and processing the response to return the text content.
         """
         raise NotImplementedError("Subclasses must implement chat_completion")
 
     async def stream_chat_completion(self, messages: List[Message], model: Optional[str] = None, **kwargs) -> AsyncIterator[str]:
         """
-        Gets a streaming chat completion, yielding text chunks.
+        Gets a streaming chat completion from the provider, yielding text chunks.
         Must be implemented by subclasses.
+        Should handle model selection, message formatting, calling the streaming API,
+        and yielding processed text chunks.
         """
         raise NotImplementedError("Subclasses must implement stream_chat_completion")
-        yield "" # Required for AsyncIterator type hint satisfaction if not implemented
-
-    async def execute_mcp_operation(self, operation_name: str, arguments: Dict[str, Any], mcp_server_url: str, agent_id: Optional[str]) -> Any:
-        """
-        Helper to execute an operation on a remote MCP server.
-        Relies on the shared self.http_client.
-        
-        Returns:
-            An MCPSuccessResponse if the operation succeeded, or an MCPErrorResponse if it failed.
-            Raises RuntimeError if MCP package is not available.
-        """
-        # Import MCP modules - if they're not available, raise a clear error
-        try:
-            from MCP.models import MCPRequest, MCPSuccessResponse, MCPErrorResponse
-            from MCP.errors import ErrorCode, MCPError
-        except ImportError:
-            logger.error("MCP package not available. Cannot execute MCP operation.")
-            raise RuntimeError("MCP package not available. This function requires the MCP module.")
-
-        # Validate prerequisites
-        if not mcp_server_url:
-            logger.error("MCP_SERVER_URL not provided. Cannot execute MCP operation.")
-            raise ValueError("MCP server URL not provided")
-
-        if not self.http_client:
-            logger.error("HTTP client not initialized. Cannot execute MCP operation.")
-            raise RuntimeError("HTTP client not initialized")
-
-        # Create request
-        request_id = f"mcp-req-{os.urandom(4).hex()}"
-        payload = MCPRequest(
-            id=request_id,
-            operation=operation_name,
-            arguments=arguments,
-            agent_id=agent_id
-        )
-
-        logger.info(f"Executing MCP operation '{operation_name}' via {mcp_server_url} (Agent: {agent_id}, Req ID: {request_id})")
-        logger.debug(f"MCP Request Payload: {payload.model_dump()}")
-
-        try:
-            # Send request
-            response = await self.http_client.post(mcp_server_url, json=payload.model_dump())
-            response.raise_for_status()
-            response_data = response.json()
-            logger.debug(f"MCP Response Raw: {response_data}")
-
-            # Parse response
-            if response_data.get("status") == "success":
-                mcp_response = MCPSuccessResponse(**response_data)
-                logger.info(f"MCP operation '{operation_name}' successful (Req ID: {request_id}).")
-                return mcp_response
-            elif response_data.get("status") == "error":
-                mcp_response = MCPErrorResponse(**response_data)
-                logger.warning(f"MCP operation '{operation_name}' failed (Req ID: {request_id}): Code={mcp_response.error_code}, Msg='{mcp_response.message}'")
-                return mcp_response
-            else:
-                logger.error(f"Invalid MCP response format received (Req ID: {request_id}): {response_data}")
-                return MCPErrorResponse(
-                    id=request_id, 
-                    error_code=ErrorCode.UNKNOWN_ERROR, 
-                    message="Invalid response format from MCP server."
-                )
-
-        except httpx.RequestError as e:
-            logger.error(f"Network error calling MCP server at {mcp_server_url}: {e}", exc_info=True)
-            return MCPErrorResponse(
-                id=request_id, 
-                error_code=ErrorCode.NETWORK_ERROR, 
-                message=f"Network error connecting to MCP server: {e}"
-            )
-        except httpx.HTTPStatusError as e:
-            logger.error(f"MCP server returned HTTP error {e.response.status_code}: {e.response.text}", exc_info=True)
-            try:
-                error_data = e.response.json()
-                if error_data.get("status") == "error":
-                    return MCPErrorResponse(**error_data)
-            except Exception:
-                pass  # Fallback to generic message
-            return MCPErrorResponse(
-                id=request_id, 
-                error_code=ErrorCode.NETWORK_ERROR, 
-                message=f"MCP server returned HTTP {e.response.status_code}"
-            )
-        except Exception as e:
-            logger.error(f"Unexpected error during MCP operation execution (Req ID: {request_id}): {e}", exc_info=True)
-            return MCPErrorResponse(
-                id=request_id, 
-                error_code=ErrorCode.UNKNOWN_ERROR, 
-                message=f"An unexpected error occurred: {e}"
-            )
+        # Required yield to satisfy AsyncIterator type hint if subclass doesn't implement
+        if False: # pragma: no cover
+            yield ""

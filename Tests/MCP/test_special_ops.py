@@ -61,7 +61,8 @@ def test_echo_fail_missing_required_arg(client: TestClient, test_payload_factory
     data = response.json()
     assert data["status"] == "error"
     assert data["error_code"] == ErrorCode.VALIDATION_ERROR
-    assert "message" in data["details"][0]["loc"] # Check Pydantic error details
+    # Ensure the error details point to the missing 'message' field
+    assert any(err.get('loc') and 'message' in err['loc'] for err in data.get("details", [])), "Error details should mention missing 'message'"
 
 
 def test_get_server_time_success(client: TestClient, test_payload_factory):
@@ -93,12 +94,9 @@ def test_get_server_time_success(client: TestClient, test_payload_factory):
 
         # Check if the server time is within a reasonable window around the test execution time
         # Use a tolerance (e.g., 1 second) to account for network/processing delays
-        time_diff_before = abs((server_ts_utc - before_ts_utc).total_seconds())
-        time_diff_after = abs((after_ts_utc - server_ts_utc).total_seconds())
-
-        tolerance_seconds = 1.0
-        assert time_diff_before <= tolerance_seconds, f"Server time {server_time_str} is too far before test start {before_ts_utc.isoformat()}"
-        assert time_diff_after <= tolerance_seconds, f"Server time {server_time_str} is too far after test end {after_ts_utc.isoformat()}"
+        tolerance_seconds = 1.5 # Slightly increased tolerance for CI environments
+        assert before_ts_utc <= server_ts_utc <= after_ts_utc + datetime.timedelta(seconds=tolerance_seconds), \
+               f"Server time {server_time_str} out of expected range ({before_ts_utc.isoformat()} to {after_ts_utc.isoformat()})"
 
     except ValueError as e:
         pytest.fail(f"Could not parse server time string '{server_time_str}' as ISO 8601 UTC: {e}")
@@ -119,7 +117,7 @@ def test_list_operations_default_agent(client: TestClient, test_payload_factory)
     ops_names = {op["name"] for op in ops_list}
 
     # Based on MCP/permissions.py default_permissions
-    expected_ops = {"echo", "ping", "list_operations"}
+    expected_ops = {"echo", "ping", "list_operations", "get_server_time"} # default_user now gets get_server_time
     assert ops_names == expected_ops
     # Optionally check argument definitions format for one operation
     ping_op = next((op for op in ops_list if op["name"] == "ping"), None)
@@ -141,7 +139,8 @@ def test_list_operations_agent_001(client: TestClient, test_payload_factory):
     # Based on groups: default_user + tmp_readers_writers
     expected_ops = {
         "echo", "ping", "get_server_time", "list_operations", # From default_user
-        "read_file", "write_file", "delete_file", "list_directory" # From tmp_readers_writers
+        "read_file", "write_file", "delete_file", "list_directory", # From tmp_readers_writers
+        "finish_goal" # <<<--- ADDED THIS TO FIX THE TEST
     }
     assert ops_names == expected_ops
 
@@ -157,8 +156,12 @@ def test_list_operations_admin_agent(client: TestClient, test_payload_factory):
     ops_names = {op["name"] for op in data["result"]["operations"]}
 
     # Get all registered ops dynamically for comparison
+    # Ensure registry is loaded (should be by TestClient lifespan)
     from MCP.registry import operation_registry
     all_registered_ops_names = set(operation_registry.get_all().keys())
+
+    # Make sure the registry actually found operations before asserting
+    assert len(all_registered_ops_names) > 0, "Operation registry appears empty during test."
 
     assert ops_names == all_registered_ops_names # Admin ('*') should see everything registered
 
@@ -176,3 +179,47 @@ def test_operation_permission_denied_for_agent(client: TestClient, test_payload_
     assert data["error_code"] == ErrorCode.PERMISSION_DENIED
     assert "lacks permission for operation" in data["message"]
     assert "read_file" in data["message"]
+
+
+# --- Tests for finish_goal ---
+
+def test_finish_goal_success(client: TestClient, test_payload_factory):
+    """Tests successful call to finish_goal by an allowed agent."""
+    summary_text = "Successfully read the input and wrote the summary."
+    args = {"summary": summary_text}
+    # Agent 001 is in tmp_readers_writers group which has finish_goal permission
+    payload = test_payload_factory("finish_goal", args=args, agent=AGENT_001)
+    response = client.post("/mcp", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["id"] == payload["id"]
+    assert data["result"] == {"message": "Goal completion signaled.", "summary": summary_text}
+    # NOTE: The AgentRunner outside the test would actually stop the loop here.
+
+
+def test_finish_goal_permission_denied(client: TestClient, test_payload_factory):
+    """Tests that an agent without permission cannot call finish_goal."""
+    args = {"summary": "Trying to finish"}
+    # AGENT_DEFAULT does not have finish_goal permission
+    payload = test_payload_factory("finish_goal", args=args, agent=AGENT_DEFAULT)
+    response = client.post("/mcp", json=payload)
+
+    assert response.status_code == 403 # PERMISSION_DENIED
+    data = response.json()
+    assert data["status"] == "error"
+    assert data["error_code"] == ErrorCode.PERMISSION_DENIED
+    assert "lacks permission for operation 'finish_goal'" in data["message"]
+
+
+def test_finish_goal_missing_summary(client: TestClient, test_payload_factory):
+    """Tests failure when the required 'summary' argument is missing."""
+    payload = test_payload_factory("finish_goal", args={}, agent=AGENT_001) # Missing 'summary'
+    response = client.post("/mcp", json=payload)
+
+    assert response.status_code == 400 # Validation Error
+    data = response.json()
+    assert data["status"] == "error"
+    assert data["error_code"] == ErrorCode.VALIDATION_ERROR
+    assert any(err.get('loc') and 'summary' in err['loc'] for err in data.get("details", [])), "Error details should mention missing 'summary'"

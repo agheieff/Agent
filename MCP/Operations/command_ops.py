@@ -2,6 +2,7 @@ import logging
 import asyncio
 import subprocess
 import shlex # For safer command splitting
+from pathlib import Path
 from typing import Optional, Dict, List, Any
 from pydantic import BaseModel, Field
 
@@ -31,7 +32,7 @@ class ExecuteCommand(Operation):
         ArgumentDefinition(name="timeout", type="integer", required=False, default=60, description="Timeout in seconds before terminating the command (default: 60).")
     ]
 
-    async def execute(self, args: BaseModel, agent_permissions: Optional[Dict] = None) -> OperationResult:
+    def execute(self, args: BaseModel, agent_permissions: Optional[Dict] = None) -> OperationResult:
         command_str = args.command
         working_dir = args.working_directory
         timeout = args.timeout if args.timeout and args.timeout > 0 else 60
@@ -73,21 +74,21 @@ class ExecuteCommand(Operation):
 
         # --- Execute Command ---
         try:
-            # Use asyncio.create_subprocess_exec for non-blocking execution
-            process = await asyncio.create_subprocess_exec(
-                *command_parts, # Pass the split command parts
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=resolved_working_dir # Pass resolved path or None
+            # Use regular subprocess for synchronous execution
+            process = subprocess.run(
+                command_parts,  # Pass the split command parts
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=resolved_working_dir,  # Pass resolved path or None
+                timeout=timeout,  # Set timeout
+                check=False,  # Don't raise on non-zero exit
+                text=True  # Return strings instead of bytes
             )
 
-            # Wait for the command to complete with timeout
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            # Access results directly - stdout/stderr are already strings
             return_code = process.returncode
-
-            # Decode stdout/stderr, handling potential errors
-            stdout = stdout_bytes.decode(errors='replace').strip()
-            stderr = stderr_bytes.decode(errors='replace').strip()
+            stdout = process.stdout.strip() if process.stdout else ""
+            stderr = process.stderr.strip() if process.stderr else ""
 
             logger.info(f"Command '{command_str}' finished with code {return_code}. Stdout length: {len(stdout)}, Stderr length: {len(stderr)}")
             logger.debug(f"Stdout:\n{stdout}\nStderr:\n{stderr}")
@@ -99,34 +100,20 @@ class ExecuteCommand(Operation):
                 "stderr": stderr,
             })
 
-        except asyncio.TimeoutError:
+        except subprocess.TimeoutExpired:
             logger.error(f"Command '{command_str}' timed out after {timeout} seconds.")
-            try:
-                process.terminate() # Try to terminate gracefully
-                await asyncio.wait_for(process.wait(), timeout=5) # Wait briefly for termination
-            except ProcessLookupError:
-                pass # Process already exited
-            except asyncio.TimeoutError:
-                logger.warning(f"Failed to terminate timed-out process {process.pid} gracefully, attempting kill.")
-                try:
-                     process.kill() # Force kill
-                except ProcessLookupError:
-                     pass # Process already exited
-            except Exception as term_err:
-                logger.error(f"Error during process termination: {term_err}")
-
             raise MCPError(ErrorCode.TIMEOUT, f"Command timed out after {timeout} seconds.") from None
-
+            
         except FileNotFoundError:
-             # This occurs if the primary command executable isn't found in PATH
-             logger.error(f"Command not found: '{command_parts[0]}'")
-             raise MCPError(ErrorCode.RESOURCE_NOT_FOUND, f"Command not found: '{command_parts[0]}'. Ensure it's in the system PATH.")
-
+            # This occurs if the primary command executable isn't found in PATH
+            logger.error(f"Command not found: '{command_parts[0]}'")
+            raise MCPError(ErrorCode.RESOURCE_NOT_FOUND, f"Command not found: '{command_parts[0]}'. Ensure it's in the system PATH.")
+            
         except PermissionError as e:
             # OS-level permission error during execution
             logger.error(f"OS Permission denied executing command '{command_str}': {e}")
             raise MCPError(ErrorCode.OS_PERMISSION_DENIED, f"OS permission denied executing command: {e}") from e
-
+            
         except Exception as e:
             logger.error(f"Error executing command '{command_str}': {e}", exc_info=True)
             raise MCPError(ErrorCode.OPERATION_FAILED, f"Failed to execute command: {str(e)}") from e

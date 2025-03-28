@@ -217,7 +217,8 @@ def test_execute_command_invalid_shlex_input(client: TestClient, test_payload_fa
     assert data["status"] == "error"
     assert data["error_code"] == ErrorCode.INVALID_ARGUMENTS
     assert "Invalid command string format" in data["message"]
-    assert "quote" in data["message"] # shlex error message usually mentions quotes
+    # Check for either 'quote' or 'quotation' in the error message
+    assert any(keyword in data["message"].lower() for keyword in ["quote", "quotation"])
 
 
 def test_execute_command_cwd_is_file(client: TestClient, test_payload_factory, agent_data_dir: Path):

@@ -1,3 +1,5 @@
+# File: /Tests/MCP/test_special_ops.py
+
 import pytest
 from fastapi.testclient import TestClient
 import datetime
@@ -142,7 +144,7 @@ def test_list_operations_agent_001(client: TestClient, test_payload_factory):
     expected_ops = {
         "echo", "ping", "get_server_time", "list_operations", # From default_user
         "read_file", "write_file", "delete_file", "list_directory", # From tmp_readers_writers
-        "finish_goal" # <<<--- ADDED THIS TO FIX THE TEST
+        "finish_goal" # From tmp_readers_writers
     }
     assert ops_names == expected_ops
 

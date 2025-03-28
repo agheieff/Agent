@@ -7,7 +7,8 @@ from typing import Dict, Any, List, Optional, Union
 # --- Imports should now work if test.py is used or PYTHONPATH is set ---
 from Core.agent_runner import AgentRunner
 from Clients import BaseClient, Message, ProviderConfig # Need base classes for mocking
-from MCP.models import MCPSuccessResponse, MCPErrorResponse, ErrorCode
+from MCP.models import MCPSuccessResponse, MCPErrorResponse
+from MCP.errors import ErrorCode
 
 # --- Mock Client Setup ---
 

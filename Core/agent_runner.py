@@ -10,7 +10,8 @@ try:
     from ..Clients import BaseClient, Message, get_client
     from ..Prompts.main import generate_system_prompt
     # Import MCP models relative to the Core package's position
-    from ..MCP.models import MCPSuccessResponse, MCPErrorResponse, ErrorCode # Added ErrorCode
+    from ..MCP.models import MCPSuccessResponse, MCPErrorResponse
+    from ..MCP.errors import ErrorCode
 except (ImportError, ValueError): # ValueError handles cases like "attempted relative import beyond top-level package"
     # Fallback for potential path issues during direct execution/testing
     # This assumes the script is run from the project root or Core directory
@@ -23,7 +24,8 @@ except (ImportError, ValueError): # ValueError handles cases like "attempted rel
     # Now try absolute imports
     from Clients import BaseClient, Message, get_client
     from Prompts.main import generate_system_prompt
-    from MCP.models import MCPSuccessResponse, MCPErrorResponse, ErrorCode
+    from MCP.models import MCPSuccessResponse, MCPErrorResponse
+    from MCP.errors import ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -158,13 +160,26 @@ class AgentRunner:
 
         elif isinstance(mcp_response, MCPErrorResponse):
             # Format error result
-            content = (f"MCP Operation Failed (ID: {req_id}):\n"
-                       f"Error Code: {mcp_response.error_code} ({ErrorCode(mcp_response.error_code).name})\n" # Add Enum name
-                       f"Message: {mcp_response.message}\n")
+            try:
+                # Try to get enum name if it exists
+                error_code_name = ErrorCode(mcp_response.error_code).name
+                content = (f"MCP Operation Failed (ID: {req_id}):\n"
+                           f"Error Code: {mcp_response.error_code} ({error_code_name})\n"
+                           f"Message: {mcp_response.message}\n")
+            except ValueError:
+                # If error code is not in enum, just show the code value
+                content = (f"MCP Operation Failed (ID: {req_id}):\n"
+                           f"Error Code: {mcp_response.error_code}\n"
+                           f"Message: {mcp_response.message}\n")
             if mcp_response.details:
                 try:
                     # Format details as JSON if possible
-                    details_str = f"```json\n{json.dumps(mcp_response.details, indent=2)}\n```"
+                    # Only use JSON formatting for dict/list types
+                    if isinstance(mcp_response.details, (dict, list)):
+                        details_str = f"```json\n{json.dumps(mcp_response.details, indent=2)}\n```"
+                    else:
+                        # For other types, just convert to string
+                        details_str = str(mcp_response.details)
                 except Exception:
                      details_str = str(mcp_response.details)
                 content += f"Details:\n{details_str}"

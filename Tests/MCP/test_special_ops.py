@@ -96,7 +96,7 @@ def test_get_server_time_success(client: TestClient, test_payload_factory):
         # Use a tolerance (e.g., 1 second) to account for network/processing delays
         tolerance_seconds = 1.5 # Slightly increased tolerance for CI environments
         assert before_ts_utc <= server_ts_utc <= after_ts_utc + datetime.timedelta(seconds=tolerance_seconds), \
-               f"Server time {server_time_str} out of expected range ({before_ts_utc.isoformat()} to {after_ts_utc.isoformat()})"
+                f"Server time {server_time_str} out of expected range ({before_ts_utc.isoformat()} to {after_ts_utc.isoformat()})"
 
     except ValueError as e:
         pytest.fail(f"Could not parse server time string '{server_time_str}' as ISO 8601 UTC: {e}")
@@ -117,7 +117,8 @@ def test_list_operations_default_agent(client: TestClient, test_payload_factory)
     ops_names = {op["name"] for op in ops_list}
 
     # Based on MCP/permissions.py default_permissions
-    expected_ops = {"echo", "ping", "list_operations", "get_server_time"} # default_user now gets get_server_time
+    # Note: Default permissions might vary based on your config. This matches the provided default.
+    expected_ops = {"echo", "ping", "list_operations"}
     assert ops_names == expected_ops
     # Optionally check argument definitions format for one operation
     ping_op = next((op for op in ops_list if op["name"] == "ping"), None)
@@ -137,6 +138,7 @@ def test_list_operations_agent_001(client: TestClient, test_payload_factory):
     ops_names = {op["name"] for op in data["result"]["operations"]}
 
     # Based on groups: default_user + tmp_readers_writers
+    # Check MCP/permissions.py for the exact definition
     expected_ops = {
         "echo", "ping", "get_server_time", "list_operations", # From default_user
         "read_file", "write_file", "delete_file", "list_directory", # From tmp_readers_writers

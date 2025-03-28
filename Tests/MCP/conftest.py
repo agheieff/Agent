@@ -1,5 +1,3 @@
-# --- File: Tests/MCP/conftest.py ---
-
 import pytest
 from fastapi.testclient import TestClient
 import sys
@@ -9,23 +7,19 @@ import copy
 import logging
 
 # --- Project Setup ---
-# Ensure MCP module is importable by adding project root to sys.path
-# Assumes conftest.py is in Tests/MCP/
-root_dir = Path(__file__).parent.parent.parent.resolve()
-if str(root_dir) not in sys.path:
-    sys.path.insert(0, str(root_dir))
+# Path setup is handled by the top-level Tests/conftest.py
 # --- End Project Setup ---
 
-# --- Imports (after path setup) ---
+# --- Imports (after path setup by parent conftest) ---
 try:
-    # Import the app *after* modifying sys.path
+    # Import the app *after* modifying sys.path (done by parent conftest)
     from MCP.server import app as fastAPI_app
     # Import the original config and the variable name used in the module
     from MCP.permissions import DEFAULT_PERMISSIONS_CONFIG, PERMISSIONS_CONFIG as DYNAMIC_CONFIG_VAR_NAME
     CONFIG_MODULE_PATH = 'MCP.permissions.PERMISSIONS_CONFIG' # Path to patch
 except ImportError as e:
     pytest.fail(f"Failed to import FastAPI app or PERMISSIONS_CONFIG: {e}\n"
-                f"Ensure PYTHONPATH includes project root ({root_dir}) and MCP components exist.",
+                f"Ensure PYTHONPATH includes project root and MCP components exist.",
                 pytrace=False)
 except Exception as e:
      pytest.fail(f"An unexpected error occurred during import: {e}", pytrace=False)

@@ -4,11 +4,7 @@ from pathlib import Path
 import logging
 
 # --- Project Setup ---
-# Ensure project module is importable by adding project root to sys.path
-# Assumes conftest.py is in Tests/CLI/
-root_dir = Path(__file__).parent.parent.parent.resolve()
-if str(root_dir) not in sys.path:
-    sys.path.insert(0, str(root_dir))
+# Path setup is handled by the top-level Tests/conftest.py
 # --- End Project Setup ---
 
 logger = logging.getLogger(__name__)
@@ -17,4 +13,7 @@ logger = logging.getLogger(__name__)
 @pytest.fixture(scope="module")
 def project_root():
     """Return the project root directory as a Path object."""
-    return root_dir
+    # Calculate the project root directory relative to this conftest file
+    return Path(__file__).parent.parent.parent.resolve()
+
+# Add other CLI-specific fixtures if needed

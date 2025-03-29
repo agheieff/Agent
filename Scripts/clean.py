@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 def remove_comments_and_excess_whitespace(source: str) -> str:
     """
-    Removes Python comments using tokenize.tokenize and cleans up blank lines.
+    Removes Python comments using tokenize.tokenize, preserves shebang,
+    and cleans up blank lines.
 
     Args:
         source: The source code as a string.
@@ -19,56 +20,89 @@ def remove_comments_and_excess_whitespace(source: str) -> str:
     Returns:
         The source code without comments, or the original source on error.
     """
-    cleaned_tokens = []
+    cleaned_tokens_for_untokenize = []
+    preserved_shebang_token = None
+    first_token_processed = False
+
     try:
         source_bytes = source.encode('utf-8')
         byte_stream = io.BytesIO(source_bytes)
-        # Use tokenize.tokenize which reads bytes directly
         tokens = tokenize.tokenize(byte_stream.readline)
 
         for token_info in tokens:
             tok_type = token_info.type
+            tok_string = token_info.string
 
-            # Skip comments AND the encoding cookie often added by tokenize.tokenize
-            if tok_type == tokenize.COMMENT or tok_type == tokenize.ENCODING:
+            # --- Shebang and Encoding Handling (First Token) ---
+            if not first_token_processed:
+                first_token_processed = True
+                # Check if the first token is a comment starting with #!
+                if tok_type == tokenize.COMMENT and tok_string.startswith('#!'):
+                    preserved_shebang_token = token_info
+                    logger.debug("Preserving shebang.")
+                    continue # Skip adding shebang to list for untokenize initially
+                # Skip encoding cookie if it's the first token
+                elif tok_type == tokenize.ENCODING:
+                    logger.debug("Skipping encoding token.")
+                    continue
+                # If the first token isn't shebang or encoding, fall through to process normally
+
+            # --- Regular Comment/Encoding Skipping (After First Token) ---
+            if tok_type == tokenize.COMMENT:
+                continue # Skip regular comments
+            # Encoding shouldn't appear after first token, but skip just in case
+            if tok_type == tokenize.ENCODING:
                 continue
 
-            cleaned_tokens.append(token_info)
+            # Add all other valid tokens to the list for untokenize
+            cleaned_tokens_for_untokenize.append(token_info)
 
     except tokenize.TokenError as e:
-        # This might catch issues like unterminated strings within the source
         logger.error(f"TokenError during tokenization: {e}")
-        return source # Return original source on tokenization error
+        return source
     except Exception as e:
-        # Log the actual exception which might be more helpful
         logger.error(f"An unexpected error occurred during tokenization: {e}", exc_info=True)
         return source
 
     try:
-        # Reconstruct the source code from the non-comment tokens
-        # untokenize expects token type and string; it should return a string.
-        cleaned_source = tokenize.untokenize(cleaned_tokens)
-        # Just in case untokenize returns bytes (less common now, but for safety)
-        if isinstance(cleaned_source, bytes):
-            cleaned_source = cleaned_source.decode('utf-8')
+        # Reconstruct the source code *without* the shebang for now
+        cleaned_source_body = tokenize.untokenize(cleaned_tokens_for_untokenize)
+        if isinstance(cleaned_source_body, bytes):
+            cleaned_source_body = cleaned_source_body.decode('utf-8')
+
+        # --- Prepend Shebang if it was preserved ---
+        final_source_parts = []
+        if preserved_shebang_token:
+            final_source_parts.append(preserved_shebang_token.string) # Add shebang line
+
+        # Add the rest of the cleaned code
+        final_source_parts.append(cleaned_source_body)
+        cleaned_source = "\n".join(final_source_parts)
 
     except Exception as e:
         logger.error(f"Failed to untokenize source: {e}")
-        return source # Return original on untokenize error
+        return source
 
-    # Cleanup of potentially fully empty lines resulted from comment removal
+    # Cleanup potentially fully empty lines resulted from comment removal
     lines = cleaned_source.splitlines()
-    # Keep lines that contain *something* other than whitespace
-    non_empty_lines = [line for line in lines if line.strip()]
+    # Preserve the first line (shebang) if it exists, then filter rest
+    first_line = lines[0] if lines and preserved_shebang_token else None
+    non_empty_lines = [line for line in lines[(1 if first_line else 0):] if line.strip()]
 
-    # Handle edge cases where the file becomes empty or was empty
-    if not non_empty_lines and lines: # Original file wasn't empty but now is
-         return "\n" # Return a single newline for non-empty original files that become empty
-    elif not non_empty_lines and not lines: # Original file was empty
-        return "" # Return empty string for empty original files
+    # Reconstruct final output
+    output_lines = []
+    if first_line:
+        output_lines.append(first_line)
+    output_lines.extend(non_empty_lines)
+
+    # Handle edge cases for empty files
+    if not output_lines and lines: # Original file wasn't empty but now is (except shebang)
+        return (first_line + "\n") if first_line else "\n"
+    elif not output_lines and not lines: # Original file was empty
+        return ""
     else:
         # Join remaining lines and add a single trailing newline
-        return "\n".join(non_empty_lines) + "\n"
+        return "\n".join(output_lines) + "\n"
 
 
 def process_file(filepath: Path, dry_run: bool = False) -> bool:
@@ -145,27 +179,23 @@ def main():
 
     modified_count = 0
     processed_count = 0
-    script_path = Path(__file__).resolve() # Get absolute path of the script
+    script_path = Path(__file__).resolve()
 
     for root, dirs, files in os.walk(start_dir):
         current_dir = Path(root)
 
-        # Prevent descending into .venv
         if ".venv" in dirs:
             dirs.remove(".venv")
             logger.debug(f"Skipping descent into: {current_dir / '.venv'}")
 
-        # Prevent descending into the script's own directory if it's under start_dir
-        # This check is more relevant if the script is placed within the target structure
         if script_dir.is_relative_to(start_dir) and current_dir == script_dir:
-            logger.debug(f"Skipping script's own directory: {current_dir}")
-            dirs[:] = [] # Clear dirs for this path so os.walk doesn't proceed
-            continue
+             logger.debug(f"Skipping script's own directory: {current_dir}")
+             dirs[:] = []
+             continue
 
         for filename in files:
             if filename.endswith(".py"):
                 filepath = current_dir / filename
-                # Explicitly skip processing the script itself
                 if filepath.resolve() == script_path:
                     logger.debug(f"Skipping self: {filepath}")
                     continue

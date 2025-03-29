@@ -9,6 +9,8 @@ from typing import Optional, List, Dict, Tuple, Any # Added Tuple, Any
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
+# --- Setup Project Path ---
+# Ensure the project root directory is in sys.path for imports
 root_dir = os.path.dirname(os.path.abspath(__file__))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
@@ -17,6 +19,7 @@ if root_dir not in sys.path:
 # --- Configure Logging ---
 load_dotenv()
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
+# Use DEBUG level if running with pytest for better test visibility
 is_testing = "pytest" in sys.modules
 effective_log_level = "DEBUG" if is_testing else log_level_str
 
@@ -25,6 +28,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
+# Reduce noise from dependencies unless LOG_LEVEL is DEBUG
 if effective_log_level != "DEBUG":
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -62,7 +66,8 @@ async def discover_and_validate_providers() -> List[str]:
         logger.error(f"Clients/API directory not found at {clients_api_dir}")
         return []
 
-    logger.info("Discovering and validating providers...")
+    # Changed from INFO to DEBUG
+    logger.debug("Discovering and validating providers...")
     for file_path in clients_api_dir.glob("*.py"):
         if file_path.stem.startswith("_") or file_path.stem == "base":
             continue
@@ -75,18 +80,23 @@ async def discover_and_validate_providers() -> List[str]:
             # In testing, this might be mocked to return a mock client directly.
             temp_client = await asyncio.to_thread(get_client, provider_name)
             if temp_client:
-                logger.info(f"✓ Provider '{provider_name}' validation successful.")
+                # Changed from INFO to DEBUG
+                logger.debug(f"✓ Provider '{provider_name}' validation successful.")
                 valid_providers.append(provider_name)
+                # Temporarily close the client after validation
                 await temp_client.close()
             else:
                 # get_client logs its own error if it returns None
                 pass
         except (ImportError, ValueError, RuntimeError, TypeError) as e:
+            # Keep warnings for validation failures
             logger.warning(f"✗ Provider '{provider_name}' validation failed: {e}")
         except Exception as e:
+            # Keep errors for unexpected issues
             logger.error(f"✗ Unexpected error validating provider '{provider_name}': {e}", exc_info=False)
         finally:
-            if temp_client and hasattr(temp_client, 'close'): # Ensure close is attempted even on some errors
+            # Ensure close is attempted even on some errors
+            if temp_client and hasattr(temp_client, 'close'):
                 try:
                     await temp_client.close()
                 except Exception: # Ignore close errors during validation
@@ -115,6 +125,7 @@ async def prompt_for_choice(options: List[str], prompt_message: str) -> Optional
         except ValueError:
             print("Invalid input. Please enter a number.")
         except (EOFError, KeyboardInterrupt):
+            # Keep warning for interruptions
             logger.warning("Input interrupted.")
             return None
 
@@ -132,6 +143,7 @@ async def prompt_for_multiline_input(prompt_message: str) -> Optional[str]:
             lines.append(line)
         return "\n".join(lines) if lines else None
     except (EOFError, KeyboardInterrupt):
+        # Keep warning for interruptions
         logger.warning("Input interrupted.")
         return None
 
@@ -167,12 +179,14 @@ async def setup_session_interactively(
         if not provider:
             valid_providers = await discover_and_validate_providers()
             if not valid_providers:
+                # Keep critical error
                 logger.critical("No valid LLM providers found or could be initialized.")
                 return None
             provider = await prompt_for_choice(valid_providers, "Please choose an LLM provider:")
             if not provider:
                 print("Provider selection cancelled.")
                 return None
+            # Keep INFO log for user choice
             logger.info(f"User selected provider: {provider}")
             model = None # Reset model if provider chosen interactively
 
@@ -183,16 +197,19 @@ async def setup_session_interactively(
                 logger.debug(f"Temporarily initializing client for '{provider}' to get models.")
                 temp_client = await asyncio.to_thread(get_client, provider)
                 if not temp_client:
+                    # Keep critical error
                     logger.critical(f"Failed to initialize client '{provider}' for model selection.")
                     return None
 
                 available_models = temp_client.get_available_models()
                 if not available_models:
+                    # Keep error
                     logger.error(f"Provider '{provider}' reported no available models.")
                     return None
 
                 default_model = temp_client.default_model
                 model_prompt = f"Please choose a model for '{provider}' (default: {default_model}):"
+                # Add "(default)" marker for clarity in prompt
                 display_models = [f"{m} {'(default)' if m == default_model else ''}" for m in available_models]
 
                 chosen_display_model = await prompt_for_choice(display_models, model_prompt)
@@ -200,7 +217,9 @@ async def setup_session_interactively(
                     print("Model selection cancelled.")
                     return None
 
+                # Extract the actual model name from the display string
                 model = chosen_display_model.split(' (default)')[0].strip()
+                # Keep INFO log for user choice
                 logger.info(f"User selected model: {model}")
 
             finally:
@@ -208,18 +227,43 @@ async def setup_session_interactively(
                     await temp_client.close()
                     logger.debug("Temporary client closed after model selection.")
 
+        # --- Goal Input ---
         if not goal:
             goal = await prompt_for_multiline_input("Please enter the goal for the agent:")
             if not goal:
                 print("Goal input cancelled or empty.")
                 return None
+            # Keep INFO log for user choice (goal)
+            logger.info(f"User provided goal: {goal[:100]}...") # Log truncated goal
 
+        # --- MCP Config ---
         mcp_url = os.getenv("MCP_SERVER_URL")
         mcp_timeout = float(os.getenv("MCP_TIMEOUT", DEFAULT_MCP_TIMEOUT))
 
         if not mcp_url:
+            # Keep critical error
             logger.critical("MCP_SERVER_URL environment variable is not set.")
             return None
+
+        # --- Final Config Validation (Example: ensure model is compatible with provider) ---
+        # (This requires initializing the client again, might be omitted for simplicity
+        # if get_client/get_model_config already does sufficient validation)
+        final_validation_client: Optional[BaseClient] = None
+        try:
+            final_validation_client = await asyncio.to_thread(get_client, provider)
+            if not final_validation_client:
+                 logger.error(f"Failed to re-initialize client '{provider}' for final validation.")
+                 return None
+            final_validation_client.get_model_config(model) # This will raise ValueError if model invalid for provider
+            logger.debug(f"Final check: Model '{model}' validated for provider '{provider}'.")
+        except ValueError as e:
+            logger.error(f"Model validation failed: {e}")
+            print(f"Error: {e}")
+            return None
+        finally:
+             if final_validation_client:
+                 await final_validation_client.close()
+
 
         # All checks passed, return config
         return SessionConfig(
@@ -233,10 +277,12 @@ async def setup_session_interactively(
         )
 
     except KeyboardInterrupt:
+        # Keep info log for interruption
         logger.info("Session setup interrupted by user.")
         print("\nSession setup interrupted.")
         return None
     except Exception as e:
+        # Keep error log for unexpected setup errors
         logger.error(f"Error during session setup: {e}", exc_info=True)
         print(f"\nError during setup: {e}")
         return None
@@ -260,15 +306,18 @@ async def run_agent_session(session_config: SessionConfig):
             # Initialize the actual client instance for the run
             llm_client = await asyncio.to_thread(get_client, session_config.provider)
             if not llm_client or not isinstance(llm_client, BaseClient):
+                # Keep critical error
                 logger.critical(f"Failed to initialize a valid LLM client for provider '{session_config.provider}'.")
                 return
 
-            # Validate and set the chosen model
-            llm_client.get_model_config(session_config.model) # Validate existence
-            llm_client.default_model = session_config.model # Set for the run
-            logger.info(f"Using LLM model: {session_config.model}")
+            # Validate and set the chosen model (get_model_config raises if invalid)
+            llm_client.get_model_config(session_config.model)
+            llm_client.default_model = session_config.model
+            # Changed from INFO to DEBUG
+            logger.debug(f"Using LLM model: {session_config.model}")
 
         except Exception as client_init_err:
+            # Keep critical error
             logger.critical(f"Failed to initialize LLM client for provider '{session_config.provider}': {client_init_err}", exc_info=True)
             return
 
@@ -283,6 +332,7 @@ async def run_agent_session(session_config: SessionConfig):
         )
 
         # --- Run the Autonomous Loop ---
+        # Keep the starting print banner
         print("\n" + "="*20 + " Starting Autonomous Agent Run " + "="*20)
         print(f"Goal: {session_config.goal}")
         print(f"Agent ID: {session_config.agent_id}")
@@ -294,6 +344,7 @@ async def run_agent_session(session_config: SessionConfig):
         run_result: AgentRunResult = await agent_runner.run_autonomous()
 
         # --- Process Result ---
+        # Keep the finishing print banner
         print("\n" + "="*20 + " Autonomous Run Finished " + "="*20)
         print(f"Outcome: {run_result.status}")
         print(f"Steps Taken: {run_result.steps_taken}")
@@ -301,9 +352,11 @@ async def run_agent_session(session_config: SessionConfig):
             # Use final_message which should contain the summary from finish_goal
             print(f"Final Summary from Agent: {run_result.final_message or '[No summary provided]'}")
         elif run_result.status == "error":
+            # Keep error message
             print(f"Error Message: {run_result.final_message}")
         elif run_result.status == "max_steps":
-             print(f"Reason: {run_result.final_message}")
+            # Keep max steps message
+            print(f"Reason: {run_result.final_message}")
 
         # Optional: Log or print final history (consider adding a flag for this)
         if run_result.final_history and logger.isEnabledFor(logging.DEBUG):
@@ -313,9 +366,11 @@ async def run_agent_session(session_config: SessionConfig):
             logger.debug("--- End History ---")
 
     except KeyboardInterrupt:
+        # Keep info log for interruption
         logger.info("Agent run interrupted by user.")
         print("\nAgent run interrupted.")
     except Exception as e:
+        # Keep critical error log
         logger.critical(f"An unexpected error occurred during agent execution: {e}", exc_info=True)
         print(f"\nSYSTEM ERROR: An unexpected error occurred during execution: {e}")
     finally:
@@ -323,17 +378,20 @@ async def run_agent_session(session_config: SessionConfig):
         try:
             if agent_runner:
                 await agent_runner.close()
-                logger.info("AgentRunner resources closed.")
+                # Changed from INFO to DEBUG
+                logger.debug("AgentRunner resources closed.")
             elif llm_client: # If runner failed but client existed
                 await llm_client.close()
-                logger.info("LLM Client resources closed.")
+                # Changed from INFO to DEBUG
+                logger.debug("LLM Client resources closed.")
             else:
-                logger.info("Run finished (Cleanup skipped, client/runner may not have initialized).")
+                # Changed from INFO to DEBUG
+                logger.debug("Run finished (Cleanup skipped, client/runner may not have initialized).")
 
-            # ----- FIX 3: Add small sleep before fully exiting -----
+            # Add small sleep before fully exiting (Keep this from previous fix)
             await asyncio.sleep(0.01)
-            # -------------------------------------------------------
         except Exception as cleanup_err:
+            # Keep error log for cleanup errors
             logger.error(f"Error during cleanup: {cleanup_err}", exc_info=True)
 
 
@@ -344,6 +402,7 @@ async def main():
         description="Run an autonomous agent with a specific goal, interactively prompting if needed.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
+    # Keep argument parsing as is
     parser.add_argument("-g", "--goal", default=None, help="The goal for the autonomous agent.")
     parser.add_argument("-p", "--provider", default=None, help="LLM provider name (e.g., 'anthropic', 'deepseek').")
     parser.add_argument("-m", "--model", default=None, help="Specific model name (optional).")
@@ -361,14 +420,17 @@ async def main():
     if session_config:
         await run_agent_session(session_config)
     else:
+        # Keep info log for setup failure/cancellation
         logger.info("Session setup failed or was cancelled. Exiting.")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
+        # Keep info log for script termination
         logger.info("Script terminated by user.")
         sys.exit(0)
     except Exception as e:
+        # Keep critical error log for unhandled errors
         logger.critical(f"Script failed to run due to an unhandled error: {e}", exc_info=True)
         sys.exit(1)

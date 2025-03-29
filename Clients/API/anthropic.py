@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # User requested not to change this section, keeping it as is.
 ANTHROPIC_CONFIG = ProviderConfig(
     name="anthropic",
-    api_base="https://api.anthropic.com",
+    api_base="[https://api.anthropic.com](https://api.anthropic.com)",
     api_key_env="ANTHROPIC_API_KEY",
     default_model="claude-3-7-sonnet", # Original default
     requires_import="anthropic",
@@ -31,6 +31,9 @@ ANTHROPIC_CONFIG = ProviderConfig(
             context_length=200000,
             pricing=PricingTier(input=3.00, output=15.00)
         ),
+        # Add other models as needed, ensuring correct API names and pricing
+        # "claude-3-opus": ModelConfig(...)
+        # "claude-3-haiku": ModelConfig(...)
     }
 )
 # --- End Configuration ---
@@ -51,6 +54,7 @@ class AnthropicClient(BaseClient):
         """(Sync) Initializes the Anthropic SDK client."""
         # BaseClient's __init__ checks api_key and dependency import
         if not self.api_key: # Should not happen if BaseClient init worked
+            # Keep RuntimeError
             raise RuntimeError("API key unexpectedly missing during client initialization.")
 
         try:
@@ -61,6 +65,7 @@ class AnthropicClient(BaseClient):
                 max_retries=self.max_retries
             )
         except Exception as e:
+            # Keep error log and raise
             logger.error(f"Failed to initialize Anthropic AsyncClient: {e}", exc_info=True)
             raise # Re-raise for BaseClient._ensure_client_initialized to handle
 
@@ -82,12 +87,15 @@ class AnthropicClient(BaseClient):
                         system_prompt = msg.content
                     else:
                         system_prompt += "\n" + msg.content
+                        # Keep warning for multiple system messages
                         logger.warning("Multiple system messages found. Concatenating them.")
                 else:
+                    # Keep warning for non-string system content
                     logger.warning(f"System message content is not a string: {type(msg.content)}. Skipping.")
             elif msg.role in ["user", "assistant"]:
                 non_system_messages.append(msg)
             else:
+                # Keep warning for unsupported roles
                 logger.warning(f"Unsupported message role '{msg.role}'. Skipping message.")
 
         # 2. Format and merge user/assistant messages
@@ -99,14 +107,17 @@ class AnthropicClient(BaseClient):
             # elif isinstance(msg.content, list):
             #     content_list = msg.content
             else:
+                # Keep warning for unsupported content types
                 logger.warning(f"Unsupported message content type: {type(msg.content)}. Treating as empty text.")
                 content_list = [{"type": "text", "text": ""}]
 
+            # Merge consecutive messages of the same role
             if formatted and formatted[-1]["role"] == msg.role:
                 if isinstance(formatted[-1]["content"], list):
                     formatted[-1]["content"].extend(content_list)
                     logger.debug(f"Merging consecutive '{msg.role}' message content.")
                 else:
+                    # Keep warning if merging fails unexpectedly
                     logger.warning("Cannot merge content: Previous message content is not a list. Appending new block.")
                     formatted.append({"role": msg.role, "content": content_list})
             else:
@@ -115,9 +126,11 @@ class AnthropicClient(BaseClient):
 
         # Validation: Anthropic requires non-empty messages and specific turn order
         if not formatted and system_prompt:
+            # Keep error log and return None for failure
             logger.error("Anthropic requires at least one user/assistant message when a system prompt is provided.")
             return None # Indicate formatting failure
         if not formatted and not system_prompt:
+            # Keep error log and return None for failure
             logger.error("Cannot make Anthropic API call with no messages or system prompt.")
             return None # Indicate formatting failure
         # SDK handles first message role validation
@@ -133,6 +146,7 @@ class AnthropicClient(BaseClient):
     ) -> Union[anthropic.types.Message, AsyncIterator[anthropic.types.MessageStreamEvent]]:
         """Makes the actual Anthropic SDK call."""
         if self.client is None: # Should have been ensured by BaseClient
+            # Keep runtime error
             raise RuntimeError("Anthropic client not initialized before API call.")
 
         messages_list, system_prompt = formatted_messages
@@ -149,15 +163,23 @@ class AnthropicClient(BaseClient):
 
         # Add other valid Anthropic parameters if they were passed through kwargs
         valid_anthropic_params = {"top_p", "top_k", "stop_sequences"}
-        for key in list(params.keys()): # Iterate over keys copy
-            if key not in valid_anthropic_params and key not in ["messages", "model", "stream", "system", "max_tokens", "temperature"]:
-                logger.warning(f"Ignoring unsupported parameter for Anthropic: {key}")
-                params.pop(key)
+        # Filter out unsupported params passed via kwargs
+        keys_to_remove = []
+        for key in kwargs:
+             if key not in valid_anthropic_params and key not in ["max_tokens", "temperature"]:
+                 keys_to_remove.append(key)
+
+        if keys_to_remove:
+            # Keep warning for ignored parameters
+            logger.warning(f"Ignoring unsupported parameters for Anthropic: {keys_to_remove}")
+            for key in keys_to_remove:
+                params.pop(key, None) # Remove from final params
 
         # Make the SDK call (let BaseClient handle exceptions)
         response = await self.client.messages.create(**params)
 
         # Log usage for non-streaming immediately
+        # Keep INFO log for usage stats
         if not stream and isinstance(response, anthropic.types.Message) and response.usage:
             logger.info(f"Anthropic API Usage: Input={response.usage.input_tokens}, Output={response.usage.output_tokens}")
 
@@ -166,6 +188,7 @@ class AnthropicClient(BaseClient):
     def _process_response(self, response: anthropic.types.Message) -> str:
         """Extracts text content from a non-streaming Anthropic response."""
         if not response.content:
+            # Keep warning for empty content
             logger.warning("Received empty content list from Anthropic.")
             return ""
 
@@ -177,6 +200,7 @@ class AnthropicClient(BaseClient):
                 logger.debug(f"Ignoring non-text content block of type: {block.type}")
 
         if not full_text and response.stop_reason:
+            # Keep warning if no text but stop reason exists
             logger.warning(f"Received no text content, but got stop reason: {response.stop_reason}")
 
         return full_text.strip()
@@ -198,6 +222,7 @@ class AnthropicClient(BaseClient):
 
     # --- Optional: Provide SDK-specific error details ---
     def _get_sdk_exception_types(self) -> Tuple[Type[Exception], ...]:
+        # Keep this as is
         return (
             anthropic.APIConnectionError,
             anthropic.RateLimitError,
@@ -206,6 +231,7 @@ class AnthropicClient(BaseClient):
         )
 
     def _extract_error_details(self, error: Exception) -> Tuple[Optional[int], str]:
+        # Keep this as is
         status_code = getattr(error, 'status_code', None)
         message = getattr(error, 'message', str(error)) # Default message
 

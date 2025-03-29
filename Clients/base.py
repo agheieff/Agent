@@ -17,6 +17,7 @@ class Message:
 class PricingTier:
     input: float  # cost per 1,000,000 input tokens
     output: float # cost per 1,000,000 output tokens
+    # Optional fields for more complex pricing
     input_cache_miss: float = 0.0
     output_cache_miss: float = 0.0
     discount_hours: Optional[tuple] = None
@@ -35,7 +36,7 @@ class ProviderConfig:
     api_key_env: str
     models: Dict[str, ModelConfig] # Key is internal name (e.g., "claude-3-5-sonnet"), value is config
     default_model: str # Internal default model key
-    requires_import: Optional[str] = None
+    requires_import: Optional[str] = None # Python package name required by the client SDK
     default_timeout: float = 60.0 # Increased default timeout
     default_max_retries: int = 2
 
@@ -65,11 +66,13 @@ class BaseClient:
         # Perform essential checks immediately
         self._check_api_key()
         self._check_dependencies()
-        logger.info(f"{self.config.name} client configured. SDK client will be initialized on first call.")
+        # Changed from INFO to DEBUG
+        logger.debug(f"{self.config.name} client configured. SDK client will be initialized on first call.")
 
     def _check_api_key(self):
         """Checks if the API key is present."""
         if not self.api_key:
+            # This is a critical failure, keep as ValueError/raise
             raise ValueError(f"API key not found in environment variable {self.config.api_key_env} for provider {self.config.name}")
 
     def _check_dependencies(self):
@@ -79,6 +82,7 @@ class BaseClient:
                 importlib.import_module(self.config.requires_import)
                 logger.debug(f"Successfully imported required package '{self.config.requires_import}' for {self.config.name}.")
             except ImportError as e:
+                # This is a critical failure, keep as ImportError/raise
                 raise ImportError(f"Required package '{self.config.requires_import}' not installed for {self.config.name} client.") from e
 
     async def _ensure_client_initialized(self):
@@ -89,9 +93,12 @@ class BaseClient:
                 # Subclass implements the actual SDK client creation
                 self.client = await asyncio.to_thread(self._initialize_provider_client)
                 if self.client is None:
+                    # Keep runtime error
                     raise RuntimeError(f"_initialize_provider_client for {self.config.name} returned None.")
-                logger.info(f"{self.config.name} provider client initialized successfully.")
+                # Changed from INFO to DEBUG
+                logger.debug(f"{self.config.name} provider client initialized successfully.")
             except Exception as e:
+                # Keep error log and raise
                 logger.error(f"Failed to initialize {self.config.name} provider client: {e}", exc_info=True)
                 raise RuntimeError(f"{self.config.name} client initialization failed: {str(e)}") from e
 
@@ -174,24 +181,25 @@ class BaseClient:
             self.client = None # Prevent trying to close again if errors occur
             try:
                 logger.debug(f"Attempting to close provider client for {self.config.name}...")
-                # ----- FIX 2: Prioritize aclose -----
+                # Prioritize aclose if available and awaitable
                 if hasattr(client_to_close, 'aclose') and callable(client_to_close.aclose):
-                    # Ensure it's awaited if it's a coroutine function/object
-                    if asyncio.iscoroutinefunction(client_to_close.aclose) or asyncio.iscoroutine(client_to_close.aclose()):
-                        await client_to_close.aclose()
+                    close_method = client_to_close.aclose
+                    if asyncio.iscoroutinefunction(close_method) or asyncio.iscoroutine(close_method()):
+                         await close_method()
                     else:
-                        # If it's callable but not async, call it directly (less likely for aclose)
-                        client_to_close.aclose() # type: ignore
-                    logger.info(f"{self.config.name} client closed via aclose().")
-                # ----- Fallback to sync close -----
+                         close_method() # Call sync if not async
+                    # Changed from INFO to DEBUG
+                    logger.debug(f"{self.config.name} client closed via aclose().")
+                # Fallback to sync close in thread
                 elif hasattr(client_to_close, 'close') and callable(client_to_close.close):
                     await asyncio.to_thread(client_to_close.close)
-                    logger.info(f"{self.config.name} client closed via close().")
+                    # Changed from INFO to DEBUG
+                    logger.debug(f"{self.config.name} client closed via close().")
                 else:
                     logger.debug(f"Provider client for {self.config.name} has no 'aclose' or 'close' method.")
             except Exception as e:
+                # Keep error log
                 logger.error(f"Error closing provider ({self.config.name}) client: {e}", exc_info=True)
-                # Do not set self.client back here, keep it None
 
     def get_available_models(self) -> List[str]:
         """Returns a list of *internal* model keys configured for this provider."""
@@ -202,8 +210,10 @@ class BaseClient:
         effective_model_key = model_key or self.default_model
         model_conf = self.config.models.get(effective_model_key)
         if not model_conf:
+            # Keep ValueError
             raise ValueError(f"Model key '{effective_model_key}' not found in {self.config.name} configuration. Available keys: {self.get_available_models()}")
         if not isinstance(model_conf, ModelConfig): # Ensure correct type
+            # Keep error log and raise
             logger.error(f"Configuration for model key '{effective_model_key}' in {self.config.name} is not a valid ModelConfig object. Found: {type(model_conf)}")
             raise TypeError(f"Invalid configuration type for model key '{effective_model_key}'. Expected ModelConfig.")
         return model_conf
@@ -215,6 +225,7 @@ class BaseClient:
         """
         await self._ensure_client_initialized()
         if not self.client: # Should be initialized now
+            # Keep runtime error
             raise RuntimeError(f"{self.config.name} client failed to initialize.")
 
         effective_model_key = model or self.default_model
@@ -225,6 +236,7 @@ class BaseClient:
 
             formatted_messages = self._format_messages(messages)
             if formatted_messages is None: # Check if formatting failed
+                # Keep ValueError
                 raise ValueError("Message formatting failed.")
 
             # Prepare common parameters (subclass _execute_api_call can override/add)
@@ -247,10 +259,12 @@ class BaseClient:
             content = self._process_response(raw_response)
             # Log usage (if available - subclass _process_response could potentially extract it)
             # Consider adding optional usage return from _process_response
-            logger.info(f"{self.config.name} chat completion successful.")
+            # Changed from INFO to DEBUG
+            logger.debug(f"{self.config.name} chat completion successful.")
             return content
 
         except self._get_sdk_exception_types() as e:
+            # Keep SDK error handling
             status_code, err_msg = self._extract_error_details(e)
             status_str = f" (Status: {status_code})" if status_code else ""
             log_msg = f"{self.config.name} API Error{status_str}: {err_msg}"
@@ -258,10 +272,13 @@ class BaseClient:
             # Check for potential model name errors
             err_msg_lower = err_msg.lower()
             if "model" in err_msg_lower or "not found" in err_msg_lower or (status_code in [400, 404]):
-                api_model_name_attempt = self.get_model_config(effective_model_key).name # Re-fetch for logging
-                logger.error(f"Potential invalid model name used: '{api_model_name_attempt}'. Verify config for key '{effective_model_key}'.")
+                try: # Avoid error if get_model_config itself fails here
+                    api_model_name_attempt = self.get_model_config(effective_model_key).name
+                    logger.error(f"Potential invalid model name used: '{api_model_name_attempt}'. Verify config for key '{effective_model_key}'.")
+                except Exception: pass # Ignore secondary error during error reporting
             raise RuntimeError(log_msg) from e
         except Exception as e: # Catch other unexpected errors
+            # Keep error log and raise
             logger.error(f"Unexpected error during {self.config.name} chat completion: {e}", exc_info=True)
             raise RuntimeError(f"Unexpected error during API call: {str(e)}") from e
 
@@ -272,6 +289,7 @@ class BaseClient:
         """
         await self._ensure_client_initialized()
         if not self.client:
+            # Keep runtime error
             raise RuntimeError(f"{self.config.name} client failed to initialize.")
 
         effective_model_key = model or self.default_model
@@ -284,6 +302,7 @@ class BaseClient:
 
             formatted_messages = self._format_messages(messages)
             if formatted_messages is None:
+                # Keep ValueError
                 raise ValueError("Message formatting failed.")
 
             params = {
@@ -302,6 +321,7 @@ class BaseClient:
             )
 
             if not hasattr(stream_iterator, '__aiter__'):
+                # Keep error log and raise
                 logger.error(f"Internal Error: _execute_api_call did not return an async iterator for streaming. Got: {type(stream_iterator)}")
                 raise RuntimeError("Internal error: Failed to obtain stream iterator.")
 
@@ -310,19 +330,24 @@ class BaseClient:
                 text_delta = self._process_stream_chunk(chunk)
                 if text_delta is not None: # Yield only if chunk contained text
                     yield text_delta
-            logger.info(f"{self.config.name} stream completed.")
+            # Changed from INFO to DEBUG
+            logger.debug(f"{self.config.name} stream completed.")
 
         except self._get_sdk_exception_types() as e:
+            # Keep SDK error handling
             status_code, err_msg = self._extract_error_details(e)
             status_str = f" (Status: {status_code})" if status_code else ""
             log_msg = f"{self.config.name} API Error during streaming{status_str}: {err_msg}"
             logger.error(log_msg, exc_info=False)
             err_msg_lower = err_msg.lower()
             if "model" in err_msg_lower or (status_code in [400, 404]):
-                api_model_name_attempt = self.get_model_config(effective_model_key).name
-                logger.error(f"Potential invalid model name used in stream: '{api_model_name_attempt}'. Check config key '{effective_model_key}'.")
+                 try:
+                    api_model_name_attempt = self.get_model_config(effective_model_key).name
+                    logger.error(f"Potential invalid model name used in stream: '{api_model_name_attempt}'. Check config key '{effective_model_key}'.")
+                 except Exception: pass
             raise RuntimeError(log_msg) from e
         except Exception as e:
+            # Keep error log and raise
             logger.error(f"Unexpected error during {self.config.name} streaming: {e}", exc_info=True)
             raise RuntimeError(f"Unexpected streaming error: {str(e)}") from e
         finally:
@@ -332,4 +357,5 @@ class BaseClient:
                     await stream_iterator.aclose()
                     logger.debug(f"{self.config.name} stream context closed.")
                 except Exception as close_err:
+                    # Keep warning for close errors
                     logger.warning(f"Error closing {self.config.name} stream context: {close_err}", exc_info=False)

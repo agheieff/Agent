@@ -77,13 +77,6 @@ async def discover_and_validate_providers() -> List[str]:
             logger.warning(f"✗ Provider '{provider_name}' validation failed: {e}")
         except Exception as e:
              logger.error(f"✗ Unexpected error validating provider '{provider_name}': {e}", exc_info=False)
-        finally:
-            # Ensure cleanup even if close wasn't called above
-            if temp_client and hasattr(temp_client, 'close'):
-                 try:
-                      await temp_client.close()
-                 except Exception:
-                      pass # Ignore errors during cleanup
 
     return sorted(valid_providers)
 
@@ -274,7 +267,7 @@ async def main(goal_arg: Optional[str], provider_arg: Optional[str], agent_id: s
                 break
 
             # 3. Parse LLM response
-            mcp_call_data = agent_runner.parse_llm_response(llm_response_text)
+            mcp_call_data = agent_runner._parse_llm_response(llm_response_text)
 
             if mcp_call_data:
                 # 4. Execute MCP Operation

@@ -15,7 +15,7 @@ from typing import List, Dict, Optional, Any
 # Import the main function and relevant classes from run.py context
 # We need to import `main` from `run` module
 try:
-    from run import main as run_main # Import the main async function
+    from run import run_agent_session as run_main# Import the main async function
     from Clients import Message, BaseClient, ProviderConfig, ModelConfig, PricingTier, get_client
     from Core import AgentRunner # Need AgentRunner for type hints if mocking instances
     from MCP.models import MCPSuccessResponse, MCPErrorResponse # For mocking MCP results
@@ -80,27 +80,27 @@ def mock_llm_client(mocker):
     # Set environment variable for API key
     mocker.patch.dict(os.environ, {"TEST_API_KEY": "fake-key"})
 
-    # Create an instance of our TestClient mock
-    client_mock = mocker.MagicMock(spec=TestClient(fake_config))
-    client_mock.__class__ = TestClient # Make isinstance check work
+    # Create an instance of our TestClient class
+    client_instance = TestClient(fake_config)
     # Configure the main methods used by the run loop
-    client_mock.chat_completion = AsyncMock(return_value="Response text")
-    client_mock.stream_chat_completion = AsyncMock() # Define if needed
-    client_mock.default_model = TEST_MODEL
-    client_mock.config = fake_config
-    client_mock.close = AsyncMock()
+    client_instance.chat_completion = AsyncMock(return_value="Response text")
+    client_instance.stream_chat_completion = AsyncMock() # Define if needed
+    client_instance.close = AsyncMock()
+    
+    # Make sure required methods are available
+    client_instance.get_available_models = lambda: [TEST_MODEL]
+    client_instance.get_model_config = lambda model: fake_config.models[TEST_MODEL]
+    
+    # Return the actual instance, not a mock
+    return client_instance
 
-    # Mock methods that will be called by run.py setup
-    client_mock.get_available_models.return_value = [TEST_MODEL]
-    client_mock.get_model_config.return_value = fake_config.models[TEST_MODEL]
-
-    # Patch asyncio.to_thread SPECIFICALLY for get_client to return our mock
+    # Patch asyncio.to_thread SPECIFICALLY for get_client to return our instance
     # This avoids interfering with other potential uses of asyncio.to_thread
     original_to_thread = asyncio.to_thread
     async def mock_to_thread_for_get_client(func, *args, **kwargs):
         if func == get_client and args and args[0] == TEST_PROVIDER:
             # print(f"DEBUG: Mocking to_thread for get_client('{args[0]}')") # Debug print
-            return client_mock
+            return client_instance
         # print(f"DEBUG: Passing through to_thread call for {func.__name__}") # Debug print
         # Fallback to original for other functions (like input, if not mocked elsewhere)
         return await original_to_thread(func, *args, **kwargs)
@@ -110,7 +110,7 @@ def mock_llm_client(mocker):
     # Mock provider validation (assuming run.py uses this)
     mocker.patch('run.discover_and_validate_providers', return_value=[TEST_PROVIDER])
 
-    return client_mock
+    return client_instance
 
 
 @pytest.fixture

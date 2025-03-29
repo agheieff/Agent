@@ -1,13 +1,18 @@
 import openai # Keep specific SDK import
 import os
 import logging
+import json # Added for formatting tool call results
 import asyncio # Import needed in base, good to have here too if used directly
 from typing import Dict, List, Optional, Any, AsyncIterator, Union, Tuple, Type
 
 # Use relative imports within the package
 from ..base import BaseClient, ProviderConfig, ModelConfig, PricingTier, Message
+# Import ArgumentDefinition for type hint in helper
+from ...MCP.Operations.base import ArgumentDefinition
+
 
 # --- Configuration (Keep as is per user request, with minor corrections) ---
+# (DEEPSEEK_CONFIG remains the same as provided)
 DEEPSEEK_CONFIG = ProviderConfig(
     name="deepseek",
     api_base="https://api.deepseek.com/v1",
@@ -16,44 +21,80 @@ DEEPSEEK_CONFIG = ProviderConfig(
     requires_import="openai",
     models={
         "deepseek-chat": ModelConfig(
-            name="deepseek-chat",
-            context_length=32768, # User should verify this, seems low for deepseek
-            pricing=PricingTier(input=0.07, output=1.10) # Per Million Tokens
+            name="deepseek-chat", # API model name
+            context_length=128000, # Deepseek chat has large context
+            pricing=PricingTier(input=0.14, output=0.28) # Per Million Tokens (example, verify)
         ),
-        "deepseek-reasoner": ModelConfig( # Assuming this is deepseek-coder? Name should match API.
-            name="deepseek-coder", # Corrected potential name based on DeepSeek docs
-            context_length=128000, # Context for coder is typically higher
-            pricing=PricingTier(input=0.14, output=0.28) # Updated pricing example for coder
+        "deepseek-coder": ModelConfig(
+            name="deepseek-coder", # API model name
+            context_length=128000,
+            pricing=PricingTier(input=0.14, output=0.28) # Per Million Tokens (example, verify)
         )
+        # Note: deepseek-reasoner might be a specific capability, not a base model name.
+        # Use 'deepseek-chat' or 'deepseek-coder' for the model parameter.
     },
-    default_timeout=60.0, # Use default from BaseClient or override here
+    default_timeout=60.0,
     default_max_retries=2
 )
 # --- End Configuration ---
 
 logger = logging.getLogger(__name__)
 
+# --- Helper Function for Function Calling ---
+
+def _arguments_to_json_schema(arguments: List[ArgumentDefinition]) -> Dict[str, Any]:
+    """Converts a list of MCP ArgumentDefinitions to JSON Schema for OpenAI tools."""
+    properties = {}
+    required_args = []
+    # Map MCP types to JSON Schema types
+    type_mapping = {
+        'string': 'string',
+        'integer': 'integer',
+        'boolean': 'boolean',
+        'float': 'number',
+        'object': 'object',
+        'array': 'array',
+        'filepath': 'string' # Treat filepath as string for JSON schema
+    }
+
+    for arg in arguments:
+        schema_type = type_mapping.get(arg.type, 'string') # Default to string if unknown
+        prop_definition = {"type": schema_type, "description": arg.description}
+        # Add default value to schema if specified (OpenAI doesn't directly use this, but good practice)
+        # Pydantic model generated later handles the default logic during validation.
+        # if arg.default is not None:
+        #     prop_definition["default"] = arg.default
+        properties[arg.name] = prop_definition
+        if arg.required:
+            required_args.append(arg.name)
+
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required_args
+    }
+
+# --- DeepSeekClient Class ---
+
 class DeepSeekClient(BaseClient):
     def __init__(self, config: Optional[ProviderConfig] = None):
         """Initializes the DeepSeekClient."""
         effective_config = config or DEEPSEEK_CONFIG
-        # Set provider-specific defaults *before* calling super().__init__ if needed
-        # self.timeout = 90.0 # Example override
         super().__init__(effective_config)
-        # self.default_model is set by BaseClient
+        # Flag to indicate if function calling should be attempted
+        self._enable_function_calling = True # Assume enabled for now
 
     def _initialize_provider_client(self) -> openai.AsyncOpenAI:
         """(Sync) Initializes the OpenAI SDK client configured for DeepSeek."""
-        # BaseClient's __init__ checks api_key and dependency import
+        # (Implementation remains the same as provided before)
         if not self.api_key:
             raise RuntimeError("API key unexpectedly missing during client initialization.")
-
         try:
             return openai.AsyncOpenAI(
                 api_key=self.api_key,
                 base_url=self.config.api_base,
-                timeout=self.timeout, # Use timeout from BaseClient attributes
-                max_retries=self.max_retries # Use retries from BaseClient attributes
+                timeout=self.timeout,
+                max_retries=self.max_retries
             )
         except Exception as e:
             logger.error(f"Failed to initialize DeepSeek client (via AsyncOpenAI): {e}", exc_info=True)
@@ -61,15 +102,18 @@ class DeepSeekClient(BaseClient):
 
     def _format_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
         """Formats messages for the OpenAI compatible API."""
+        # (Implementation remains the same as provided before)
         formatted = []
         for msg in messages:
-            if isinstance(msg.content, str):
+             # Skip system prompt if handled separately (though OpenAI usually wants it first)
+             # if msg.role == "system": continue # Optional: skip if handled via 'tools' or elsewhere
+
+             if isinstance(msg.content, str):
                 formatted.append({"role": msg.role, "content": msg.content})
-            else:
+             else:
                 # Handle potential complex content (e.g., images) - currently log/convert
                 logger.warning(f"Unsupported content type {type(msg.content)} in DeepSeek message, converting to string.")
                 formatted.append({"role": msg.role, "content": str(msg.content)})
-        # OpenAI compatible API generally requires non-empty messages
         if not formatted:
             logger.error("Cannot make OpenAI-compatible API call with empty formatted messages.")
             return None # Indicate formatting failure
@@ -82,77 +126,183 @@ class DeepSeekClient(BaseClient):
         stream: bool,
         **kwargs
     ) -> Union[openai.types.chat.ChatCompletion, AsyncIterator[openai.types.chat.ChatCompletionChunk]]:
-        """Makes the actual OpenAI SDK call for DeepSeek."""
+        """Makes the actual OpenAI SDK call for DeepSeek, potentially adding tools."""
         if self.client is None:
             raise RuntimeError("DeepSeek client (AsyncOpenAI) not initialized before API call.")
+
+        # --- Tool/Function Calling Setup ---
+        tools_param = []
+        tool_choice_param = None # Let the model decide ("auto") by default
+        if self._enable_function_calling:
+            try:
+                # Import dynamically inside method to avoid circular dependency at module level
+                # And ensure registry is populated when called
+                from ...MCP.registry import operation_registry
+                all_ops = operation_registry.get_all() # Ensure discovery ran
+                if not all_ops:
+                     logger.warning("MCP Operation Registry is empty. Cannot generate tools for DeepSeek.")
+                else:
+                    for op_name, op_instance in all_ops.items():
+                        # Exclude finish_goal from being presented as a callable tool
+                        if op_name == "finish_goal":
+                            continue
+                        # Ensure op_instance has required attributes
+                        op_desc = getattr(op_instance, 'description', f'Operation {op_name}')
+                        op_args_defs = getattr(op_instance, 'arguments', [])
+
+                        tools_param.append({
+                            "type": "function",
+                            "function": {
+                                "name": op_name,
+                                "description": op_desc,
+                                "parameters": _arguments_to_json_schema(op_args_defs)
+                            }
+                        })
+                    if tools_param: # Only set tool_choice if tools are actually available
+                        tool_choice_param = "auto"
+                        logger.debug(f"Generated {len(tools_param)} tools for DeepSeek API call.")
+
+            except ImportError:
+                logger.error("Could not import MCP Operation Registry. Function calling disabled.")
+            except Exception as e:
+                logger.error(f"Error generating tools for DeepSeek API: {e}", exc_info=True)
+        # --- End Tool Setup ---
 
         params = {
             "messages": formatted_messages,
             "model": api_model_name,
             "stream": stream,
-            **kwargs # Include max_tokens, temperature etc. from BaseClient
+            **kwargs # Include max_tokens, temperature etc. from BaseClient caller
         }
 
-        # Add other valid OpenAI/DeepSeek parameters if provided
-        valid_extra_params = {"top_p", "frequency_penalty", "presence_penalty", "stop"}
-        for key in list(params.keys()): # Iterate over keys copy
-            if key not in valid_extra_params and key not in ["messages", "model", "stream", "max_tokens", "temperature"]:
-                logger.warning(f"Ignoring unsupported parameter for DeepSeek/OpenAI: {key}")
-                params.pop(key)
+        # Add tools if available
+        if tools_param:
+            params["tools"] = tools_param
+        if tool_choice_param:
+            params["tool_choice"] = tool_choice_param
 
+        # Filter out unsupported parameters (remains the same)
+        valid_extra_params = {"top_p", "frequency_penalty", "presence_penalty", "stop"}
+        # Add tool parameters to the list of known valid keys
+        valid_keys = set(params.keys()) | valid_extra_params | {"tools", "tool_choice"}
+        for key in list(kwargs.keys()): # Iterate over original kwargs passed in
+             if key not in valid_keys and key not in ["max_tokens", "temperature"]: # Check against ALL valid keys
+                  logger.warning(f"Ignoring unsupported parameter for DeepSeek/OpenAI: {key}")
+                  # Don't remove from params here, kwargs are already unpacked
+                  # If BaseClient adds unexpected things to kwargs, handle there.
+
+        logger.debug(f"Calling DeepSeek API with params: {params}")
         # Make the SDK call (let BaseClient handle exceptions)
         response = await self.client.chat.completions.create(**params)
 
-        # Log usage for non-streaming immediately
+        # Log usage for non-streaming immediately (remains the same)
         if not stream and isinstance(response, openai.types.chat.ChatCompletion) and response.usage:
-            logger.info(f"DeepSeek API Usage: Input={response.usage.prompt_tokens}, Output={response.usage.completion_tokens}")
+            logger.info(f"DeepSeek API Usage: Input={response.usage.prompt_tokens}, Output={response.usage.completion_tokens}, Total={response.usage.total_tokens}")
+            if response.choices and response.choices[0].finish_reason == 'tool_calls':
+                 logger.info("DeepSeek API call finished with tool_calls.")
 
         return response
 
     def _process_response(self, response: openai.types.chat.ChatCompletion) -> str:
-        """Extracts text content from a non-streaming OpenAI-compatible response."""
+        """
+        Extracts text content or formats the first tool call into MCP JSON
+        from a non-streaming OpenAI-compatible response.
+        """
         if not response.choices:
             logger.warning("Received no choices from DeepSeek/OpenAI.")
             return ""
 
         message = response.choices[0].message
-        if not message or not message.content:
-            logger.warning("Received choice but no message content from DeepSeek/OpenAI.")
-            return ""
 
-        return message.content.strip()
+        # --- Check for Tool Calls ---
+        if message.tool_calls:
+            first_tool_call = message.tool_calls[0]
+            if first_tool_call.type == "function":
+                function_call = first_tool_call.function
+                op_name = function_call.name
+                try:
+                    # Arguments are a JSON string, need to parse them
+                    op_args = json.loads(function_call.arguments or '{}')
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to parse JSON arguments for tool call '{op_name}': {function_call.arguments}")
+                    op_args = {} # Use empty dict on parse failure
+
+                # Format as the MCP JSON structure expected by AgentRunner
+                mcp_json_payload = {
+                    "mcp_operation": {
+                        "operation_name": op_name,
+                        "arguments": op_args
+                    }
+                }
+                # Wrap in ```json block
+                mcp_json_string = f"```json\n{json.dumps(mcp_json_payload, indent=2)}\n```"
+                logger.info(f"Processed tool call '{op_name}' into MCP JSON format.")
+                return mcp_json_string
+            else:
+                logger.warning(f"Received unsupported tool call type: {first_tool_call.type}")
+                # Fall through to process content if any
+
+        # --- Process Regular Content ---
+        if message.content:
+            return message.content.strip()
+        else:
+             # If no tool call and no content, return empty
+             # Log the finish reason if available and potentially informative
+             finish_reason = response.choices[0].finish_reason
+             logger.warning(f"Received choice but no message content or tool calls from DeepSeek/OpenAI. Finish reason: {finish_reason}")
+             return ""
+
 
     def _process_stream_chunk(self, chunk: openai.types.chat.ChatCompletionChunk) -> Optional[str]:
-        """Extracts text delta from an OpenAI-compatible stream chunk."""
+        """
+        Extracts text delta from an OpenAI-compatible stream chunk.
+        NOTE: Streaming tool calls are NOT fully handled here yet. This primarily handles text deltas.
+        """
         if chunk.choices:
             delta = chunk.choices[0].delta
+            # --- Handle Text Delta ---
             if delta and delta.content:
                 return delta.content
-        # Can add logging for finish_reason or other chunk details if needed
-        return None # No text delta in this chunk
 
-    # --- Optional: Provide SDK-specific error details ---
+            # --- Basic Logging for Tool Call Chunks (Full reconstruction not implemented) ---
+            if delta and delta.tool_calls:
+                 logger.debug(f"Received tool_call chunk delta: {delta.tool_calls}")
+                 # To fully support streaming tool calls, need to accumulate chunks here
+                 # and yield the formatted MCP JSON once a full call is received.
+                 # For Phase 1, relying on non-streaming tool calls via _process_response.
+
+            # Log finish reason if present in the chunk delta
+            finish_reason = chunk.choices[0].finish_reason
+            if finish_reason:
+                logger.debug(f"Stream chunk indicates finish_reason: {finish_reason}")
+                if finish_reason == 'tool_calls':
+                     logger.info("Stream finished with tool_calls.")
+
+
+        return None # No text delta in this chunk or only tool call chunk part
+
+    # --- SDK Error Handling (remains the same) ---
     def _get_sdk_exception_types(self) -> Tuple[Type[Exception], ...]:
         return (
             openai.APIConnectionError,
             openai.RateLimitError,
             openai.APIStatusError,
-            openai.APIError
+            openai.APIError # Catch broader SDK errors too
         )
 
     def _extract_error_details(self, error: Exception) -> Tuple[Optional[int], str]:
         status_code = getattr(error, 'status_code', None)
         message = getattr(error, 'message', str(error)) # Default message
 
-        # Try to get more specific message from OpenAI's error response text/body
         if isinstance(error, openai.APIStatusError):
             try:
-                # Response might be JSON containing more details
                 error_details = error.response.json()
                 message = error_details.get('error', {}).get('message', message)
-            except: # Handle cases where response is not JSON or parsing fails
-                message = error.response.text or message # Fallback to raw text
+            except Exception: # Handle cases where response is not JSON or parsing fails
+                 # Try getting raw text, fallback to original message
+                 message = getattr(error.response, 'text', message) or message
 
         return status_code, message
 
-    # chat_completion and stream_chat_completion are inherited
+    # chat_completion and stream_chat_completion are inherited from BaseClient
+    # The modifications in _execute_api_call and _process_response adapt them.

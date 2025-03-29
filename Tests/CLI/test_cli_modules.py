@@ -65,10 +65,17 @@ def test_api_client_modules_can_be_imported(project_root: Path):
         full_module_path = f"Clients.API.{module_name}"
 
         try:
-            # Mock the base client import within the API client to avoid API key errors during import testing
-            # Adjust mock target based on actual import statement in client files
-            with mock.patch('Clients.API.' + module_name + '.BaseClient'):
-                 importlib.import_module(full_module_path)
+            # Mock the base client imports and related modules to avoid API key errors during import testing
+            mocks = [
+                mock.patch('Clients.API.' + module_name + '.BaseClient'),
+                mock.patch('Clients.base.BaseClient'),
+                mock.patch('Clients.API.' + module_name + '.openai', create=True),
+                mock.patch('openai.AsyncOpenAI', create=True),
+                mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "fake_key", "ANTHROPIC_API_KEY": "fake_key"})
+            ]
+            
+            with mock.patch.multiple('', **{m.target: m.new for m in mocks}):
+                importlib.import_module(full_module_path)
             # Test successful if import didn't raise exception
         except ImportError as e:
             pytest.fail(f"Failed to import client module {full_module_path}: {e}\nCheck sys.path and dependencies.")

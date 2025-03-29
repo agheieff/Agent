@@ -10,32 +10,65 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 def remove_comments_and_excess_whitespace(source: str) -> str:
+    """
+    Removes Python comments using tokenize.tokenize and cleans up blank lines.
+
+    Args:
+        source: The source code as a string.
+
+    Returns:
+        The source code without comments, or the original source on error.
+    """
     cleaned_tokens = []
     try:
-        tokens = tokenize.generate_tokens(io.BytesIO(source.encode('utf-8')).readline)
+        source_bytes = source.encode('utf-8')
+        byte_stream = io.BytesIO(source_bytes)
+        # Use tokenize.tokenize which reads bytes directly
+        tokens = tokenize.tokenize(byte_stream.readline)
 
         for token_info in tokens:
             tok_type = token_info.type
-            if tok_type == tokenize.COMMENT:
+
+            # Skip comments AND the encoding cookie often added by tokenize.tokenize
+            if tok_type == tokenize.COMMENT or tok_type == tokenize.ENCODING:
                 continue
+
             cleaned_tokens.append(token_info)
 
     except tokenize.TokenError as e:
-        logger.error(f"Failed to tokenize source: {e}")
-        return source
+        # This might catch issues like unterminated strings within the source
+        logger.error(f"TokenError during tokenization: {e}")
+        return source # Return original source on tokenization error
     except Exception as e:
-        logger.error(f"An unexpected error occurred during tokenization: {e}")
+        # Log the actual exception which might be more helpful
+        logger.error(f"An unexpected error occurred during tokenization: {e}", exc_info=True)
         return source
 
     try:
+        # Reconstruct the source code from the non-comment tokens
+        # untokenize expects token type and string; it should return a string.
         cleaned_source = tokenize.untokenize(cleaned_tokens)
+        # Just in case untokenize returns bytes (less common now, but for safety)
+        if isinstance(cleaned_source, bytes):
+            cleaned_source = cleaned_source.decode('utf-8')
+
     except Exception as e:
         logger.error(f"Failed to untokenize source: {e}")
-        return source
+        return source # Return original on untokenize error
 
+    # Cleanup of potentially fully empty lines resulted from comment removal
     lines = cleaned_source.splitlines()
+    # Keep lines that contain *something* other than whitespace
     non_empty_lines = [line for line in lines if line.strip()]
-    return "\n".join(non_empty_lines) + "\n"
+
+    # Handle edge cases where the file becomes empty or was empty
+    if not non_empty_lines and lines: # Original file wasn't empty but now is
+         return "\n" # Return a single newline for non-empty original files that become empty
+    elif not non_empty_lines and not lines: # Original file was empty
+        return "" # Return empty string for empty original files
+    else:
+        # Join remaining lines and add a single trailing newline
+        return "\n".join(non_empty_lines) + "\n"
 
 
 def process_file(filepath: Path, dry_run: bool = False) -> bool:
@@ -72,7 +105,6 @@ def process_file(filepath: Path, dry_run: bool = False) -> bool:
 
 
 def main():
-    # Determine the directory containing this script and its parent
     script_dir = Path(__file__).parent.resolve()
     default_target_dir = script_dir.parent
 
@@ -83,7 +115,6 @@ def main():
     parser.add_argument(
         "directory",
         nargs="?",
-        # Default to the parent directory of the script
         default=str(default_target_dir),
         help=f"The root directory to scan for .py files (default: parent directory '{default_target_dir}')"
     )
@@ -114,35 +145,32 @@ def main():
 
     modified_count = 0
     processed_count = 0
-
-    # Exclude the script's own directory if it's within the target directory
-    # (though usually it won't be since we start one level up)
-    script_dir_relative = None
-    try:
-        script_dir_relative = script_dir.relative_to(start_dir)
-    except ValueError:
-        pass # Script directory is not inside start_dir
+    script_path = Path(__file__).resolve() # Get absolute path of the script
 
     for root, dirs, files in os.walk(start_dir):
         current_dir = Path(root)
 
-        # Skip .venv directories
-        if ".venv" in current_dir.parts:
-            logger.debug(f"Skipping directory: {current_dir} (virtual environment)")
-            # Prevent os.walk from descending further into .venv
-            dirs[:] = [d for d in dirs if d != ".venv"]
+        # Prevent descending into .venv
+        if ".venv" in dirs:
+            dirs.remove(".venv")
+            logger.debug(f"Skipping descent into: {current_dir / '.venv'}")
+
+        # Prevent descending into the script's own directory if it's under start_dir
+        # This check is more relevant if the script is placed within the target structure
+        if script_dir.is_relative_to(start_dir) and current_dir == script_dir:
+            logger.debug(f"Skipping script's own directory: {current_dir}")
+            dirs[:] = [] # Clear dirs for this path so os.walk doesn't proceed
             continue
 
-        # Skip the script's own directory if applicable
-        if script_dir_relative and Path(root).resolve() == script_dir.resolve():
-             logger.debug(f"Skipping script's own directory: {current_dir}")
-             dirs[:] = [] # Don't descend further into script's dir
-             continue
-
         for filename in files:
-            if filename.endswith(".py") and Path(root) / filename != Path(__file__).resolve(): # Ensure we don't process the script itself
-                processed_count += 1
+            if filename.endswith(".py"):
                 filepath = current_dir / filename
+                # Explicitly skip processing the script itself
+                if filepath.resolve() == script_path:
+                    logger.debug(f"Skipping self: {filepath}")
+                    continue
+
+                processed_count += 1
                 if process_file(filepath, args.dry_run):
                     modified_count += 1
 

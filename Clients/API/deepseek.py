@@ -7,9 +7,7 @@ from typing import Dict, List, Optional, Any, AsyncIterator, Union, Tuple, Type
 
 # Use relative imports within the package
 from ..base import BaseClient, ProviderConfig, ModelConfig, PricingTier, Message
-# Import ArgumentDefinition for type hint in helper
-from ...MCP.Operations.base import ArgumentDefinition
-
+# Removed: from ...MCP.Operations.base import ArgumentDefinition # <-- REMOVED
 
 # --- Configuration (Keep as is per user request, with minor corrections) ---
 # (DEEPSEEK_CONFIG remains the same as provided)
@@ -42,7 +40,8 @@ logger = logging.getLogger(__name__)
 
 # --- Helper Function for Function Calling ---
 
-def _arguments_to_json_schema(arguments: List[ArgumentDefinition]) -> Dict[str, Any]:
+# FIX 2: Removed List[ArgumentDefinition] type hint here
+def _arguments_to_json_schema(arguments: List[Any]) -> Dict[str, Any]:
     """Converts a list of MCP ArgumentDefinitions to JSON Schema for OpenAI tools."""
     properties = {}
     required_args = []
@@ -58,15 +57,21 @@ def _arguments_to_json_schema(arguments: List[ArgumentDefinition]) -> Dict[str, 
     }
 
     for arg in arguments:
-        schema_type = type_mapping.get(arg.type, 'string') # Default to string if unknown
-        prop_definition = {"type": schema_type, "description": arg.description}
-        # Add default value to schema if specified (OpenAI doesn't directly use this, but good practice)
-        # Pydantic model generated later handles the default logic during validation.
-        # if arg.default is not None:
-        #     prop_definition["default"] = arg.default
-        properties[arg.name] = prop_definition
-        if arg.required:
-            required_args.append(arg.name)
+        # Access attributes using getattr for safety if type hint is removed
+        arg_name = getattr(arg, 'name', None)
+        arg_type = getattr(arg, 'type', 'string') # Default if missing
+        arg_description = getattr(arg, 'description', '')
+        arg_required = getattr(arg, 'required', False)
+
+        if arg_name is None:
+             logger.warning(f"Skipping argument definition missing 'name': {arg}")
+             continue
+
+        schema_type = type_mapping.get(arg_type, 'string') # Default to string if unknown
+        prop_definition = {"type": schema_type, "description": arg_description}
+        properties[arg_name] = prop_definition
+        if arg_required:
+            required_args.append(arg_name)
 
     return {
         "type": "object",
@@ -105,18 +110,19 @@ class DeepSeekClient(BaseClient):
         # (Implementation remains the same as provided before)
         formatted = []
         for msg in messages:
-             # Skip system prompt if handled separately (though OpenAI usually wants it first)
-             # if msg.role == "system": continue # Optional: skip if handled via 'tools' or elsewhere
+            # Skip system prompt if handled separately (though OpenAI usually wants it first)
+            # if msg.role == "system": continue # Optional: skip if handled via 'tools' or elsewhere
 
-             if isinstance(msg.content, str):
+            if isinstance(msg.content, str):
                 formatted.append({"role": msg.role, "content": msg.content})
-             else:
+            else:
                 # Handle potential complex content (e.g., images) - currently log/convert
                 logger.warning(f"Unsupported content type {type(msg.content)} in DeepSeek message, converting to string.")
                 formatted.append({"role": msg.role, "content": str(msg.content)})
         if not formatted:
             logger.error("Cannot make OpenAI-compatible API call with empty formatted messages.")
-            return None # Indicate formatting failure
+            # Returning empty list instead of None to avoid downstream errors expecting list
+            return []
         return formatted
 
     async def _execute_api_call(
@@ -137,30 +143,42 @@ class DeepSeekClient(BaseClient):
             try:
                 # Import dynamically inside method to avoid circular dependency at module level
                 # And ensure registry is populated when called
-                from ...MCP.registry import operation_registry
+                from ..MCP.registry import operation_registry # Adjusted import path
                 all_ops = operation_registry.get_all() # Ensure discovery ran
                 if not all_ops:
-                     logger.warning("MCP Operation Registry is empty. Cannot generate tools for DeepSeek.")
+                    logger.warning("MCP Operation Registry is empty. Cannot generate tools for DeepSeek.")
                 else:
+                    ops_for_tool_gen = []
                     for op_name, op_instance in all_ops.items():
                         # Exclude finish_goal from being presented as a callable tool
                         if op_name == "finish_goal":
                             continue
                         # Ensure op_instance has required attributes
                         op_desc = getattr(op_instance, 'description', f'Operation {op_name}')
-                        op_args_defs = getattr(op_instance, 'arguments', [])
+                        # Ensure arguments attribute exists and is iterable
+                        op_args_defs_raw = getattr(op_instance, 'arguments', [])
+                        op_args_defs = list(op_args_defs_raw) if isinstance(op_args_defs_raw, (list, tuple)) else []
 
-                        tools_param.append({
-                            "type": "function",
-                            "function": {
-                                "name": op_name,
-                                "description": op_desc,
-                                "parameters": _arguments_to_json_schema(op_args_defs)
-                            }
+                        ops_for_tool_gen.append({
+                            "name": op_name,
+                            "description": op_desc,
+                            "arguments": op_args_defs # Pass the actual list of arg definitions
                         })
-                    if tools_param: # Only set tool_choice if tools are actually available
-                        tool_choice_param = "auto"
-                        logger.debug(f"Generated {len(tools_param)} tools for DeepSeek API call.")
+
+                    # Generate JSON schema from collected definitions
+                    if ops_for_tool_gen:
+                         for op_data in ops_for_tool_gen:
+                              tools_param.append({
+                                   "type": "function",
+                                   "function": {
+                                        "name": op_data["name"],
+                                        "description": op_data["description"],
+                                        "parameters": _arguments_to_json_schema(op_data["arguments"]) # Call helper here
+                                   }
+                              })
+                         tool_choice_param = "auto"
+                         logger.debug(f"Generated {len(tools_param)} tools for DeepSeek API call.")
+
 
             except ImportError:
                 logger.error("Could not import MCP Operation Registry. Function calling disabled.")
@@ -185,15 +203,17 @@ class DeepSeekClient(BaseClient):
         valid_extra_params = {"top_p", "frequency_penalty", "presence_penalty", "stop"}
         # Add tool parameters to the list of known valid keys
         valid_keys = set(params.keys()) | valid_extra_params | {"tools", "tool_choice"}
-        for key in list(kwargs.keys()): # Iterate over original kwargs passed in
-             if key not in valid_keys and key not in ["max_tokens", "temperature"]: # Check against ALL valid keys
-                  logger.warning(f"Ignoring unsupported parameter for DeepSeek/OpenAI: {key}")
-                  # Don't remove from params here, kwargs are already unpacked
-                  # If BaseClient adds unexpected things to kwargs, handle there.
+        final_params = {k: v for k, v in params.items() if k in valid_keys or k in ["messages", "model", "stream", "max_tokens", "temperature"]}
 
-        logger.debug(f"Calling DeepSeek API with params: {params}")
+        # Log removed keys if any
+        removed_keys = set(params.keys()) - set(final_params.keys())
+        if removed_keys:
+             logger.warning(f"Ignoring unsupported parameters for DeepSeek/OpenAI: {removed_keys}")
+
+
+        logger.debug(f"Calling DeepSeek API with params: {final_params}")
         # Make the SDK call (let BaseClient handle exceptions)
-        response = await self.client.chat.completions.create(**params)
+        response = await self.client.chat.completions.create(**final_params) # Use filtered params
 
         # Log usage for non-streaming immediately (remains the same)
         if not stream and isinstance(response, openai.types.chat.ChatCompletion) and response.usage:
@@ -296,11 +316,22 @@ class DeepSeekClient(BaseClient):
 
         if isinstance(error, openai.APIStatusError):
             try:
-                error_details = error.response.json()
-                message = error_details.get('error', {}).get('message', message)
+                # Access response attribute directly if available
+                response = getattr(error, 'response', None)
+                if response:
+                    error_details = response.json()
+                    message = error_details.get('error', {}).get('message', message)
+                else: # Fallback if response attribute missing
+                     body = getattr(error, 'body', None)
+                     if isinstance(body, dict) and 'error' in body:
+                          message = body.get('error',{}).get('message', message)
+
             except Exception: # Handle cases where response is not JSON or parsing fails
                  # Try getting raw text, fallback to original message
-                 message = getattr(error.response, 'text', message) or message
+                 response = getattr(error, 'response', None)
+                 if response:
+                      message = getattr(response, 'text', message) or message
+                 # Fallback to default message if all else fails
 
         return status_code, message
 

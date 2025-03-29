@@ -303,7 +303,7 @@ class AgentRunner:
         Runs the main autonomous loop for the agent.
         (Implementation remains the same - uses other refactored methods)
         """
-        # ... (code is identical to the provided version) ...
+        # ... (code is identical to the provided version, EXCEPT for the change below) ...
         logger.info(f"Starting autonomous run for agent '{self.agent_id}'. Goal: {self.goal}")
         step_count = 0
         final_summary = None
@@ -317,7 +317,9 @@ class AgentRunner:
                 logger.info("Added initial user goal message to history.")
             logger.debug(f"Messages for LLM Call {step_count}:\n{[{'role': m.role, 'content': str(m.content)} for m in messages_for_llm]}")
             try:
-                logger.info("Agent thinking...")
+                # FIX 3: Change logger.info to print for test capture
+                print("Agent thinking...") # Ensures output is captured by capsys
+                # logger.info("Agent thinking...") # Original line
                 llm_response_text = await self.client.chat_completion(messages=messages_for_llm)
                 logger.debug(f"LLM Raw Response Text: <<<{llm_response_text}>>>")
                 if not llm_response_text or not llm_response_text.strip():

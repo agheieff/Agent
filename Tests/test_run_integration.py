@@ -1,3 +1,4 @@
+# File: /Tests/test_run_integration.py
 import os
 import pytest
 import asyncio
@@ -14,7 +15,7 @@ try:
     from run import run_agent_session, SessionConfig
     from Clients import Message, BaseClient, ProviderConfig, ModelConfig, PricingTier, get_client
     from Core import AgentRunner
-    from Core.agent_runner import DEFAULT_MCP_TIMEOUT # Import default timeout
+    from Core.agent_runner import AgentRunResult, DEFAULT_MCP_TIMEOUT # Import default timeout
     from MCP.models import MCPSuccessResponse, MCPErrorResponse
     from MCP.errors import ErrorCode
 except ImportError as e:
@@ -145,7 +146,9 @@ async def test_run_mcp_call_then_finish(mock_llm_client, mock_mcp_execution, cap
 
     # Mock LLM Responses (Sequence)
     read_call_json = f"""```json\n{{\n"mcp_operation": {{\n"operation_name": "read_file",\n"arguments": {{"path": "{target_file}"}}\n}}\n}}\n```"""
-    finish_call_json = """```json\n{{\n"mcp_operation": {{\n"operation_name": "finish_goal",\n"arguments": {"summary": "Read file successfully."}\n}}\n}}\n```"""
+    # ---- FIX: Corrected JSON formatting (removed extra braces) ----
+    finish_call_json = """```json\n{\n"mcp_operation": {\n"operation_name": "finish_goal",\n"arguments": {"summary": "Read file successfully."}\n}\n}\n```"""
+    # ---------------------------------------------------------------
     mock_llm_client.chat_completion.side_effect = [read_call_json, finish_call_json]
 
     # Mock MCP Response
@@ -169,7 +172,7 @@ async def test_run_mcp_call_then_finish(mock_llm_client, mock_mcp_execution, cap
     # Check history passed to second LLM call contains the system message with MCP result
     second_call_args = mock_llm_client.chat_completion.call_args_list[1]
     messages_for_second_call = second_call_args.kwargs['messages']
-    success_pattern_found = any("MCP Operation Successful" in msg.content and "File content here" in msg.content for msg in messages_for_second_call)
+    success_pattern_found = any("MCP Operation Successful" in msg.content and "File content here" in msg.content for msg in messages_for_second_call if msg.role == 'system')
     assert success_pattern_found, "Expected MCP result message not found in history"
 
     # Check logs/output (adjust based on AgentRunner logging)
@@ -189,7 +192,9 @@ async def test_run_ask_user_then_finish(mock_llm_client, mock_mcp_execution, cap
 
     # Mock LLM Responses
     ask_question_text = "Should I proceed with the important action?"
-    finish_call_json = """```json\n{{\n"mcp_operation": {{\n"operation_name": "finish_goal",\n"arguments": {"summary": "User confirmed action."}\n}}\n}}\n```"""
+    # ---- FIX: Corrected JSON formatting (removed extra braces) ----
+    finish_call_json = """```json\n{\n"mcp_operation": {\n"operation_name": "finish_goal",\n"arguments": {"summary": "User confirmed action."}\n}\n}\n```"""
+    # ---------------------------------------------------------------
     mock_llm_client.chat_completion.side_effect = [ask_question_text, finish_call_json]
 
     # Mock User Input - Patch the helper in run.py

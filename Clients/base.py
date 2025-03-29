@@ -170,24 +170,28 @@ class BaseClient:
     async def close(self):
         """Clean up resources, like the provider's SDK client if needed."""
         if self.client:
+            client_to_close = self.client
+            self.client = None # Prevent trying to close again if errors occur
             try:
                 logger.debug(f"Attempting to close provider client for {self.config.name}...")
-                if hasattr(self.client, 'aclose') and callable(self.client.aclose):
-                    if asyncio.iscoroutinefunction(self.client.aclose) or asyncio.iscoroutine(self.client.aclose()):
-                        await self.client.aclose()
+                # ----- FIX 2: Prioritize aclose -----
+                if hasattr(client_to_close, 'aclose') and callable(client_to_close.aclose):
+                    # Ensure it's awaited if it's a coroutine function/object
+                    if asyncio.iscoroutinefunction(client_to_close.aclose) or asyncio.iscoroutine(client_to_close.aclose()):
+                        await client_to_close.aclose()
                     else:
-                        self.client.aclose() # type: ignore
+                        # If it's callable but not async, call it directly (less likely for aclose)
+                        client_to_close.aclose() # type: ignore
                     logger.info(f"{self.config.name} client closed via aclose().")
-                elif hasattr(self.client, 'close') and callable(self.client.close):
-                    # Run sync close in thread pool
-                    await asyncio.to_thread(self.client.close)
+                # ----- Fallback to sync close -----
+                elif hasattr(client_to_close, 'close') and callable(client_to_close.close):
+                    await asyncio.to_thread(client_to_close.close)
                     logger.info(f"{self.config.name} client closed via close().")
                 else:
                     logger.debug(f"Provider client for {self.config.name} has no 'aclose' or 'close' method.")
             except Exception as e:
                 logger.error(f"Error closing provider ({self.config.name}) client: {e}", exc_info=True)
-            finally:
-                self.client = None # Ensure client is marked as closed
+                # Do not set self.client back here, keep it None
 
     def get_available_models(self) -> List[str]:
         """Returns a list of *internal* model keys configured for this provider."""

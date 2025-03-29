@@ -87,9 +87,9 @@ async def discover_and_validate_providers() -> List[str]:
             logger.error(f"✗ Unexpected error validating provider '{provider_name}': {e}", exc_info=False)
         finally:
             if temp_client and hasattr(temp_client, 'close'): # Ensure close is attempted even on some errors
-                 try:
+                try:
                     await temp_client.close()
-                 except Exception: # Ignore close errors during validation
+                except Exception: # Ignore close errors during validation
                     pass
 
     return sorted(valid_providers)
@@ -208,15 +208,12 @@ async def setup_session_interactively(
                     await temp_client.close()
                     logger.debug("Temporary client closed after model selection.")
 
-        # --- Goal Input ---
         if not goal:
             goal = await prompt_for_multiline_input("Please enter the goal for the agent:")
             if not goal:
                 print("Goal input cancelled or empty.")
                 return None
-            logger.info(f"User entered goal: {goal[:100]}...")
 
-        # --- Environment/Config Variables ---
         mcp_url = os.getenv("MCP_SERVER_URL")
         mcp_timeout = float(os.getenv("MCP_TIMEOUT", DEFAULT_MCP_TIMEOUT))
 
@@ -259,8 +256,6 @@ async def run_agent_session(session_config: SessionConfig):
     agent_runner: Optional[AgentRunner] = None
 
     try:
-        # --- Initialize LLM Client ---
-        logger.info(f"Initializing LLM client for provider: {session_config.provider}")
         try:
             # Initialize the actual client instance for the run
             llm_client = await asyncio.to_thread(get_client, session_config.provider)
@@ -325,14 +320,22 @@ async def run_agent_session(session_config: SessionConfig):
         print(f"\nSYSTEM ERROR: An unexpected error occurred during execution: {e}")
     finally:
         # --- Cleanup ---
-        if agent_runner:
-            await agent_runner.close()
-            logger.info("AgentRunner resources closed.")
-        elif llm_client: # If runner failed but client existed
-            await llm_client.close()
-            logger.info("LLM Client resources closed.")
-        else:
-            logger.info("Run finished (Cleanup skipped, client/runner may not have initialized).")
+        try:
+            if agent_runner:
+                await agent_runner.close()
+                logger.info("AgentRunner resources closed.")
+            elif llm_client: # If runner failed but client existed
+                await llm_client.close()
+                logger.info("LLM Client resources closed.")
+            else:
+                logger.info("Run finished (Cleanup skipped, client/runner may not have initialized).")
+
+            # ----- FIX 3: Add small sleep before fully exiting -----
+            await asyncio.sleep(0.01)
+            # -------------------------------------------------------
+        except Exception as cleanup_err:
+            logger.error(f"Error during cleanup: {cleanup_err}", exc_info=True)
+
 
 # --- Argument Parsing and Main Execution ---
 async def main():

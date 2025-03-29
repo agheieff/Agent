@@ -64,8 +64,8 @@ def _arguments_to_json_schema(arguments: List[Any]) -> Dict[str, Any]:
         arg_required = getattr(arg, 'required', False)
 
         if arg_name is None:
-             logger.warning(f"Skipping argument definition missing 'name': {arg}")
-             continue
+            logger.warning(f"Skipping argument definition missing 'name': {arg}")
+            continue
 
         schema_type = type_mapping.get(arg_type, 'string') # Default to string if unknown
         prop_definition = {"type": schema_type, "description": arg_description}
@@ -143,7 +143,9 @@ class DeepSeekClient(BaseClient):
             try:
                 # Import dynamically inside method to avoid circular dependency at module level
                 # And ensure registry is populated when called
-                from ..MCP.registry import operation_registry # Adjusted import path
+                # ----- FIX 1: Use absolute import -----
+                from MCP.registry import operation_registry # Use absolute import
+                # --------------------------------------
                 all_ops = operation_registry.get_all() # Ensure discovery ran
                 if not all_ops:
                     logger.warning("MCP Operation Registry is empty. Cannot generate tools for DeepSeek.")
@@ -167,23 +169,28 @@ class DeepSeekClient(BaseClient):
 
                     # Generate JSON schema from collected definitions
                     if ops_for_tool_gen:
-                         for op_data in ops_for_tool_gen:
-                              tools_param.append({
-                                   "type": "function",
-                                   "function": {
-                                        "name": op_data["name"],
-                                        "description": op_data["description"],
-                                        "parameters": _arguments_to_json_schema(op_data["arguments"]) # Call helper here
-                                   }
-                              })
-                         tool_choice_param = "auto"
-                         logger.debug(f"Generated {len(tools_param)} tools for DeepSeek API call.")
+                        for op_data in ops_for_tool_gen:
+                            tools_param.append({
+                                "type": "function",
+                                "function": {
+                                    "name": op_data["name"],
+                                    "description": op_data["description"],
+                                    "parameters": _arguments_to_json_schema(op_data["arguments"]) # Call helper here
+                                }
+                            })
+                        tool_choice_param = "auto"
+                        logger.debug(f"Generated {len(tools_param)} tools for DeepSeek API call.")
 
-
-            except ImportError:
-                logger.error("Could not import MCP Operation Registry. Function calling disabled.")
+            # ----- FIX 1: Catch potential ImportError here too -----
+            except ImportError as e:
+                logger.error(f"Could not import MCP Operation Registry (ImportError: {e}). Function calling disabled.")
+                tools_param = [] # Ensure params are empty on failure
+                tool_choice_param = None
+            # ------------------------------------------------------
             except Exception as e:
                 logger.error(f"Error generating tools for DeepSeek API: {e}", exc_info=True)
+                tools_param = [] # Ensure params are empty on failure
+                tool_choice_param = None
         # --- End Tool Setup ---
 
         params = {
@@ -208,7 +215,7 @@ class DeepSeekClient(BaseClient):
         # Log removed keys if any
         removed_keys = set(params.keys()) - set(final_params.keys())
         if removed_keys:
-             logger.warning(f"Ignoring unsupported parameters for DeepSeek/OpenAI: {removed_keys}")
+            logger.warning(f"Ignoring unsupported parameters for DeepSeek/OpenAI: {removed_keys}")
 
 
         logger.debug(f"Calling DeepSeek API with params: {final_params}")
@@ -219,7 +226,7 @@ class DeepSeekClient(BaseClient):
         if not stream and isinstance(response, openai.types.chat.ChatCompletion) and response.usage:
             logger.info(f"DeepSeek API Usage: Input={response.usage.prompt_tokens}, Output={response.usage.completion_tokens}, Total={response.usage.total_tokens}")
             if response.choices and response.choices[0].finish_reason == 'tool_calls':
-                 logger.info("DeepSeek API call finished with tool_calls.")
+                logger.info("DeepSeek API call finished with tool_calls.")
 
         return response
 
@@ -266,11 +273,11 @@ class DeepSeekClient(BaseClient):
         if message.content:
             return message.content.strip()
         else:
-             # If no tool call and no content, return empty
-             # Log the finish reason if available and potentially informative
-             finish_reason = response.choices[0].finish_reason
-             logger.warning(f"Received choice but no message content or tool calls from DeepSeek/OpenAI. Finish reason: {finish_reason}")
-             return ""
+            # If no tool call and no content, return empty
+            # Log the finish reason if available and potentially informative
+            finish_reason = response.choices[0].finish_reason
+            logger.warning(f"Received choice but no message content or tool calls from DeepSeek/OpenAI. Finish reason: {finish_reason}")
+            return ""
 
 
     def _process_stream_chunk(self, chunk: openai.types.chat.ChatCompletionChunk) -> Optional[str]:
@@ -286,17 +293,17 @@ class DeepSeekClient(BaseClient):
 
             # --- Basic Logging for Tool Call Chunks (Full reconstruction not implemented) ---
             if delta and delta.tool_calls:
-                 logger.debug(f"Received tool_call chunk delta: {delta.tool_calls}")
-                 # To fully support streaming tool calls, need to accumulate chunks here
-                 # and yield the formatted MCP JSON once a full call is received.
-                 # For Phase 1, relying on non-streaming tool calls via _process_response.
+                logger.debug(f"Received tool_call chunk delta: {delta.tool_calls}")
+                # To fully support streaming tool calls, need to accumulate chunks here
+                # and yield the formatted MCP JSON once a full call is received.
+                # For Phase 1, relying on non-streaming tool calls via _process_response.
 
             # Log finish reason if present in the chunk delta
             finish_reason = chunk.choices[0].finish_reason
             if finish_reason:
                 logger.debug(f"Stream chunk indicates finish_reason: {finish_reason}")
                 if finish_reason == 'tool_calls':
-                     logger.info("Stream finished with tool_calls.")
+                    logger.info("Stream finished with tool_calls.")
 
 
         return None # No text delta in this chunk or only tool call chunk part
@@ -322,16 +329,16 @@ class DeepSeekClient(BaseClient):
                     error_details = response.json()
                     message = error_details.get('error', {}).get('message', message)
                 else: # Fallback if response attribute missing
-                     body = getattr(error, 'body', None)
-                     if isinstance(body, dict) and 'error' in body:
-                          message = body.get('error',{}).get('message', message)
+                    body = getattr(error, 'body', None)
+                    if isinstance(body, dict) and 'error' in body:
+                        message = body.get('error',{}).get('message', message)
 
             except Exception: # Handle cases where response is not JSON or parsing fails
-                 # Try getting raw text, fallback to original message
-                 response = getattr(error, 'response', None)
-                 if response:
-                      message = getattr(response, 'text', message) or message
-                 # Fallback to default message if all else fails
+                # Try getting raw text, fallback to original message
+                response = getattr(error, 'response', None)
+                if response:
+                    message = getattr(response, 'text', message) or message
+                # Fallback to default message if all else fails
 
         return status_code, message
 

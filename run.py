@@ -237,7 +237,10 @@ async def setup_session_interactively(
             logger.info(f"User provided goal: {goal[:100]}...") # Log truncated goal
 
         # --- MCP Config ---
-        mcp_url = os.getenv("MCP_SERVER_URL")
+        mcp_url = os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8000/mcp") 
+        # Default to http:// if URL is supplied without protocol
+        if mcp_url and not (mcp_url.startswith("http://") or mcp_url.startswith("https://")):
+            mcp_url = "http://" + mcp_url
         mcp_timeout = float(os.getenv("MCP_TIMEOUT", DEFAULT_MCP_TIMEOUT))
 
         if not mcp_url:
@@ -388,8 +391,10 @@ async def run_agent_session(session_config: SessionConfig):
                 # Changed from INFO to DEBUG
                 logger.debug("Run finished (Cleanup skipped, client/runner may not have initialized).")
 
-            # Add small sleep before fully exiting (Keep this from previous fix)
-            await asyncio.sleep(0.01)
+            # Make sure all tasks have completed
+            logger.debug("Sleeping to ensure all coroutines have a chance to complete...")
+            await asyncio.sleep(0.5)
+            logger.debug("Sleep complete.")
         except Exception as cleanup_err:
             # Keep error log for cleanup errors
             logger.error(f"Error during cleanup: {cleanup_err}", exc_info=True)

@@ -49,6 +49,19 @@ class AnthropicClient(BaseClient):
         # Call BaseClient's __init__ to handle common setup (API key, SDK check)
         super().__init__(effective_config)
         # BaseClient handles setting self.default_model
+        
+    async def close(self):
+        """Override to properly close the AsyncAnthropic client"""
+        if self.client:
+            client_to_close = self.client
+            self.client = None
+            try:
+                logger.debug(f"Closing AsyncAnthropic client...")
+                # AsyncAnthropic has an async close method that needs to be awaited
+                await client_to_close.close()
+                logger.debug(f"AsyncAnthropic client closed successfully.")
+            except Exception as e:
+                logger.error(f"Error closing AsyncAnthropic client: {e}", exc_info=True)
 
     def _initialize_provider_client(self) -> anthropic.AsyncAnthropic:
         """(Sync) Initializes the Anthropic SDK client."""

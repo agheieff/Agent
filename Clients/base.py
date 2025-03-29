@@ -184,7 +184,7 @@ class BaseClient:
                 # Prioritize aclose if available and awaitable
                 if hasattr(client_to_close, 'aclose') and callable(client_to_close.aclose):
                     close_method = client_to_close.aclose
-                    if asyncio.iscoroutinefunction(close_method) or asyncio.iscoroutine(close_method()):
+                    if asyncio.iscoroutinefunction(close_method):
                          await close_method()
                     else:
                          close_method() # Call sync if not async

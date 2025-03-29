@@ -40,9 +40,9 @@ class AgentRunner:
     def __init__(self,
                  client: BaseClient,
                  goal: str,
-                 mcp_server_url: str, # Added MCP URL
+                 mcp_server_url: Optional[str] = None,
                  agent_id: Optional[str] = "autonomous-agent",
-                 mcp_timeout: float = DEFAULT_MCP_TIMEOUT, # Added MCP timeout
+                 mcp_timeout: float = DEFAULT_MCP_TIMEOUT,
                  max_steps: int = 10):
         """
         Initializes the AgentRunner.
@@ -51,14 +51,13 @@ class AgentRunner:
             client: An initialized instance of a BaseClient subclass (e.g., AnthropicClient).
             goal: The initial high-level goal for the agent.
             mcp_server_url: The URL of the running MCP server (e.g., "http://localhost:8000/mcp").
+                            Optional for test cases.
             agent_id: The ID to use when executing MCP operations (for permissions).
             mcp_timeout: Timeout in seconds for MCP requests.
             max_steps: The maximum number of iterations allowed (informational, loop controlled externally).
         """
         if not isinstance(client, BaseClient):
             raise TypeError("client must be an instance of BaseClient or its subclass.")
-        if not mcp_server_url:
-             raise ValueError("mcp_server_url must be provided.")
 
         self.client = client
         self.goal = goal
@@ -78,10 +77,10 @@ class AgentRunner:
         self._initialize_http_client() # Initialize the client for MCP calls
 
     def _initialize_http_client(self):
-         """Initializes the httpx client for MCP communication."""
-         if not self.http_client:
-             self.http_client = httpx.AsyncClient(timeout=self.mcp_timeout)
-             logger.info(f"Initialized shared HTTP client for MCP calls (Timeout: {self.mcp_timeout}s).")
+        """Initializes the httpx client for MCP communication."""
+        if not self.http_client and self.mcp_server_url:
+            self.http_client = httpx.AsyncClient(timeout=self.mcp_timeout)
+            logger.info(f"Initialized shared HTTP client for MCP calls (Timeout: {self.mcp_timeout}s).")
 
     async def close(self):
         """Closes the underlying LLM client and the internal HTTP client."""
@@ -133,7 +132,7 @@ class AgentRunner:
              self.history = []
 
 
-    def parse_llm_response(self, response_text: str) -> Optional[Dict[str, Any]]: # Renamed
+    def _parse_llm_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """
         Parses the LLM response text to find a valid MCP operation JSON block.
 
@@ -197,7 +196,7 @@ class AgentRunner:
             return None
 
 
-    def format_mcp_result(self, mcp_response: Union[MCPSuccessResponse, MCPErrorResponse]) -> Message: # Renamed
+    def _format_mcp_result(self, mcp_response: Union[MCPSuccessResponse, MCPErrorResponse]) -> Message:
         """
         Formats the result of an MCP operation into a Message object for conversation history.
 

@@ -1,6 +1,7 @@
 import importlib
 import os
 import logging
+import asyncio # Import asyncio
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, AsyncIterator, Union
 import httpx # Keep httpx here if subclasses *might* use it for other things, otherwise remove
@@ -86,9 +87,14 @@ class BaseClient:
 
         # Initialize the provider-specific SDK client
         try:
+            # _initialize_provider_client should return the SDK client instance
             self.client = self._initialize_provider_client()
-            if self.client is None:
-                 raise RuntimeError(f"_initialize_provider_client for {self.config.name} returned None.")
+            if self.client is None and self.config.requires_import: # If import required, client shouldn't be None
+                 # Added check: If an import is required, the provider client should be initialized.
+                 logger.warning(f"_initialize_provider_client for {self.config.name} returned None despite requiring import '{self.config.requires_import}'.")
+                 # Consider raising error here depending on strictness desired.
+                 # raise RuntimeError(f"_initialize_provider_client for {self.config.name} returned None.")
+
             logger.info(f"{self.config.name} client initialized successfully.")
         except Exception as e:
             logger.error(f"Failed to initialize {self.config.name} provider client: {e}", exc_info=True)
@@ -106,24 +112,40 @@ class BaseClient:
     async def close(self):
         """Clean up resources, like the provider's SDK client if needed."""
         closed_provider = False
-        if self.client:
+        client_to_close = self.client
+        if client_to_close: # Use a temporary variable to avoid issues if self.client is set to None concurrently
             try:
-                # Prefer async close if available
-                if hasattr(self.client, 'aclose'):
-                    await self.client.aclose()
-                    closed_provider = True
-                # Fallback to sync close
-                elif hasattr(self.client, 'close'):
-                    # Consider running sync close in thread pool if it blocks
+                logger.debug(f"Attempting to close provider client for {self.config.name}...")
+                # --- CORRECTED Logic ---
+                if hasattr(client_to_close, 'aclose'):
+                    # Check if it's awaitable
+                    if asyncio.iscoroutinefunction(client_to_close.aclose) or asyncio.iscoroutine(client_to_close.aclose):
+                        logger.debug("Using await client.aclose()")
+                        await client_to_close.aclose()
+                        closed_provider = True
+                    # If aclose exists but isn't async (unusual), try calling it
+                    elif callable(client_to_close.aclose):
+                         logger.debug("Using client.aclose() (sync)")
+                         client_to_close.aclose() # type: ignore
+                         closed_provider = True
+
+                elif hasattr(client_to_close, 'close') and callable(client_to_close.close):
+                    # Fallback to sync close if aclose doesn't exist
+                    # Consider running sync close in thread pool if it blocks significantly
                     # For simplicity here, just call it directly.
-                    self.client.close()
+                    logger.debug("Using client.close() (sync)")
+                    # await asyncio.to_thread(client_to_close.close) # Option for thread pool
+                    client_to_close.close()
                     closed_provider = True
-                # else: provider client has no close method
+                else:
+                     logger.debug(f"Provider client for {self.config.name} has no 'aclose' or 'close' method.")
+                # --- END CORRECTED Logic ---
+
             except Exception as e:
                 logger.error(f"Error closing provider ({self.config.name}) client: {e}", exc_info=True)
             finally:
                 # Set client to None regardless of close success/failure
-                self.client = None
+                self.client = None # Ensure it's set to None after attempting close
 
         if closed_provider:
             logger.info(f"{self.config.name} client resources closed.")
@@ -142,9 +164,9 @@ class BaseClient:
             raise ValueError(f"Model key '{effective_model_key}' not found in {self.config.name} configuration. Available keys: {self.get_available_models()}")
         # Ensure the returned object is indeed a ModelConfig instance (due to potential config structure issues)
         if not isinstance(model_conf, ModelConfig):
-             # This might happen if the config dict wasn't structured correctly initially
-             logger.error(f"Configuration for model key '{effective_model_key}' in {self.config.name} is not a valid ModelConfig object. Found: {type(model_conf)}")
-             raise TypeError(f"Invalid configuration type for model key '{effective_model_key}'. Expected ModelConfig.")
+            # This might happen if the config dict wasn't structured correctly initially
+            logger.error(f"Configuration for model key '{effective_model_key}' in {self.config.name} is not a valid ModelConfig object. Found: {type(model_conf)}")
+            raise TypeError(f"Invalid configuration type for model key '{effective_model_key}'. Expected ModelConfig.")
         return model_conf
 
     def _format_messages(self, messages: List[Message]) -> Any:

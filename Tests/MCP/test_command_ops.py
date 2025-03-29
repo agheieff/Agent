@@ -12,9 +12,9 @@ from MCP.errors import ErrorCode
 from MCP.permissions import PERMISSIONS_CONFIG
 
 # Define agents used in tests
-AGENT_ADMIN = "agent-admin"       # Has '*' permissions, should include execute_command
-AGENT_001 = "agent-001"         # Does NOT have execute_command permission by default
-AGENT_DEFAULT = None            # Does NOT have execute_command permission
+AGENT_ADMIN = "agent-admin"      # Has '*' permissions, should include execute_command
+AGENT_001 = "agent-001"          # Does NOT have execute_command permission by default
+AGENT_DEFAULT = None             # Does NOT have execute_command permission
 
 # Helper to get a platform-specific simple command
 def get_simple_command():
@@ -132,8 +132,8 @@ def test_execute_command_permission_denied_cwd(client: TestClient, test_payload_
     non_existent_dir = tmp_path / "i_do_not_exist"
 
     payload = test_payload_factory("execute_command",
-                                 args={"command": command, "working_directory": str(non_existent_dir)},
-                                 agent=AGENT_ADMIN)
+                                   args={"command": command, "working_directory": str(non_existent_dir)},
+                                   agent=AGENT_ADMIN)
     response = client.post("/mcp", json=payload)
 
     # This should fail validation because the directory doesn't exist
@@ -183,8 +183,8 @@ def test_execute_command_timeout(client: TestClient, test_payload_factory):
     command = get_sleep_command(sleep_time)
 
     payload = test_payload_factory("execute_command", args={"command": command, "timeout": timeout_limit}, agent=AGENT_ADMIN)
-    # Use a longer timeout for the HTTP request itself than the command timeout
-    response = client.post("/mcp", json=payload, timeout=timeout_limit + 5)
+    # Remove the timeout argument from client.post
+    response = client.post("/mcp", json=payload) # Removed timeout=timeout_limit + 5
 
     assert response.status_code == 504 # TIMEOUT maps to 504 Gateway Timeout
     data = response.json()
@@ -227,8 +227,8 @@ def test_execute_command_cwd_is_file(client: TestClient, test_payload_factory, a
     file_path.touch()
     command = get_simple_command()
     payload = test_payload_factory("execute_command",
-                                 args={"command": command, "working_directory": str(file_path)},
-                                 agent=AGENT_ADMIN)
+                                   args={"command": command, "working_directory": str(file_path)},
+                                   agent=AGENT_ADMIN)
     response = client.post("/mcp", json=payload)
 
     assert response.status_code == 400 # INVALID_ARGUMENTS

@@ -20,8 +20,8 @@ def remove_comments_and_excess_whitespace(source: str) -> str:
     Returns:
         The source code without comments, or the original source on error.
     """
-    cleaned_tokens_for_untokenize = []
-    preserved_shebang_token = None
+    tokens_for_body = []
+    preserved_shebang_string = None
     first_token_processed = False
 
     try:
@@ -33,29 +33,20 @@ def remove_comments_and_excess_whitespace(source: str) -> str:
             tok_type = token_info.type
             tok_string = token_info.string
 
-            # --- Shebang and Encoding Handling (First Token) ---
             if not first_token_processed:
                 first_token_processed = True
-                # Check if the first token is a comment starting with #!
                 if tok_type == tokenize.COMMENT and tok_string.startswith('#!'):
-                    preserved_shebang_token = token_info
+                    preserved_shebang_string = tok_string # Store the string directly
                     logger.debug("Preserving shebang.")
-                    continue # Skip adding shebang to list for untokenize initially
-                # Skip encoding cookie if it's the first token
+                    continue
                 elif tok_type == tokenize.ENCODING:
                     logger.debug("Skipping encoding token.")
                     continue
-                # If the first token isn't shebang or encoding, fall through to process normally
 
-            # --- Regular Comment/Encoding Skipping (After First Token) ---
-            if tok_type == tokenize.COMMENT:
-                continue # Skip regular comments
-            # Encoding shouldn't appear after first token, but skip just in case
-            if tok_type == tokenize.ENCODING:
+            if tok_type == tokenize.COMMENT or tok_type == tokenize.ENCODING:
                 continue
 
-            # Add all other valid tokens to the list for untokenize
-            cleaned_tokens_for_untokenize.append(token_info)
+            tokens_for_body.append(token_info)
 
     except tokenize.TokenError as e:
         logger.error(f"TokenError during tokenization: {e}")
@@ -65,44 +56,42 @@ def remove_comments_and_excess_whitespace(source: str) -> str:
         return source
 
     try:
-        # Reconstruct the source code *without* the shebang for now
-        cleaned_source_body = tokenize.untokenize(cleaned_tokens_for_untokenize)
-        if isinstance(cleaned_source_body, bytes):
-            cleaned_source_body = cleaned_source_body.decode('utf-8')
+        # Untokenize only the body tokens
+        cleaned_body = tokenize.untokenize(tokens_for_body)
+        if isinstance(cleaned_body, bytes):
+            cleaned_body = cleaned_body.decode('utf-8')
 
-        # --- Prepend Shebang if it was preserved ---
-        final_source_parts = []
-        if preserved_shebang_token:
-            final_source_parts.append(preserved_shebang_token.string) # Add shebang line
+        # Clean empty lines from the body *only*
+        body_lines = cleaned_body.splitlines()
+        non_empty_body_lines = [line for line in body_lines if line.strip()]
+        cleaned_body_no_empty = "\n".join(non_empty_body_lines)
 
-        # Add the rest of the cleaned code
-        final_source_parts.append(cleaned_source_body)
-        cleaned_source = "\n".join(final_source_parts)
+        # Reconstruct final source
+        final_parts = []
+        if preserved_shebang_string:
+            final_parts.append(preserved_shebang_string)
+
+        # Add cleaned body only if it's not empty
+        if cleaned_body_no_empty:
+             final_parts.append(cleaned_body_no_empty)
+
+        # Join parts with newline, add trailing newline if content exists
+        if final_parts:
+            final_source = "\n".join(final_parts) + "\n"
+        else:
+             # Handle case where original source might have only contained comments/whitespace
+             # or was empty to begin with
+             if source.strip(): # Original had non-whitespace content (likely just comments/shebang)
+                 final_source = "\n" # Return single newline if original wasn't truly empty
+             else:
+                 final_source = "" # Return empty if original was empty/whitespace only
+
 
     except Exception as e:
-        logger.error(f"Failed to untokenize source: {e}")
+        logger.error(f"Failed to untokenize or reconstruct source: {e}")
         return source
 
-    # Cleanup potentially fully empty lines resulted from comment removal
-    lines = cleaned_source.splitlines()
-    # Preserve the first line (shebang) if it exists, then filter rest
-    first_line = lines[0] if lines and preserved_shebang_token else None
-    non_empty_lines = [line for line in lines[(1 if first_line else 0):] if line.strip()]
-
-    # Reconstruct final output
-    output_lines = []
-    if first_line:
-        output_lines.append(first_line)
-    output_lines.extend(non_empty_lines)
-
-    # Handle edge cases for empty files
-    if not output_lines and lines: # Original file wasn't empty but now is (except shebang)
-        return (first_line + "\n") if first_line else "\n"
-    elif not output_lines and not lines: # Original file was empty
-        return ""
-    else:
-        # Join remaining lines and add a single trailing newline
-        return "\n".join(output_lines) + "\n"
+    return final_source
 
 
 def process_file(filepath: Path, dry_run: bool = False) -> bool:
@@ -112,7 +101,14 @@ def process_file(filepath: Path, dry_run: bool = False) -> bool:
         original_content = filepath.read_text(encoding='utf-8')
         cleaned_content = remove_comments_and_excess_whitespace(original_content)
 
+        # Normalize line endings in original content for comparison if needed
+        # original_content_normalized = "\n".join(original_content.splitlines()) + ("\n" if original_content.endswith(('\n', '\r\n')) else "")
+
+        # Compare, accounting for potential trailing newline differences if necessary
+        # For simplicity, let's compare directly first
         if original_content != cleaned_content:
+            # Optional: More robust check ignoring only trailing whitespace differences
+            # if original_content.rstrip() != cleaned_content.rstrip():
             changed = True
             if dry_run:
                 logger.info(f"[DRY RUN] Would modify: {filepath}")
@@ -123,6 +119,8 @@ def process_file(filepath: Path, dry_run: bool = False) -> bool:
                 except OSError as e:
                     logger.error(f"Failed to write changes to {filepath}: {e}")
                     changed = False
+            # else:
+            #     logger.debug(f"Content differs only by trailing whitespace/newlines: {filepath}")
         else:
             logger.debug(f"No changes needed for: {filepath}")
 
@@ -188,10 +186,19 @@ def main():
             dirs.remove(".venv")
             logger.debug(f"Skipping descent into: {current_dir / '.venv'}")
 
-        if script_dir.is_relative_to(start_dir) and current_dir == script_dir:
-             logger.debug(f"Skipping script's own directory: {current_dir}")
-             dirs[:] = []
-             continue
+        # Check if script_dir is a subdirectory of start_dir before checking equality
+        # This avoids errors if start_dir is higher up the tree than script_dir's parent
+        try:
+             is_relative = script_dir.relative_to(start_dir)
+             # Only skip if current_dir *is* script_dir
+             if current_dir == script_dir:
+                 logger.debug(f"Skipping script's own directory: {current_dir}")
+                 dirs[:] = []
+                 continue
+        except ValueError:
+             # script_dir is not under start_dir, no need to skip based on this check
+             pass
+
 
         for filename in files:
             if filename.endswith(".py"):

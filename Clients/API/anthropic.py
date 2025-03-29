@@ -69,7 +69,7 @@ class AnthropicClient(BaseClient):
         """Initializes the Anthropic SDK client."""
         # api_key check is done in BaseClient's __init__
         if not self.api_key: # Should not happen if BaseClient init worked
-             raise RuntimeError("API key not set during BaseClient initialization.")
+            raise RuntimeError("API key not set during BaseClient initialization.")
 
         try:
             # Use timeout/retries potentially set in __init__ before super() call
@@ -125,25 +125,24 @@ class AnthropicClient(BaseClient):
 
             # Merge with previous message if same role
             if formatted and formatted[-1]["role"] == msg.role:
-                 # Ensure previous content is a list before extending
-                 if isinstance(formatted[-1]["content"], list):
-                     formatted[-1]["content"].extend(content_list)
-                     logger.debug(f"Merging consecutive '{msg.role}' message content.")
-                 else:
-                     # This case shouldn't happen with current logic, but safeguard anyway
-                     logger.warning(f"Cannot merge content: Previous message content is not a list. Appending new message block.")
-                     formatted.append({"role": msg.role, "content": content_list})
+                # Ensure previous content is a list before extending
+                if isinstance(formatted[-1]["content"], list):
+                    formatted[-1]["content"].extend(content_list)
+                    logger.debug(f"Merging consecutive '{msg.role}' message content.")
+                else:
+                    # This case shouldn't happen with current logic, but safeguard anyway
+                    logger.warning(f"Cannot merge content: Previous message content is not a list. Appending new message block.")
+                    formatted.append({"role": msg.role, "content": content_list})
             else:
                 # Start a new message block
                 formatted.append({"role": msg.role, "content": content_list})
             last_role = msg.role
 
-        # 3. Validation: Anthropic requires the first message to be 'user' if history is not empty
-        if formatted and formatted[0]['role'] != 'user':
-            logger.error("Anthropic API Error: First message in history must be from the 'user' role.")
-            # Raise an error to prevent an invalid API call
-            raise ValueError("Conversation history for Anthropic must start with a 'user' message.")
-            # Alternative: logger.warning("First message is not 'user'. This will likely cause an API error.")
+        # 3. REMOVED Validation: Anthropic SDK handles this internally.
+        # The check below caused errors in valid multi-turn conversations.
+        # if formatted and formatted[0]['role'] != 'user':
+        #     logger.error("Anthropic API Error: First message in history must be from the 'user' role.")
+        #     raise ValueError("Conversation history for Anthropic must start with a 'user' message.")
 
         return formatted, system_prompt
 
@@ -231,8 +230,8 @@ class AnthropicClient(BaseClient):
             error_message = getattr(e, 'message', str(e))
             error_body = getattr(e, 'body', None)
             if isinstance(error_body, dict) and 'error' in error_body:
-                 # Anthropic often returns JSON like {'error': {'type': '...', 'message': '...'}}
-                 error_message = error_body.get('error', {}).get('message', error_message)
+                # Anthropic often returns JSON like {'error': {'type': '...', 'message': '...'}}
+                error_message = error_body.get('error', {}).get('message', error_message)
 
             logger.error(f"Anthropic API Status Error: {e.status_code} - {error_message}", exc_info=False) # exc_info=False to avoid redundant traceback
 
@@ -320,7 +319,7 @@ class AnthropicClient(BaseClient):
                     # Get final message details (including usage) after stream ends
                     # final_message = await stream.get_final_message() # Available in recent SDK versions
                     # if final_message and final_message.usage:
-                    #      logger.info(f"Stream Final Usage: Input={final_message.usage.input_tokens}, Output={final_message.usage.output_tokens}")
+                    #     logger.info(f"Stream Final Usage: Input={final_message.usage.input_tokens}, Output={final_message.usage.output_tokens}")
                     break # Exit the loop cleanly on message_stop
                 # Ignore other event types for simplicity (e.g., content_block_start/stop, ping)
 

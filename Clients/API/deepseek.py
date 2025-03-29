@@ -13,7 +13,7 @@ from ..base import BaseClient, ProviderConfig, ModelConfig, PricingTier, Message
 # (DEEPSEEK_CONFIG remains the same as provided)
 DEEPSEEK_CONFIG = ProviderConfig(
     name="deepseek",
-    api_base="[https://api.deepseek.com/v1](https://api.deepseek.com/v1)",
+    api_base="https://api.deepseek.com/v1",  # Fixed API base URL
     api_key_env="DEEPSEEK_API_KEY",
     default_model="deepseek-chat",
     requires_import="openai",

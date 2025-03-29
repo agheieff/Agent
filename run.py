@@ -316,7 +316,7 @@ async def main(goal_arg: Optional[str], provider_arg: Optional[str], agent_id: s
                         operation_name=op_name,
                         arguments=op_args
                     )
-                    result_msg = agent_runner.format_mcp_result(mcp_result)
+                    result_msg = agent_runner._format_mcp_result(mcp_result)
                     agent_runner.history.append(result_msg)
 
                     print(f"⚙️ SYSTEM: MCP Operation Result ({op_name}):")

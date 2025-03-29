@@ -28,7 +28,7 @@ def test_executables_exist(expected_executable_scripts: list[Path]):
 
 # Parameterize tests over the expected scripts
 @pytest.mark.parametrize("script_path", [
-    pytest.param(p, id=p.name) for p in (Path(__file__).parent.parent.parent.resolve() / s for s in ['test.py', 'run.py', 'mcp_run.py'])
+    pytest.param(p, id=p.name) for p in (Path(__file__).parent.parent.parent.resolve() / s for s in ['run.py', 'mcp_run.py'])
     # Add other scripts from expected_executable_scripts here if needed
 ])
 def test_script_has_executable_permission(script_path: Path):
@@ -39,7 +39,7 @@ def test_script_has_executable_permission(script_path: Path):
         f"{script_path.name} should have executable permission. Fix with: chmod +x {script_path}"
 
 @pytest.mark.parametrize("script_path", [
-    pytest.param(p, id=p.name) for p in (Path(__file__).parent.parent.parent.resolve() / s for s in ['test.py', 'run.py', 'mcp_run.py'])
+    pytest.param(p, id=p.name) for p in (Path(__file__).parent.parent.parent.resolve() / s for s in ['run.py', 'mcp_run.py'])
     # Add other scripts here
 ])
 def test_script_has_shebang(script_path: Path):

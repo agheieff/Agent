@@ -6,7 +6,7 @@ from pathlib import Path
 
 # --- Setup Project Path ---
 # Ensure the project root directory is in sys.path for imports
-root_dir = Path(__file__).parent.resolve()
+root_dir = Path(__file__).parent.parent.resolve()  # Go up one more level to the project root
 if str(root_dir) not in sys.path:
     print(f"DEBUG [test.py]: Adding project root to sys.path: {root_dir}", file=sys.stderr)
     sys.path.insert(0, str(root_dir))

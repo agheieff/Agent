@@ -17,9 +17,6 @@ def expected_executable_scripts(project_root: Path) -> list[Path]:
     # Define scripts expected to be executable
     # Exclude mcp_run.py if its permissions are tested elsewhere or not strictly required
     return [
-        project_root / 'test.py',
-        # project_root / 'api_test.py', # Moved to scripts/
-        # project_root / 'prompt_test.py', # Moved to scripts/
         project_root / 'run.py',
         project_root / 'mcp_run.py', # Include if it should be directly executable
     ]

@@ -16,14 +16,14 @@ class End(Tool):
                 Argument(
                     name="message",
                     arg_type=ArgumentType.STRING,
-                    is_optional=True,
+                    optional=True,
                     default_value="Task completed successfully.",
                     description="The final message to display before ending"
                 ),
                 Argument(
                     name="status",
                     arg_type=ArgumentType.STRING,
-                    is_optional=True,
+                    optional=True,
                     default_value="success",
                     description="The status of the task (success, failure, or incomplete)"
                 )

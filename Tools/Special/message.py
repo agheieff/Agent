@@ -21,7 +21,7 @@ class Message(Tool):
                 Argument(
                     name="important",
                     arg_type=ArgumentType.BOOLEAN,
-                    is_optional=True,
+                    optional=True,
                     default_value=False,
                     description="Whether to highlight this message as important"
                 )

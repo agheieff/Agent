@@ -16,7 +16,7 @@ class Pause(Tool):
                 Argument(
                     name="message",
                     arg_type=ArgumentType.STRING,
-                    is_optional=True,
+                    optional=True,
                     default_value="The agent is waiting for your input. Please provide any additional information or press Enter to continue.",
                     description="The message to display to the user when pausing"
                 )

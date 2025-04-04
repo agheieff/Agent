@@ -61,3 +61,6 @@ DEFAULT_MESSAGES = {
     ErrorCodes.INTERNAL_ERROR: "Internal error occurred",
     ErrorCodes.UNKNOWN_ERROR: "Unknown error occurred"
 }
+
+class ConversationEnded(Exception):
+    pass

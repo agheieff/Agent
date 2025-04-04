@@ -32,20 +32,18 @@ class End(Tool):
     def _run(self, args):
         message = args.get("message")
         status = args.get("status")
-
         valid_statuses = ["success", "failure", "incomplete"]
         if status not in valid_statuses:
              return ToolResult(success=False, code=ErrorCodes.INVALID_ARGUMENT_VALUE,
-                            message=f"Invalid status '{status}'. Must be one of: {', '.join(valid_statuses)}.")
+                               message=f"Invalid status '{status}'. Must be one of: {', '.join(valid_statuses)}.")
 
         status_symbols = {
             "success": "✓",
             "failure": "✗",
             "incomplete": "⚠"
         }
-
         symbol = status_symbols.get(status, "")
-        formatted_message = f"\n{symbol} CONVERSATION ENDED: {message}\n"
-
+        formatted_message = f"\n{symbol} CONVERSATION ENDED ({status}): {message}\n"
         print(formatted_message)
-        return 999, "CONVERSATION_END"
+
+        raise ConversationEnded(formatted_message)

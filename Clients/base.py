@@ -6,17 +6,18 @@ from typing import List, Dict, Optional, Any
 
 @dataclass
 class Message:
-    role: str  # "system", "user", "assistant"
+    role: str
     content: str
 
 @dataclass
 class PricingTier:
-    input: float  # cost per 1,000,000 input tokens
-    output: float  # cost per 1,000,000 output tokens
-    input_cache_miss: float = 0.0  # additional cost per 1,000,000 tokens for cache miss
-    output_cache_miss: float = 0.0  # additional cost per 1,000,000 tokens for cache miss
-    discount_hours: Optional[tuple] = None  # tuple (start_hour, end_hour) in UTC for discount hours
-    discount_rate: float = 0.0  # discount rate as a decimal
+    # per 1m tokens
+    input: float
+    output: float
+    input_cache_miss: float = 0.0
+    output_cache_miss: float = 0.0
+    discount_hours: Optional[tuple] = None
+    discount_rate: float = 0.0
 
 @dataclass
 class ModelConfig:
@@ -44,12 +45,14 @@ class BaseClient:
         self.config = config
         self.api_key = os.getenv(config.api_key_env)
         self.client = None
+        self.timeout = 30
+        self.max_retries = 3
         self._initialize()
-        
+
     def _initialize(self):
         if not self.api_key:
             raise ValueError(f"API key not found in {self.config.api_key_env}")
-            
+
         try:
             if self.config.requires_import:
                 importlib.import_module(self.config.requires_import)
@@ -71,11 +74,28 @@ class BaseClient:
     def _initialize_client(self):
         raise NotImplementedError("Subclasses must implement _initialize_client")
 
+    def _format_messages(self, messages: List[Message]) -> Any:
+        raise NotImplementedError("Subclasses must implement _format_messages")
+        
     def _call_api(self, **kwargs):
         raise NotImplementedError("Subclasses must implement _call_api")
 
     def _process_response(self, response):
         raise NotImplementedError("Subclasses must implement _process_response")
 
-    async def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
-        raise NotImplementedError("Subclasses must implement chat_completion")
+    async def chat_completion(self, messages: List[Message], model: str = None, **kwargs) -> str:
+            if not self.client:
+                raise RuntimeError("Client not initialized.")
+
+            model_config = self._get_model_config(model)
+            model_to_use = model_config.name
+            formatted_data_for_api = self._format_messages(messages)
+
+            api_response = await self._call_api(
+                formatted_messages=formatted_data_for_api,
+                model_name=model_to_use,
+                **kwargs
+            )
+
+            result_text = self._process_response(api_response)
+            return result_text

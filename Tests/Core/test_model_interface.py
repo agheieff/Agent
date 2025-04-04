@@ -8,33 +8,37 @@ class TestAnthropicInterface(unittest.TestCase):
     @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'})
     @patch('anthropic.AsyncAnthropic')
     def test_generate_response(self, mock_anthropic):
-        mock_client = AsyncMock()
-        mock_anthropic.return_value = mock_client
+        mock_client_instance = AsyncMock()
+        mock_anthropic.return_value = mock_client_instance
 
-        mock_message = MagicMock()
-        mock_message.text = "Mock response"
-
-        mock_response = MagicMock()
-        mock_response.content = [mock_message]
-        mock_client.messages.create.return_value = mock_response
+        mock_api_message = MagicMock()
+        mock_api_message.text = "Mock response"
+        mock_api_response = MagicMock()
+        mock_api_response.content = [mock_api_message]
+        mock_client_instance.messages.create.return_value = mock_api_response
 
         async def run_test():
             client = AnthropicClient()
-            client.client = mock_client
 
             self.assertEqual(client.timeout, 30.0)
             self.assertEqual(client.max_retries, 3)
 
             messages = [Message(role="user", content="Test")]
 
-            response = await client._call_api(
-                messages=messages, 
+            processed_response = await client.chat_completion(
+                messages=messages,
                 model=ANTHROPIC_CONFIG.default_model
             )
-            processed = client._process_response(response)
 
-            self.assertEqual(processed, "Mock response")
-            mock_client.messages.create.assert_called_once()
+            self.assertEqual(processed_response, "Mock response")
+
+            mock_client_instance.messages.create.assert_called_once()
+
+            call_args, call_kwargs = mock_client_instance.messages.create.call_args
+            expected_model_name = ANTHROPIC_CONFIG.models[ANTHROPIC_CONFIG.default_model].name
+            self.assertEqual(call_kwargs['model'], expected_model_name)
+            self.assertEqual(call_kwargs['messages'], [{'role': 'user', 'content': 'Test'}])
+            self.assertNotIn('system', call_kwargs)
 
         asyncio.run(run_test())
 

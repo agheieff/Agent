@@ -9,7 +9,7 @@ DEEPSEEK_CONFIG = ProviderConfig(
     api_base="https://api.deepseek.com/v1",
     api_key_env="DEEPSEEK_API_KEY",
     default_model="deepseek-chat",
-    requires_import="openai",  # Added this line
+    requires_import="openai",
     models={
         "deepseek-chat": ModelConfig(
             name="deepseek-chat",
@@ -38,11 +38,8 @@ DEEPSEEK_CONFIG = ProviderConfig(
 
 class DeepSeekClient(BaseClient):
     def __init__(self, config: ProviderConfig = None):
-        self.timeout = 30.0
-        self.max_retries = 3
         config = config or DEEPSEEK_CONFIG
         super().__init__(config)
-        self.default_model = config.default_model
 
     def _initialize_client(self):
         import openai
@@ -56,13 +53,11 @@ class DeepSeekClient(BaseClient):
     def _format_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
         return [{"role": msg.role, "content": msg.content} for msg in messages]
 
-    async def _call_api(self, messages, model, **kwargs):
-        formatted_msgs = self._format_messages(messages)
-        
+    async def _call_api(self, formatted_messages: List[Dict[str, str]], model_name: str, **kwargs):
         try:
             response = await self.client.chat.completions.create(
-                messages=formatted_msgs,
-                model=model,
+                messages=formatted_messages,
+                model=model_name,
                 max_tokens=kwargs.get('max_tokens', 1024),
                 temperature=kwargs.get('temperature', 0.7),
             )
@@ -74,11 +69,6 @@ class DeepSeekClient(BaseClient):
         if not response.choices:
             return ""
         return response.choices[0].message.content
-
-    async def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
-        model_config = self._get_model_config(model)
-        response = await self._call_api(messages=messages, model=model_config.name, **kwargs)
-        return self._process_response(response)
 
     def calculate_cost(self, model_name: str, input_tokens: int, output_tokens: int, cache_hit: bool = True) -> float:
         """

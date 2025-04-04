@@ -26,61 +26,51 @@ ANTHROPIC_CONFIG = ProviderConfig(
 
 class AnthropicClient(BaseClient):
     def __init__(self, config=None):
-        self.timeout = 30.0  # seconds (use float for timeout)
-        self.max_retries = 3
         config = config or ANTHROPIC_CONFIG
         super().__init__(config)
-        # Removed setting self.client = None so that BaseClient._initialize() properly creates it
 
     def _initialize_client(self):
-        self.client = anthropic.AsyncAnthropic(
+        return anthropic.AsyncAnthropic(
             api_key=self.api_key,
             timeout=self.timeout,
             max_retries=self.max_retries
         )
-        return self.client
 
-    def _format_messages(self, messages: List[Message]) -> (List[Dict[str, str]], Optional[str]):
+    def _format_messages(self, messages: List[Message]) -> Dict[str, Any]:
         formatted = []
         system = None
-        
         for msg in messages:
             if msg.role == "system":
                 system = msg.content
             else:
                 role = "assistant" if msg.role == "assistant" else "user"
                 formatted.append({"role": role, "content": msg.content})
-        
-        return formatted, system
+        return {"formatted_msgs": formatted, "system": system}
 
-    async def _call_api(self, messages, model, **kwargs):
-        formatted_msgs, system = self._format_messages(messages)
-        # Build parameters and only include system if it is not None
-        params = {
-            "messages": formatted_msgs,
-            "model": model,
-            "max_tokens": kwargs.get('max_tokens', 500),
-            "temperature": kwargs.get('temperature', 0.7),
-        }
-        if system is not None:
-            params["system"] = system
-        
-        try:
-            response = await self.client.messages.create(**params)
-            return response
-        except anthropic.APIConnectionError as e:
-            raise ConnectionError(f"Connection error: {e}") from e
-        except anthropic.APIStatusError as e:
-            raise RuntimeError(f"API error: {e.status_code} - {e.message}") from e
-        except Exception as e:
-            raise RuntimeError(f"Unexpected error: {str(e)}") from e
+    async def _call_api(self, formatted_messages: Dict[str, Any], model_name: str, **kwargs):
+            actual_message_list = formatted_messages["formatted_msgs"]
+            system_prompt = formatted_messages["system"]
+
+            params = {
+                "messages": actual_message_list,
+                "model": model_name,
+                "max_tokens": kwargs.get('max_tokens', 500),
+                "temperature": kwargs.get('temperature', 0.7),
+            }
+            if system_prompt is not None:
+                params["system"] = system_prompt
+
+            try:
+                response = await self.client.messages.create(**params)
+                return response
+            except anthropic.APIConnectionError as e:
+                raise ConnectionError(f"Connection error: {e}") from e
+            except anthropic.APIStatusError as e:
+                raise RuntimeError(f"API error: {e.status_code} - {e.message}") from e
+            except Exception as e:
+                raise RuntimeError(f"Unexpected error during Anthropic API call: {str(e)}") from e
 
     def _process_response(self, response):
         if not response.content:
             return ""
         return response.content[0].text
-
-    async def chat_completion(self, messages: List[Message], model: str = None, **kwargs):
-        model_config = self._get_model_config(model)
-        response = await self._call_api(messages=messages, model=model_config.name, **kwargs)
-        return self._process_response(response)

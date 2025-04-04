@@ -7,11 +7,11 @@ def parse_tool_call(text: str) -> Dict[str, Any]:
     match = re.search(tool_pattern, text, re.DOTALL)
     if not match:
         raise ValueError("Invalid tool call format")
-    
+
     args = {}
     current_key = None
     current_value = []
-    
+
     for line in match.group('body').strip().split('\n'):
         line = line.strip()
         if not line:
@@ -25,10 +25,9 @@ def parse_tool_call(text: str) -> Dict[str, Any]:
             current_key = key.strip()
             val = val.strip()
             if val == '<<<':
-                # Start multi-line mode; keep current_key for accumulation.
                 continue
             args[current_key] = val
-            current_key = None  # Clear current_key after a single-line assignment.
+            current_key = None
         elif line == '>>>':
             if current_key:
                 args[current_key] = '\n'.join(current_value).strip()
@@ -36,10 +35,10 @@ def parse_tool_call(text: str) -> Dict[str, Any]:
                 current_value = []
         elif current_key:
             current_value.append(line)
-    
+
     if current_key and current_value:
         args[current_key] = '\n'.join(current_value).strip()
-    
+
     return {'tool': match.group('name'), 'args': args}
 
 def format_result(name: str, exit_code: int, output: str) -> str:
@@ -56,13 +55,12 @@ class Executor:
         try:
             parsed = parse_tool_call(tool_call)
             tool = self.tools.get(parsed['tool'])
-            
+
             if not tool:
                 return format_result(parsed['tool'], 1, "Tool not found")
-                
+
             result = tool.execute(**parsed['args'])
-            
-            # Handle different return types
+
             if isinstance(result, tuple) and len(result) == 2:
                 exit_code, message = result
                 return format_result(parsed['tool'], exit_code, str(message))
@@ -74,6 +72,6 @@ class Executor:
                 )
             else:
                 return format_result(parsed['tool'], 0, str(result))
-                
+
         except Exception as e:
             return format_result("unknown", 1, str(e))

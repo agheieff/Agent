@@ -59,23 +59,14 @@ class Executor:
             tool = self.tools.get(parsed['tool'])
 
             if not tool:
-                return format_result(parsed['tool'], 1, f"Tool '{parsed['tool']}' not found in executor registry.")
+                return f"Error: Tool '{parsed['tool']}' not found"
 
             result: ToolResult = tool.execute(**parsed['args'])
 
-            return format_result(
-                parsed['tool'],
-                result.code,
-                result.message if result.message else str(result.data)
-            )
+            if result.success:
+                return f"Tool {parsed['tool']} succeeded: {result.message or 'Operation completed'}"
+            else:
+                return f"Tool {parsed['tool']} failed (code {result.code}): {result.message}"
 
-        except ValueError as ve:
-             return format_result("unknown_tool_format", 1, f"Error parsing tool call: {str(ve)}")
         except Exception as e:
-            tool_name = "unknown_tool_execution"
-            try:
-                 parsed_for_name = parse_tool_call(tool_call)
-                 tool_name = parsed_for_name['tool']
-            except ValueError:
-                 pass
-            return format_result(tool_name, 1, f"Error executing tool: {str(e)}")
+            return f"Error executing tool: {str(e)}"

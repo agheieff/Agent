@@ -39,49 +39,35 @@ class AgentRunner:
     async def _run_chat_cycle(self, prompt: str):
         self.add_message('user', prompt)
 
-        client_messages = [
-            Message(role=msg.role, content=msg.content)
-            for msg in self.messages
-        ]
+        parser = ToolCallParser()
+        full_response = ""
+        tool_called = False
 
-        response_text = await self.client.chat_completion(
-            messages=client_messages,
+        async for chunk in self.client.chat_completion_stream(
+            messages=self.messages,
             model=self.model
-        )
+        ):
+            text, tool_call = parser.feed(chunk)
 
-        while True:
-            try:
-                _ = parse_tool_call(response_text)
-                tool_result_str = self.executor.execute(response_text)
-                self.add_message('assistant', tool_result_str)
-                if "CONVERSATION_END" in tool_result_str:
-                    return "[Conversation ended by tool]"
+            if text:
+                full_response += text
+                print(text, end='', flush=True)
+
+            if tool_call:
+                tool_called = True
+                print()
                 break
-            except ValueError:
-                break
 
-        self.add_message('assistant', response_text)
-        return response_text
+        if tool_called:
+            tool_result = self.executor.execute(full_response + self.buffer)
+            print(f"\nTool result: {tool_result}\n")
 
-    def run(self, prompt: str):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            initial_response = loop.run_until_complete(self._run_chat_cycle(prompt))
-            print(f"\nAssistant: {initial_response}")
+            if full_response.strip():
+                self.add_message('assistant', full_response)
 
-            while True:
-                try:
-                    follow_up = get_multiline_input("\nYou: ")
-                    if not follow_up.strip():
-                        continue
-                    response = loop.run_until_complete(self._run_chat_cycle(follow_up))
-                    print(f"\nAssistant: {response}")
-                    if any(end_word in response.lower() for end_word in ['goodbye', 'farewell', 'exit']):
-                        break
-                except EOFError:
-                    break
-        except KeyboardInterrupt:
-            print("\nSession ended by user")
-        finally:
-            loop.close()
+            self.add_message('user', tool_result)
+
+            return await self._run_chat_cycle("")
+
+        self.add_message('assistant', full_response)
+        return full_response

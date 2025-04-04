@@ -76,7 +76,7 @@ class BaseClient:
 
     def _format_messages(self, messages: List[Message]) -> Any:
         raise NotImplementedError("Subclasses must implement _format_messages")
-        
+
     def _call_api(self, **kwargs):
         raise NotImplementedError("Subclasses must implement _call_api")
 
@@ -99,3 +99,6 @@ class BaseClient:
 
             result_text = self._process_response(api_response)
             return result_text
+
+    async def chat_completion_stream(self, messages: List[Message], model: str = None, **kwargs) -> AsyncGenerator[str, None]:
+        raise NotImplementedError("Subclasses must implement chat_completion_stream")

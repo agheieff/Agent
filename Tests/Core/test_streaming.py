@@ -6,6 +6,9 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from Core.agent_runner import AgentRunner
 from Core.tool_parser import ToolCallParser
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Filter out coroutine warnings for this test
 warnings.filterwarnings("ignore", category=RuntimeWarning, message="coroutine .* was never awaited")

@@ -11,27 +11,18 @@ class ToolCallParser:
         output_text = ""
         tool_call = None
 
-        while True:
-            tool_match = re.search(r'@tool\s+(?P<name>\w+)(?P<body>.*?)@end', 
-                                 self.buffer, re.DOTALL)
+        tool_start = self.buffer.find("@tool")
+        if tool_start >= 0:
+            tool_end = self.buffer.find("@end", tool_start)
+            if tool_end >= 0:
+                tool_section = self.buffer[tool_start:tool_end+4]
+                output_text = self.buffer[:tool_start]
+                self.buffer = self.buffer[tool_end+4:]
 
-            if not tool_match:
-                break
-
-            tool_name = tool_match.group('name')
-            tool_body = tool_match.group('body').strip()
-
-            args = self._parse_tool_args(tool_body)
-
-            tool_call = {
-                'tool': tool_name,
-                'args': args
-            }
-
-            self.buffer = self.buffer[tool_match.end():]
-
-        output_text = self.buffer
-        self.buffer = ""
+                try:
+                    tool_call = parse_tool_call(tool_section)
+                except ValueError:
+                    output_text += tool_section
 
         return output_text, tool_call
 

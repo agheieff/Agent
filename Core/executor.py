@@ -62,20 +62,16 @@ class Executor:
                     try:
                         parsed = parse_tool_call(tool_call + "\n@end")
                     except ValueError:
-                        return f"Error: Incomplete tool call - {str(e)}"
+                        return format_result("error", ErrorCodes.INVALID_ARGUMENTS, f"Invalid tool call - {str(e)}")
                 else:
-                    return f"Error: Invalid tool call - {str(e)}"
-            tool = self.tools.get(parsed['tool'])
+                    return format_result("error", ErrorCodes.INVALID_ARGUMENTS, f"Invalid tool call - {str(e)}")
 
+            tool = self.tools.get(parsed['tool'])
             if not tool:
-                return f"Error: Tool '{parsed['tool']}' not found"
+                return format_result(parsed['tool'], ErrorCodes.TOOL_NOT_FOUND, f"Tool '{parsed['tool']}' not found")
 
             result: ToolResult = tool.execute(**parsed['args'])
-
-            if result.success:
-                return f"Tool {parsed['tool']} succeeded: {result.message or 'Operation completed'}"
-            else:
-                return f"Tool {parsed['tool']} failed (code {result.code}): {result.message}"
+            return format_result(parsed['tool'], result.code, result.message)
 
         except Exception as e:
-            return f"Error executing tool: {str(e)}"
+            return format_result("error", ErrorCodes.UNKNOWN_ERROR, f"Error executing tool: {str(e)}")

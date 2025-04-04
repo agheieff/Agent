@@ -1,6 +1,6 @@
 import asyncio
 from typing import List, Optional
-from Clients import Message
+from Clients import BaseClient, Message
 from Core.tool_parser import ToolCallParser
 from Core.executor import Executor
 from Core.stream_manager import StreamManager
@@ -17,6 +17,21 @@ class AgentRunner:
         if use_system_prompt:
             system_prompt = generate_system_prompt(provider)
             self.add_message('system', system_prompt)
+
+    def _init_client(self, provider: str) -> BaseClient:
+        try:
+            module = __import__(f'Clients.API.{provider.lower()}', fromlist=['*'])
+            for name, obj in module.__dict__.items():
+                if name.endswith('Client') and name.lower().startswith(provider.lower()):
+                    return obj()
+            for name, obj in module.__dict__.items():
+                if name.endswith('Client'):
+                    return obj()
+            raise ValueError(f"No client class found in module Clients.API.{provider}")
+        except ImportError as e:
+            raise ImportError(f"Provider module not found: {provider}") from e
+        except Exception as e:
+            raise RuntimeError(f"Error initializing client for {provider}: {str(e)}") from e
 
     async def _run_chat_cycle(self, prompt: str) -> str:
         """Enhanced streaming with tool interruption"""

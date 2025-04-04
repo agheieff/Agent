@@ -16,7 +16,6 @@ class TestStreamingBehavior(unittest.TestCase):
 
     @patch('Clients.API.anthropic.AnthropicClient.chat_completion_stream')
     async def test_mid_stream_tool_interrupt(self, mock_stream):
-        # Simulate a stream that gets interrupted by a tool call
         mock_stream.return_value = self.simulate_stream([
             "Here's some initial text...",
             "@tool read_file\npath: test.txt\n@end",

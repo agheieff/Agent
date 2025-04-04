@@ -1,4 +1,5 @@
 from typing import Tuple, Optional, Dict, Any
+from Core.executor import parse_tool_call
 import re
 
 class ToolCallParser:

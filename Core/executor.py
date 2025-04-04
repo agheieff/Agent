@@ -2,6 +2,7 @@ import re
 from typing import Dict, Any
 from Tools.base import ToolResult
 from Tools.Core.registry import ToolRegistry
+from Tools.error_codes import ErrorCodes
 
 def parse_tool_call(text: str) -> Dict[str, Any]:
     tool_pattern = r'@tool\s+(?P<name>\w+)(?P<body>.*?)@end'
@@ -68,8 +69,7 @@ class Executor:
 
             tool = self.tools.get(parsed['tool'])
             if not tool:
-                return format_result(parsed['tool'], ErrorCodes.TOOL_NOT_FOUND, f"Tool '{parsed['tool']}' not found")
-
+                return format_result(parsed['tool'], ErrorCodes.TOOL_NOT_FOUND, f"Tool '{parsed['tool']}' not found in executor registry")
             result: ToolResult = tool.execute(**parsed['args'])
             return format_result(parsed['tool'], result.code, result.message)
 

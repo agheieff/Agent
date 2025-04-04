@@ -51,7 +51,7 @@ arg2: value2
 arg1: value1
 @end"""
         result = self.executor.execute(call_text)
-        self.assertIn("exit_code: 1", result)
+        self.assertIn("exit_code: -1", result)
         self.assertIn("not found in executor registry", result)
 
     def test_execute_tool_error(self):

@@ -18,11 +18,11 @@ class ToolInfo:
 class PromptGenerator:
     def __init__(self):
         self.sections = []
-    
+
     def add_section(self, title: str, content: str):
         self.sections.append((title, content))
         return self
-    
+
     def generate(self) -> str:
         return "\n\n".join(
             f"# {title.upper()}\n{content}"
@@ -48,27 +48,15 @@ def get_tool_info(tool_instance: Tool) -> ToolInfo:
     )
 
 def discover_tools() -> List[Tool]:
-    """
-    Discover all available tools by leveraging the ToolRegistry.
-    Returns a list of Tool instances.
-    """
     registry = ToolRegistry()
-    # Trigger discovery so that the registry is populated
     registry.discover_tools()
-    # Sort the tools alphabetically by name for consistency
     return sorted(list(registry.get_all().values()), key=lambda t: t.name)
 
 def generate_tools_overview() -> str:
-    """
-    Generate an overview of available tools including the file structure
-    of the Tools directory, tool names, and their short descriptions.
-    """
-    # Determine the path to the Tools directory (assuming this file is in Prompts/)
     tools_dir = os.path.join(os.path.dirname(__file__), "..", "Tools")
-    
+
     tree_lines = []
     for root, dirs, files in os.walk(tools_dir):
-        # Skip hidden directories and __pycache__
         dirs[:] = [d for d in dirs if not d.startswith('.') and d != '__pycache__']
         files = [f for f in files if not f.startswith('.') and not f.startswith('__')]
         level = root.replace(tools_dir, "").count(os.sep)
@@ -78,13 +66,12 @@ def generate_tools_overview() -> str:
         for f in files:
             tree_lines.append(f"{sub_indent}{f}")
     file_structure = "\n".join(tree_lines)
-    
-    # Get a simple overview of tools from the registry
+
     tools = discover_tools()
     tool_overview_lines = ["Available Tools:"]
     for tool in tools:
         tool_overview_lines.append(f"- {tool.name}: {tool.description}")
-    
+
     overview = (
         "File Structure of Tools Directory:\n"
         f"{file_structure}\n\n"
@@ -93,18 +80,14 @@ def generate_tools_overview() -> str:
     return overview
 
 def generate_system_prompt(provider: str) -> str:
-    """
-    Generates complete system prompt with dynamic tool documentation.
-    """
     builder = PromptGenerator()
-    
-    # Core Agent Role
+
     builder.add_section("Role", 
         "You are an autonomous AI assistant with tool usage capabilities. "
-        "Your purpose is to assist users by executing tasks using available tools."
+        "Your purpose is to assist users by executing tasks using available tools. "
+        "The code is currently in testing, not fully developed yet, so don't expect everything to work smoothly." #TODO delete later
     )
-    
-    # Tool Usage Instructions
+
     builder.add_section("Tool Usage",
         "Use tools by specifying @tool followed by the tool name and arguments.\n"
         "Example: @tool read_file path='file.txt' lines=10\n"
@@ -113,22 +96,21 @@ def generate_system_prompt(provider: str) -> str:
         "For instance:\n"
         "@tool edit_file\nfilename: 'notes.txt'\nreplacements: '{\"Hello\":\"World\"}'\n@end"
     )
-    
-    # File Path Handling
+
     builder.add_section("File Paths",
         "When working with files:\n"
         "- Use absolute paths (/path/to/file) or relative paths (./file.txt)\n"
         "- ~ expands to user home directory\n"
-        "- Paths are case-sensitive"
+        "- Paths are case-sensitive\n"
+        "- Don't use quotation marks with paths"
     )
-    
-    # Provider-specific formatting note (if applicable)
+
     if provider == "anthropic":
         builder.add_section("Formatting",
             "For Anthropic, please note that special XML-like tags might be used, "
             "but you should still prefer the @tool ... @end style in your responses."
         )
-    
+
     # Detailed Tools Documentation Section
     tools_section = ["## Available Tools"]
     for tool_instance in discover_tools():
@@ -142,15 +124,10 @@ def generate_system_prompt(provider: str) -> str:
             tools_section.append("**Examples:**")
             for ex in info.examples:
                 tools_section.append(f"  {ex}")
-    
+
     builder.add_section("Tools", "\n".join(tools_section))
-    
-    # Add the tools overview (file structure and simple list of tool names)
+
     tools_overview = generate_tools_overview()
     builder.add_section("Tool Overview", tools_overview)
-    
-    return builder.generate()
 
-# For testing purposes you could uncomment the following lines to print the system prompt:
-# if __name__ == "__main__":
-#     print(generate_system_prompt("anthropic"))
+    return builder.generate()

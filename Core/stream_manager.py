@@ -1,21 +1,25 @@
 import asyncio
-from typing import AsyncGenerator, Any
+from typing import AsyncGenerator
 
 class StreamManager:
-    @staticmethod
-    async def gather_chunks(stream: AsyncGenerator, max_chunks: int = None) -> str:
-        content = ""
-        count = 0
-        async for chunk in stream:
-            content += chunk
-            count += 1
-            if max_chunks and count >= max_chunks:
-                break
-        return content
+    def __init__(self, timeout: float = 30.0):
+        self.timeout = timeout
 
-    @staticmethod
-    async def cancel_stream(stream: AsyncGenerator):
+    async def process_stream(self, stream: AsyncGenerator) -> AsyncGenerator:
+        try:
+            async for chunk in asyncio.wait_for(self._stream_generator(stream), self.timeout):
+                yield chunk
+        except asyncio.TimeoutError:
+            await self.close_stream(stream)
+            raise
+
+    async def close_stream(self, stream: AsyncGenerator) -> None:
         try:
             await stream.aclose()
-        except:
+        except Exception:
             pass
+
+    @staticmethod
+    async def _stream_generator(stream: AsyncGenerator):
+        async for chunk in stream:
+            yield chunk

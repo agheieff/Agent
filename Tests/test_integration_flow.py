@@ -1,3 +1,4 @@
+from typing import AsyncGenerator
 import os
 import unittest
 import asyncio
@@ -8,29 +9,23 @@ from Tools.Core.registry import ToolRegistry
 
 class TestIntegrationFlow(unittest.TestCase):
     def setUp(self):
-        # Ensure a dummy API key is present so that the Anthropic client initializes.
         os.environ["ANTHROPIC_API_KEY"] = "dummy-key"
 
-        # Clear the ToolRegistry so we start with a fresh discovery.
         registry = ToolRegistry()
         registry._tools.clear()
         registry._discovered = False
 
-        # Patch the Anthropic client's chat_completion method so no real API call is made.
         self.mock_chat_completion = AsyncMock()
-        # Note: Patch the method on the correct target.
         patcher1 = patch("Clients.API.anthropic.AnthropicClient.chat_completion", new=self.mock_chat_completion)
         self.addCleanup(patcher1.stop)
         patcher1.start()
 
-        # Patch the Executor.execute method used to execute tool calls.
         self.mock_execute = MagicMock()
         patcher2 = patch("Core.agent_runner.Executor.execute", new=self.mock_execute)
         self.addCleanup(patcher2.stop)
         patcher2.start()
 
     def test_tool_call_in_response(self):
-        # Simulate an LLM response that contains a tool call.
         tool_call_response = (
             "@tool read_file\n"
             "path: ./my_test_file.txt\n"
@@ -38,7 +33,6 @@ class TestIntegrationFlow(unittest.TestCase):
         )
         self.mock_chat_completion.return_value = tool_call_response
 
-        # Simulate the tool execution result.
         tool_result = (
             "@result read_file\n"
             "exit_code: 0\n"

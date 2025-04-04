@@ -1,76 +1,57 @@
+from typing import Tuple, Optional, Dict, Any
+import re
+
 class ToolCallParser:
     def __init__(self):
         self.buffer = ""
-        self.state = "TEXT"  # TEXT, TOOL_START, TOOL_BODY, TOOL_END
-        self.tool_depth = 0
-        self.current_tool = ""
-        self.pending_text = ""
+        self.partial_tool = None
 
     def feed(self, text: str) -> Tuple[str, Optional[Dict]]:
         self.buffer += text
-        output = []
+        output_text = ""
         tool_call = None
 
-        while self.buffer:
-            if self.state == "TEXT":
-                tool_start = self.buffer.find("@tool")
-                if tool_start >= 0:
-                    output.append(self.buffer[:tool_start])
-                    self.buffer = self.buffer[tool_start:]
-                    self.state = "TOOL_START"
-                else:
-                    output.append(self.buffer)
-                    self.buffer = ""
+        while True:
+            tool_match = re.search(r'@tool\s+(?P<name>\w+)(?P<body>.*?)@end', 
+                                 self.buffer, re.DOTALL)
 
-            elif self.state == "TOOL_START":
-                if len(self.buffer) >= 5 and self.buffer.startswith("@tool"):
-                    self.buffer = self.buffer[5:].lstrip()
-                    self.state = "TOOL_BODY"
-                    self.tool_depth = 1
-                    self.current_tool = ""
-                else:
-                    output.append("@tool" + self.buffer)
-                    self.buffer = ""
-                    self.state = "TEXT"
+            if not tool_match:
+                break
 
-            elif self.state == "TOOL_BODY":
-                end_pos = self.buffer.find("@end")
-                tool_pos = self.buffer.find("@tool")
+            tool_name = tool_match.group('name')
+            tool_body = tool_match.group('body').strip()
 
-                if end_pos >= 0 and (tool_pos < 0 or end_pos < tool_pos):
-                    self.current_tool += self.buffer[:end_pos]
-                    self.buffer = self.buffer[end_pos:]
-                    self.state = "TOOL_END"
-                elif tool_pos >= 0:
-                    self.current_tool += self.buffer[:tool_pos]
-                    self.buffer = self.buffer[tool_pos:]
-                    self.tool_depth += 1
-                    self.state = "TOOL_START"
-                else:
-                    self.current_tool += self.buffer
-                    self.buffer = ""
+            args = self._parse_tool_args(tool_body)
 
-            elif self.state == "TOOL_END":
-                if len(self.buffer) >= 4 and self.buffer.startswith("@end"):
-                    self.tool_depth -= 1
-                    if self.tool_depth == 0:
-                        try:
-                            tool_call = parse_tool_call("@tool" + self.current_tool + "@end")
-                            self.state = "TEXT"
-                            self.current_tool = ""
-                            self.buffer = self.buffer[4:]
-                            break
-                        except ValueError:
-                            output.append("@tool" + self.current_tool + "@end")
-                            self.state = "TEXT"
-                            self.current_tool = ""
-                            self.buffer = self.buffer[4:]
-                    else:
-                        self.current_tool += "@end"
-                        self.buffer = self.buffer[4:]
-                        self.state = "TOOL_BODY"
-                else:
-                    self.current_tool += self.buffer
-                    self.buffer = ""
+            tool_call = {
+                'tool': tool_name,
+                'args': args
+            }
 
-        return ''.join(output), tool_call
+            self.buffer = self.buffer[tool_match.end():]
+
+        output_text = self.buffer
+        self.buffer = ""
+
+        return output_text, tool_call
+
+    def _parse_tool_args(self, body: str) -> Dict[str, str]:
+        args = {}
+        current_key = None
+        current_value = []
+
+        for line in body.split('\n'):
+            line = line.strip()
+            if ': ' in line:
+                if current_key:
+                    args[current_key] = '\n'.join(current_value).strip()
+                key, val = line.split(': ', 1)
+                current_key = key.strip()
+                current_value = [val.strip()]
+            elif current_key:
+                current_value.append(line)
+
+        if current_key:
+            args[current_key] = '\n'.join(current_value).strip()
+
+        return args

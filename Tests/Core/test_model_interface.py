@@ -1,3 +1,4 @@
+from typing import AsyncGenerator
 import unittest
 import asyncio
 from unittest.mock import patch, MagicMock, AsyncMock

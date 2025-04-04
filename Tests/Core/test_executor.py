@@ -1,3 +1,4 @@
+from typing import AsyncGenerator
 import unittest
 from unittest.mock import MagicMock, patch
 from Core.executor import Executor, parse_tool_call, format_result

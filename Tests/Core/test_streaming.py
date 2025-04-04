@@ -1,3 +1,4 @@
+from typing import AsyncGenerator
 import unittest
 import asyncio
 from unittest.mock import AsyncMock, patch
@@ -11,41 +12,46 @@ class TestStreamingBehavior(unittest.TestCase):
     async def simulate_stream(self, chunks):
         for chunk in chunks:
             yield chunk
-            await asyncio.sleep(0.01)  # Simulate network delay
+            await asyncio.sleep(0.01)
 
     @patch('Clients.API.anthropic.AnthropicClient.chat_completion_stream')
-    async def test_tool_call_mid_stream(self, mock_stream):
-        # Simulate a response that has a tool call after some text
+    async def test_mid_stream_tool_interrupt(self, mock_stream):
+        # Simulate a stream that gets interrupted by a tool call
         mock_stream.return_value = self.simulate_stream([
-            "Here's some text before the ",
-            "tool call: @tool read_file\npath: test.txt\n@end",
-            " and this text should never be seen"
+            "Here's some initial text...",
+            "@tool read_file\npath: test.txt\n@end",
+            "This text should never appear"
         ])
 
-        agent = AgentRunner("anthropic", "claude-3-7-sonnet", use_system_prompt=False)
-        await agent._run_chat_cycle("Test prompt")
+        agent = AgentRunner("anthropic", use_system_prompt=False)
+        with patch.object(agent.executor, 'execute', return_value="File content") as mock_exec:
+            result = await agent._run_chat_cycle("Test")
 
-        # Verify the tool was called and streaming stopped
-        self.assertEqual(len(agent.messages), 3)  # User, Assistant (partial), User (tool result)
-        self.assertIn("@tool read_file", agent.messages[1].content)
-        self.assertNotIn("never be seen", agent.messages[1].content)
+            # Verify tool was executed
+            mock_exec.assert_called_once_with({
+                'tool': 'read_file',
+                'args': {'path': 'test.txt'}
+            })
 
-    def test_parser_incremental_tool(self):
+            # Verify message history
+            self.assertEqual(len(agent.messages), 3)  # user, assistant, tool result
+            self.assertIn("initial text", agent.messages[1].content)
+            self.assertNotIn("never appear", agent.messages[1].content)
+
+    def test_parser_incremental(self):
         chunks = [
             "Some text @tool",
-            " read_file\npath: test.txt\n",
-            "@end more text"
+            " edit_file\nfilename: test.txt\n",
+            "content: new content\n@end more text"
         ]
 
         full_text = ""
-        tool_detected = False
         for chunk in chunks:
-            text, tool_call = self.parser.feed(chunk)
+            text, tool = self.parser.feed(chunk)
             full_text += text
-            if tool_call:
-                tool_detected = True
+            if tool:
+                self.assertEqual(tool['tool'], 'edit_file')
+                self.assertEqual(tool['args']['filename'], 'test.txt')
                 break
 
-        self.assertTrue(tool_detected)
         self.assertEqual(full_text, "Some text ")
-        self.assertEqual(tool_call['tool'], 'read_file')

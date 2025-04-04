@@ -1,5 +1,4 @@
 import asyncio
-from dataclasses import dataclass
 from typing import List
 
 from Clients import BaseClient, Message
@@ -7,16 +6,11 @@ from Core.utils import get_multiline_input
 from Core.executor import parse_tool_call, Executor, format_result
 from Prompts.main import generate_system_prompt
 
-@dataclass
-class AgentMessage:
-    role: str
-    content: str
-
 class AgentRunner:
     def __init__(self, provider: str, model: str = None, use_system_prompt: bool = True):
         self.client = self._init_client(provider)
         self.model = model or self.client.config.default_model
-        self.messages: List[AgentMessage] = []
+        self.messages: List[Message] = []
         self.executor = Executor()
         self.provider_name = provider
 
@@ -40,7 +34,7 @@ class AgentRunner:
             raise RuntimeError(f"Error initializing client for {provider}: {str(e)}") from e
 
     def add_message(self, role: str, content: str):
-        self.messages.append(AgentMessage(role, content))
+        self.messages.append(Message(role=role, content=content))
 
     async def _run_chat_cycle(self, prompt: str):
         self.add_message('user', prompt)

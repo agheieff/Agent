@@ -1,5 +1,4 @@
-from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType
-
+from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType, ToolResult
 
 class End(Tool):
     def __init__(self):
@@ -11,30 +10,33 @@ class End(Tool):
         super().__init__(
             name="end",
             description="Finishes the conversation with the agent",
-            help_text="Signals that the agent has completed its task and ends the conversation.",
-            arguments=[
+            args=[
                 Argument(
                     name="message",
                     arg_type=ArgumentType.STRING,
                     optional=True,
-                    default_value="Task completed successfully.",
+                    default="Task completed successfully.",
                     description="The final message to display before ending"
                 ),
                 Argument(
                     name="status",
                     arg_type=ArgumentType.STRING,
                     optional=True,
-                    default_value="success",
+                    default="success",
                     description="The status of the task (success, failure, or incomplete)"
                 )
             ],
             config=config
         )
 
-    def _execute(self, message="Task completed successfully.", status="success"):
+    def _run(self, args):
+        message = args.get("message")
+        status = args.get("status")
+
         valid_statuses = ["success", "failure", "incomplete"]
         if status not in valid_statuses:
-            return ErrorCodes.INVALID_ARGUMENT_VALUE, f"Invalid status '{status}'. Must be one of: {', '.join(valid_statuses)}."
+             return ToolResult(success=False, code=ErrorCodes.INVALID_ARGUMENT_VALUE,
+                            message=f"Invalid status '{status}'. Must be one of: {', '.join(valid_statuses)}.")
 
         status_symbols = {
             "success": "✓",
@@ -46,5 +48,4 @@ class End(Tool):
         formatted_message = f"\n{symbol} CONVERSATION ENDED: {message}\n"
 
         print(formatted_message)
-
-        return 999, "CONVERSATION_END" 
+        return 999, "CONVERSATION_END"

@@ -1,5 +1,4 @@
-from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType
-
+from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType, ToolResult
 
 class Pause(Tool):
     def __init__(self):
@@ -11,20 +10,20 @@ class Pause(Tool):
         super().__init__(
             name="pause",
             description="Pauses the agent and waits for user input",
-            help_text="Stops the conversation, displays a message to the user, and waits for their input before continuing.",
-            arguments=[
+            args=[
                 Argument(
                     name="message",
                     arg_type=ArgumentType.STRING,
                     optional=True,
-                    default_value="The agent is waiting for your input. Please provide any additional information or press Enter to continue.",
+                    default="The agent is waiting for your input. Please provide any additional information or press Enter to continue.",
                     description="The message to display to the user when pausing"
                 )
             ],
             config=config
         )
 
-    def _execute(self, message="The agent is waiting for your input. Please provide any additional information or press Enter to continue."):
+    def _run(self, args):
+        message = args.get("message")
         print(f"\n{message}\n")
         user_input = input("> ")
-        return ErrorCodes.SUCCESS, f"User input: {user_input}" 
+        return ToolResult(success=True, code=ErrorCodes.SUCCESS, message=f"User input: {user_input}")

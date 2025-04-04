@@ -1,6 +1,7 @@
 import re
 from typing import Dict, Any
 from Tools.base import ToolResult
+from Tools.Core.registry import ToolRegistry
 
 def parse_tool_call(text: str) -> Dict[str, Any]:
     tool_pattern = r'@tool\s+(?P<name>\w+)(?P<body>.*?)@end'
@@ -46,7 +47,8 @@ def format_result(name: str, exit_code: int, output: str) -> str:
 
 class Executor:
     def __init__(self):
-        self.tools = {}
+        registry = ToolRegistry()
+        self.tools: Dict[str, Any] = registry.get_all()
 
     def register_tool(self, tool):
         self.tools[tool.name] = tool
@@ -57,21 +59,23 @@ class Executor:
             tool = self.tools.get(parsed['tool'])
 
             if not tool:
-                return format_result(parsed['tool'], 1, "Tool not found")
+                return format_result(parsed['tool'], 1, f"Tool '{parsed['tool']}' not found in executor registry.")
 
-            result = tool.execute(**parsed['args'])
+            result: ToolResult = tool.execute(**parsed['args'])
 
-            if isinstance(result, tuple) and len(result) == 2:
-                exit_code, message = result
-                return format_result(parsed['tool'], exit_code, str(message))
-            elif isinstance(result, ToolResult):
-                return format_result(
-                    parsed['tool'], 
-                    0 if result.success else 1,
-                    result.message if result.message else str(result.data)
-                )
-            else:
-                return format_result(parsed['tool'], 0, str(result))
+            return format_result(
+                parsed['tool'],
+                result.code,
+                result.message if result.message else str(result.data)
+            )
 
+        except ValueError as ve:
+             return format_result("unknown_tool_format", 1, f"Error parsing tool call: {str(ve)}")
         except Exception as e:
-            return format_result("unknown", 1, str(e))
+            tool_name = "unknown_tool_execution"
+            try:
+                 parsed_for_name = parse_tool_call(tool_call)
+                 tool_name = parsed_for_name['tool']
+            except ValueError:
+                 pass
+            return format_result(tool_name, 1, f"Error executing tool: {str(e)}")

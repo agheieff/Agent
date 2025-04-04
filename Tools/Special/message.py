@@ -1,5 +1,4 @@
-from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType
-
+from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType, ToolResult
 
 class Message(Tool):
     def __init__(self):
@@ -11,8 +10,7 @@ class Message(Tool):
         super().__init__(
             name="message",
             description="Sends a message from the agent to the user",
-            help_text="Outputs a message to the user's screen without adding it to the conversation history.",
-            arguments=[
+            args=[
                 Argument(
                     name="text",
                     arg_type=ArgumentType.STRING,
@@ -22,19 +20,24 @@ class Message(Tool):
                     name="important",
                     arg_type=ArgumentType.BOOLEAN,
                     optional=True,
-                    default_value=False,
+                    default=False,
                     description="Whether to highlight this message as important"
                 )
             ],
             config=config
         )
 
-    def _execute(self, text, important=False):
+    def _run(self, args):
+        text = args.get("text")
+        important = args.get("important")
+
+        if text is None:
+             return ToolResult(success=False, code=ErrorCodes.MISSING_REQUIRED_ARGUMENT, message="Missing required argument: text")
+
         if important:
             formatted_message = f"\n!!! IMPORTANT MESSAGE !!!\n{text}\n!!!\n"
         else:
             formatted_message = f"\n{text}\n"
 
         print(formatted_message)
-
-        return ErrorCodes.SUCCESS, None 
+        return ToolResult(success=True, code=ErrorCodes.SUCCESS, message="Message displayed.")

@@ -55,7 +55,16 @@ class Executor:
 
     def execute(self, tool_call: str) -> str:
         try:
-            parsed = parse_tool_call(tool_call)
+            try:
+                parsed = parse_tool_call(tool_call)
+            except ValueError as e:
+                if "@tool" in tool_call and "@end" not in tool_call:
+                    try:
+                        parsed = parse_tool_call(tool_call + "\n@end")
+                    except ValueError:
+                        return f"Error: Incomplete tool call - {str(e)}"
+                else:
+                    return f"Error: Invalid tool call - {str(e)}"
             tool = self.tools.get(parsed['tool'])
 
             if not tool:

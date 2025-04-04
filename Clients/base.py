@@ -102,3 +102,10 @@ class BaseClient:
 
     async def chat_completion_stream(self, messages: List[Message], model: str = None, **kwargs) -> AsyncGenerator[str, None]:
         raise NotImplementedError("Subclasses must implement chat_completion_stream")
+
+    async def _stream_with_timeout(self, generator: AsyncGenerator, timeout: float = 30.0):
+        try:
+            async for item in asyncio.wait_for(generator, timeout):
+                yield item
+        except asyncio.TimeoutError:
+            raise RuntimeError("Streaming timed out")

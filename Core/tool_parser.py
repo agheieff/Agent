@@ -1,48 +1,76 @@
 class ToolCallParser:
     def __init__(self):
         self.buffer = ""
-        self.in_tool = False
+        self.state = "TEXT"  # TEXT, TOOL_START, TOOL_BODY, TOOL_END
         self.tool_depth = 0
-        self.tool_pattern = re.compile(r'@tool\s+(\w+)')
+        self.current_tool = ""
+        self.pending_text = ""
 
     def feed(self, text: str) -> Tuple[str, Optional[Dict]]:
         self.buffer += text
         output = []
         tool_call = None
 
-        i = 0
-        while i < len(self.buffer):
-            if not self.in_tool:
-                # Look for start of tool call
-                if self.buffer.startswith('@tool', i):
-                    self.in_tool = True
+        while self.buffer:
+            if self.state == "TEXT":
+                tool_start = self.buffer.find("@tool")
+                if tool_start >= 0:
+                    output.append(self.buffer[:tool_start])
+                    self.buffer = self.buffer[tool_start:]
+                    self.state = "TOOL_START"
+                else:
+                    output.append(self.buffer)
+                    self.buffer = ""
+
+            elif self.state == "TOOL_START":
+                if len(self.buffer) >= 5 and self.buffer.startswith("@tool"):
+                    self.buffer = self.buffer[5:].lstrip()
+                    self.state = "TOOL_BODY"
                     self.tool_depth = 1
-                    tool_start = i
-                    i += 5  # skip '@tool'
-                    continue
-                output.append(self.buffer[i])
-                i += 1
-            else:
-                # Inside tool call
-                if self.buffer.startswith('@end', i):
+                    self.current_tool = ""
+                else:
+                    output.append("@tool" + self.buffer)
+                    self.buffer = ""
+                    self.state = "TEXT"
+
+            elif self.state == "TOOL_BODY":
+                end_pos = self.buffer.find("@end")
+                tool_pos = self.buffer.find("@tool")
+
+                if end_pos >= 0 and (tool_pos < 0 or end_pos < tool_pos):
+                    self.current_tool += self.buffer[:end_pos]
+                    self.buffer = self.buffer[end_pos:]
+                    self.state = "TOOL_END"
+                elif tool_pos >= 0:
+                    self.current_tool += self.buffer[:tool_pos]
+                    self.buffer = self.buffer[tool_pos:]
+                    self.tool_depth += 1
+                    self.state = "TOOL_START"
+                else:
+                    self.current_tool += self.buffer
+                    self.buffer = ""
+
+            elif self.state == "TOOL_END":
+                if len(self.buffer) >= 4 and self.buffer.startswith("@end"):
                     self.tool_depth -= 1
                     if self.tool_depth == 0:
-                        tool_text = self.buffer[tool_start:i+4]
                         try:
-                            tool_call = parse_tool_call(tool_text)
+                            tool_call = parse_tool_call("@tool" + self.current_tool + "@end")
+                            self.state = "TEXT"
+                            self.current_tool = ""
+                            self.buffer = self.buffer[4:]
+                            break
                         except ValueError:
-                            # Invalid tool call, treat as text
-                            output.append(tool_text)
-                        self.in_tool = False
-                        i += 4  # skip '@end'
-                        continue
+                            output.append("@tool" + self.current_tool + "@end")
+                            self.state = "TEXT"
+                            self.current_tool = ""
+                            self.buffer = self.buffer[4:]
                     else:
-                        i += 4
-                elif self.buffer.startswith('@tool', i):
-                    self.tool_depth += 1
-                    i += 5
+                        self.current_tool += "@end"
+                        self.buffer = self.buffer[4:]
+                        self.state = "TOOL_BODY"
                 else:
-                    i += 1
+                    self.current_tool += self.buffer
+                    self.buffer = ""
 
-        self.buffer = self.buffer[i:] if self.in_tool else ""
         return ''.join(output), tool_call

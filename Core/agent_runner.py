@@ -38,7 +38,6 @@ class AgentRunner:
 
     async def _run_chat_cycle(self, prompt: str):
         self.add_message('user', prompt)
-
         parser = ToolCallParser()
         full_response = ""
         tool_called = False
@@ -55,18 +54,17 @@ class AgentRunner:
 
             if tool_call:
                 tool_called = True
-                print()
-                break
+                print()  # New line after tool call
+                break  # Stop streaming immediately when tool call is found
 
         if tool_called:
-            tool_result = self.executor.execute(full_response + self.buffer)
+            tool_result = self.executor.execute(full_response)
             print(f"\nTool result: {tool_result}\n")
 
             if full_response.strip():
                 self.add_message('assistant', full_response)
 
             self.add_message('user', tool_result)
-
             return await self._run_chat_cycle("")
 
         self.add_message('assistant', full_response)

@@ -95,5 +95,8 @@ class AnthropicClient(BaseClient):
                 async for chunk in stream:
                     if chunk.type == "content_block_delta":
                         yield chunk.delta.text
+                    # Stop if we get any indication the stream is complete
+                    if chunk.type == "message_stop":
+                        break
         except Exception as e:
             raise RuntimeError(f"Streaming error: {str(e)}")

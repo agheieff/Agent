@@ -95,3 +95,24 @@ class DeepSeekClient(BaseClient):
             total_cost *= (1 - pricing.discount_rate)
 
         return total_cost
+
+    async def chat_completion_stream(self, messages: List[Message], model: str = None, **kwargs):
+        model_config = self._get_model_config(model)
+        model_to_use = model_config.name
+        formatted_messages = self._format_messages(messages)
+
+        params = {
+            "messages": formatted_messages,
+            "model": model_to_use,
+            "max_tokens": kwargs.get('max_tokens', 1024),
+            "temperature": kwargs.get('temperature', 0.7),
+            "stream": True
+        }
+
+        try:
+            response = await self.client.chat.completions.create(**params)
+            async for chunk in response:
+                if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        except Exception as e:
+            raise RuntimeError(f"Streaming error: {str(e)}")

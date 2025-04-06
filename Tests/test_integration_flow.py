@@ -6,34 +6,52 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 from Core.agent_runner import AgentRunner
 from Tools.Core.registry import ToolRegistry
-from Clients.base import Message
+from Clients.base import Message, ProviderConfig, BaseClient # Import necessary base classes
 
 class TestIntegrationFlow(unittest.TestCase):
     def setUp(self):
-        os.environ["ANTHROPIC_API_KEY"] = "dummy-key"
+        # Ensure dummy key is set if not present for AnthropicClient init
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            os.environ["ANTHROPIC_API_KEY"] = "dummy-key-anthropic"
 
+        # Mock the client loading process within AgentRunner
+        self.mock_get_client_patcher = patch('Core.agent_runner.AgentRunner._get_client_instance')
+        self.mock_get_client = self.mock_get_client_patcher.start()
+        self.addCleanup(self.mock_get_client_patcher.stop)
+
+        # Setup mock client that _get_client_instance will return
+        self.mock_client = MagicMock(spec=BaseClient) # Use spec for better mocking
+        self.mock_client.config = MagicMock(spec=ProviderConfig)
+        self.mock_client.config.default_model = 'claude-3-5-sonnet-mock'
+        self.mock_client.get_available_models.return_value = ['claude-3-5-sonnet-mock', 'claude-3-7-sonnet']
+        # Mock the actual API call method if needed, though this test focuses on message flow
+        self.mock_client.chat_completion = AsyncMock(return_value="Mocked API Response")
+        self.mock_get_client.return_value = self.mock_client
+
+        # Mock the Executor's execute method directly as it's used by AgentRunner
+        self.mock_execute_patcher = patch("Core.executor.Executor.execute", return_value = (
+            "@result read_file\n"
+            "exit_code: 0\n"
+            "output: File content: Hello from test!\n"
+            "@end"
+        ))
+        self.mock_execute = self.mock_execute_patcher.start()
+        self.addCleanup(self.mock_execute_patcher.stop)
+
+
+        # Reset tool registry if needed (though mocking execute bypasses it here)
         registry = ToolRegistry()
         registry._tools.clear()
         registry._discovered = False
 
-        self.mock_chat_completion = AsyncMock()
-        patcher1 = patch("Clients.API.anthropic.AnthropicClient.chat_completion", new=self.mock_chat_completion)
-        self.addCleanup(patcher1.stop)
-        patcher1.start()
-
-        self.mock_execute = MagicMock()
-        patcher2 = patch("Core.agent_runner.Executor.execute", new=self.mock_execute)
-        self.addCleanup(patcher2.stop)
-        patcher2.start()
 
     def test_tool_call_in_response(self):
-        # Create an AgentRunner instance with use_system_prompt set to False.
-        agent = AgentRunner("anthropic", "claude-3-7-sonnet", use_system_prompt=False)
-        
-        # Add a user message
+        # Instantiate AgentRunner correctly - it will use the mocked _get_client_instance
+        agent = AgentRunner(provider="anthropic", model="claude-3-7-sonnet", use_system_prompt=False)
+
+        # Add messages manually to test the sequence storage
         agent.add_message('user', "User wants to read a file.")
-        
-        # Add the tool call message
+
         tool_call_response = (
             "@tool read_file\n"
             "path: ./my_test_file.txt\n"
@@ -41,7 +59,6 @@ class TestIntegrationFlow(unittest.TestCase):
         )
         agent.add_message('assistant', tool_call_response)
 
-        # Add the tool result message
         tool_result = (
             "@result read_file\n"
             "exit_code: 0\n"
@@ -50,20 +67,23 @@ class TestIntegrationFlow(unittest.TestCase):
         )
         agent.add_message('assistant', tool_result)
 
-        # Verify that messages are added correctly
+        # Verify messages list
         messages = agent.messages
-        
-        # Verify the first message is the user message
+
+        self.assertEqual(len(messages), 3)
+
         self.assertEqual(messages[0].role, "user")
         self.assertEqual(messages[0].content, "User wants to read a file.")
-        
-        # Verify that the second message contains the tool call
+
         self.assertEqual(messages[1].role, "assistant")
         self.assertEqual(messages[1].content, tool_call_response)
-        
-        # Verify that the third message contains the tool result
+
         self.assertEqual(messages[2].role, "assistant")
         self.assertEqual(messages[2].content, tool_result)
+
+        # Clean up dummy key if set
+        if os.environ.get("ANTHROPIC_API_KEY") == "dummy-key-anthropic":
+            del os.environ["ANTHROPIC_API_KEY"]
 
 if __name__ == '__main__':
     unittest.main()

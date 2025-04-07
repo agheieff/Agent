@@ -3,7 +3,6 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from Clients.base import BaseClient, ProviderConfig, ModelConfig, PricingTier, Message
-import traceback # Keep for error reporting if needed
 
 DEEPSEEK_CONFIG = ProviderConfig(
     name="deepseek",
@@ -19,7 +18,7 @@ DEEPSEEK_CONFIG = ProviderConfig(
                 input=0.07,
                 output=1.10,
                 input_cache_miss=0.27,
-                discount_hours=(16.5, 0.5), # Example: 4:30 PM UTC to 00:30 AM UTC
+                discount_hours=(16.5, 0.5),
                 discount_rate=0.50
             )
         ),
@@ -30,7 +29,7 @@ DEEPSEEK_CONFIG = ProviderConfig(
                 input=0.14,
                 output=2.19,
                 input_cache_miss=0.55,
-                discount_hours=(16.5, 0.5), # Example: 4:30 PM UTC to 00:30 AM UTC
+                discount_hours=(16.5, 0.5),
                 discount_rate=0.75
             )
         )
@@ -74,8 +73,6 @@ class DeepSeekClient(BaseClient):
             )
             return response
         except Exception as e:
-            # Add traceback print here for debugging if needed
-            # traceback.print_exc()
             raise RuntimeError(f"API error: {str(e)}") from e
 
     def _process_response(self, response):
@@ -122,7 +119,7 @@ class DeepSeekClient(BaseClient):
 
         if not formatted_messages:
             print("Warning: chat_completion_stream called with no messages to send.")
-            if False: yield # Return an empty async generator explicitly
+            if False: yield
             return
 
         params = {
@@ -143,12 +140,10 @@ class DeepSeekClient(BaseClient):
                          if hasattr(choice, 'delta') and choice.delta:
                               content_delta = choice.delta.content
                 except (IndexError, AttributeError):
-                     pass # Ignore errors accessing chunk attributes for now
+                     pass
 
                 if content_delta:
                     yield content_delta
 
         except Exception as e:
-            # Add traceback print here for debugging if needed
-            # traceback.print_exc()
             raise RuntimeError(f"Streaming error: {str(e)}") from e

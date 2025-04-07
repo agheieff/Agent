@@ -11,13 +11,11 @@ from Clients.base import BaseClient, ProviderConfig
 from Core.agent_config import AgentConfiguration
 from Core.agent_instance import AgentInstance
 from Core.executor import Executor
-from Tools.error_codes import ConversationEnded, ErrorCodes # Import ErrorCodes
+from Tools.error_codes import ConversationEnded, ErrorCodes
 from Prompts.main import build_system_prompt, discover_tools, Tool
-from Core.utils import get_multiline_input # Import needed utility
+from Core.utils import get_multiline_input
 
-# --- load_agent_configurations remains the same ---
 def load_agent_configurations(config_dir: str = "./AgentConfigs") -> List[AgentConfiguration]:
-    """Loads agent configurations from YAML files in a directory."""
     print(f"Loading agent configurations from: {config_dir}")
     configs = []
     config_path = Path(config_dir)
@@ -72,7 +70,6 @@ def load_agent_configurations(config_dir: str = "./AgentConfigs") -> List[AgentC
 
 
 class Orchestrator:
-    # --- __init__, _initialize_clients, _create_agents remain the same ---
     def __init__(self, config_list: List[AgentConfiguration]):
         self.agents: Dict[str, AgentInstance] = {}
         self.clients: Dict[str, BaseClient] = {}
@@ -125,9 +122,7 @@ class Orchestrator:
                 print(f"Unexpected error creating agent '{config.agent_id}': {e}")
                 traceback.print_exc()
 
-    # --- Updated run_main_loop with Pause Check Debugging ---
     async def run_main_loop(self, initial_prompt: str, target_agent_id: str = "ceo", max_turns: int = 10):
-        """Runs the main execution loop, handling pauses."""
         print(f"\n--- Starting Main Loop (Target: {target_agent_id}, Max Turns: {max_turns}) ---")
         agent = self.agents.get(target_agent_id)
         if not agent:
@@ -145,19 +140,15 @@ class Orchestrator:
                 if agent.messages and agent.messages[-1].role == 'assistant':
                     agent.add_message('user', "Proceed.")
 
-                # --- Execute Turn ---
-                # This might raise ConversationEnded if 'end' tool is called and handled by Executor
                 result = await agent.execute_turn()
                 turn_count += 1
 
-                # --- Check for Pause Request (AFTER turn execution) ---
                 print(f"DEBUG Orchestrator: Checking pause flag for agent '{agent.config.agent_id}'. Flag is: {agent.pause_requested_by_tool}") # DEBUG
                 if agent.pause_requested_by_tool:
                     print(f"DEBUG Orchestrator: Pause flag is True. Entering pause handling.") # DEBUG
                     agent.pause_requested_by_tool = False # Reset flag
 
                     pause_message = "Agent paused. Please provide input or press Enter to continue."
-                    # Extract the specific message from the *last assistant message* which should be the pause tool result
                     if agent.messages and agent.messages[-1].role == 'assistant' and agent.messages[-1].content.startswith("@result pause"):
                          try:
                              lines = agent.messages[-1].content.split('\n')
@@ -183,14 +174,12 @@ class Orchestrator:
                         print("[Empty input received. Resuming autonomous run...]")
 
                     print(f"DEBUG Orchestrator: Continuing loop after pause handling.") # DEBUG
-                    continue # Go to next iteration
+                    continue
 
-                # --- Other loop control checks ---
                 if isinstance(result, str) and result.startswith("[ERROR:"):
                     print(f"\n[Orchestrator] Agent '{target_agent_id}' reported error. Stopping loop.")
                     break
 
-                # Simplified check: Stop if agent returns empty string and last message wasn't a tool call result
                 if result == "" and agent.messages and not agent.messages[-1].content.startswith("@result"):
                      print(f"\n[Orchestrator] Agent '{target_agent_id}' produced no text output. Stopping loop.")
                      break
@@ -203,7 +192,6 @@ class Orchestrator:
 
         except ConversationEnded as e:
             print(f"\n[Orchestrator] Caught ConversationEnded signal.")
-            # Optional: print the message from the exception: print(f"  End message: {e}")
         except KeyboardInterrupt:
             print("\n[Orchestrator] Keyboard interrupt detected. Stopping.")
         except Exception as e:

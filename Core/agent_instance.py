@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from Core.agent_config import AgentConfiguration
 
 class AgentInstance:
-    # --- __init__ and add_message remain the same ---
     def __init__(self, config: 'AgentConfiguration', client: BaseClient, executor: Executor, all_discovered_tools: Dict[str, Tool]):
         if not config or not client or not executor or all_discovered_tools is None:
              raise ValueError("AgentInstance requires config, client, executor, and all_discovered_tools.")
@@ -59,13 +58,10 @@ class AgentInstance:
             if len(self.messages) == 1 and self.messages[0].role == 'system': return "[ERROR: Turn cannot start with only a system message]"
             if self.messages[-1].role == 'system': print(f"Warning (Agent: {self.config.agent_id}): Executing turn where last message is system.")
 
-            # --- Get stream from LLM ---
-            # <<< CHANGE: Removed 'await' from the next line >>>
             stream = self.client.chat_completion_stream(
                 messages=self.messages,
                 model=self.config.model_name
             )
-            # Now 'stream' is assumed to be the async generator object directly
 
             processed_stream_generator = self.stream_manager.process_stream(stream)
 
@@ -100,7 +96,6 @@ class AgentInstance:
              print(f"\n[AgentInstance '{self.config.agent_id}' propagating ConversationEnded]")
              raise ce
         except Exception as e:
-            # Check if the error is the specific TypeError we are trying to avoid
             if isinstance(e, TypeError) and "async_generator" in str(e) and "await" in str(e):
                  error_msg = "[ERROR: Client stream method returned generator directly - code needs adjustment]"
                  print(f"\n[Agent '{self.config.agent_id}' FATAL error: {error_msg}] - {e}")
@@ -116,7 +111,6 @@ class AgentInstance:
         return "[ERROR: Unexpected end of execute_turn]"
 
 
-    # --- _handle_tool_call remains the same ---
     async def _handle_tool_call(self, partial_response: str, tool_data: dict):
         if partial_response.strip(): self.add_message('assistant', partial_response.strip())
         tool_name = tool_data.get('tool')

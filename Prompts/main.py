@@ -1,44 +1,39 @@
 import os
-import json
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, TYPE_CHECKING
 import inspect
 
 from Tools.Core.registry import ToolRegistry
-from Tools.base import Tool, Argument
-from Tools.error_codes import ErrorCodes
+from Tools.base import Tool, Argument, ArgumentType # Added ArgumentType
+
+# Avoid circular import, only needed for type hints
+if TYPE_CHECKING:
+    from Core.agent_config import AgentConfiguration
+
+# --- Tool Discovery Logic (Keep as is or refine) ---
 
 @dataclass
 class ToolInfo:
     name: str
     description: str
-    args: List[Dict[str, str]]
-    examples: List[str]
-
-class PromptGenerator:
-    def __init__(self):
-        self.sections = []
-
-    def add_section(self, title: str, content: str):
-        self.sections.append((title, content))
-        return self
-
-    def generate(self) -> str:
-        return "\n\n".join(
-            f"# {title.upper()}\n{content}"
-            for title, content in self.sections
-        )
+    args: List[Dict[str, str]] = field(default_factory=list)
+    examples: List[str] = field(default_factory=list)
 
 def get_tool_info(tool_instance: Tool) -> ToolInfo:
     """Extracts metadata from a Tool instance."""
     arg_list = []
     if hasattr(tool_instance, "args"):
         for arg in tool_instance.args:
-            arg_list.append({
+            arg_info = {
                 "name": arg.name,
-                "type": arg.arg_type.name,
-                "description": arg.description
-            })
+                "type": arg.arg_type.name, # Use Enum name
+                "description": arg.description,
+                "optional": arg.optional,
+            }
+            if arg.optional and arg.default is not None:
+                 arg_info["default"] = str(arg.default) # Include default if present
+            arg_list.append(arg_info)
+
     examples = getattr(tool_instance, "examples", [])
     return ToolInfo(
         name=tool_instance.name,
@@ -47,87 +42,133 @@ def get_tool_info(tool_instance: Tool) -> ToolInfo:
         examples=examples
     )
 
-def discover_tools() -> List[Tool]:
+def discover_tools() -> Dict[str, Tool]:
+    """Discovers tools and returns them as a dictionary."""
     registry = ToolRegistry()
-    registry.discover_tools()
-    return sorted(list(registry.get_all().values()), key=lambda t: t.name)
+    # Ensure discovery runs if it hasn't already
+    if not registry._discovered:
+         print("Running tool discovery...")
+         registry.discover_tools()
+    return registry.get_all() # Return the dict
 
-def generate_tools_overview() -> str:
-    tools_dir = os.path.join(os.path.dirname(__file__), "..", "Tools")
+# --- Prompt Building Logic ---
 
-    tree_lines = []
-    for root, dirs, files in os.walk(tools_dir):
-        dirs[:] = [d for d in dirs if not d.startswith('.') and d != '__pycache__']
-        files = [f for f in files if not f.startswith('.') and not f.startswith('__')]
-        level = root.replace(tools_dir, "").count(os.sep)
-        indent = "    " * level
-        tree_lines.append(f"{indent}{os.path.basename(root)}/")
-        sub_indent = "    " * (level + 1)
-        for f in files:
-            tree_lines.append(f"{sub_indent}{f}")
-    file_structure = "\n".join(tree_lines)
+class PromptGenerator:
+    """Simple builder for constructing multi-section prompts."""
+    def __init__(self):
+        self.sections = []
 
-    tools = discover_tools()
-    tool_overview_lines = ["Available Tools:"]
-    for tool in tools:
-        tool_overview_lines.append(f"- {tool.name}: {tool.description}")
+    def add_section(self, title: str, content: str):
+        if content and content.strip(): # Only add sections with content
+             self.sections.append((title.strip(), content.strip()))
+        return self
 
-    overview = (
-        "File Structure of Tools Directory:\n"
-        f"{file_structure}\n\n"
-        + "\n".join(tool_overview_lines)
-    )
-    return overview
+    def generate(self) -> str:
+        return "\n\n".join(
+            f"# {title.upper()}\n{content}"
+            for title, content in self.sections
+            if content # Ensure content exists before joining
+        ).strip()
 
-def generate_system_prompt(provider: str) -> str:
+def build_allowed_tools_section(all_tools: Dict[str, Tool], allowed_tool_names: List[str]) -> str:
+    """Generates Markdown documentation for allowed tools."""
+    if not allowed_tool_names:
+        return "No tools are available or allowed for this agent."
+
+    tool_docs = []
+    # Sort allowed names for consistent output
+    sorted_allowed_names = sorted(list(set(allowed_tool_names)))
+
+    for tool_name in sorted_allowed_names:
+        tool_instance = all_tools.get(tool_name)
+        if not tool_instance:
+            tool_docs.append(f"### {tool_name}\n*Warning: Tool '{tool_name}' not found in registry.*")
+            continue
+
+        info = get_tool_info(tool_instance)
+        tool_docs.append(f"### {info.name}\n{info.description}")
+        if info.args:
+            tool_docs.append("**Arguments:**")
+            for arg in info.args:
+                 details = f"- `{arg['name']}` ({arg['type']})"
+                 if arg['optional']: details += " (optional"
+                 if 'default' in arg: details += f", default: `{arg['default']}`"
+                 if arg['optional']: details += ")"
+                 details += f": {arg['description']}"
+                 tool_docs.append(details)
+        # Add examples if they exist
+        # if info.examples:
+        #     tool_docs.append("**Examples:**")
+        #     for ex in info.examples:
+        #         tool_docs.append(f"  ```\n  {ex}\n  ```") # Format examples nicely
+        tool_docs.append("") # Add spacing between tools
+
+    return "\n".join(tool_docs)
+
+
+def build_system_prompt(config: 'AgentConfiguration', all_discovered_tools: Dict[str, Tool]) -> str:
+    """
+    Builds the system prompt for an agent based on its configuration.
+
+    Args:
+        config: The AgentConfiguration object.
+        all_discovered_tools: A dictionary of all tools found by discover_tools().
+
+    Returns:
+        The fully constructed system prompt string.
+    """
     builder = PromptGenerator()
 
-    builder.add_section("Role", 
-        "You are an autonomous AI assistant with tool usage capabilities. "
-        "Your purpose is to assist users by executing tasks using available tools. "
-        "The code is currently in testing, not fully developed yet, so don't expect everything to work smoothly." #TODO delete later
-    )
+    # 1. Core Directives (Always Included)
+    core_directives = """
+You are an autonomous AI assistant.
+Think step-by-step. Plan your actions.
+Use available tools when necessary by following the specified format precisely.
+Base your responses and actions *only* on the information provided in the conversation history and tool results.
+Do not hallucinate tool availability or functionality.
+If you lack necessary information or permissions, state it clearly.
+""".strip()
+    builder.add_section("Core Directives", core_directives)
 
-    builder.add_section("Tool Usage",
-        "Use tools by specifying @tool followed by the tool name and arguments.\n"
-        "Example: @tool read_file path='file.txt' lines=10\n"
-        "End the tool call with @end.\n\n"
-        "You can embed multiple lines in the tool call body.\n"
-        "For instance:\n"
-        "@tool edit_file\nfilename: 'notes.txt'\nreplacements: '{\"Hello\":\"World\"}'\n@end"
-    )
+    # 2. Role & Goal (From Config)
+    # The config.system_prompt should contain the primary role definition and high-level goals.
+    builder.add_section(f"Role: {config.role}", config.system_prompt)
 
-    builder.add_section("File Paths",
-        "When working with files:\n"
-        "- Use absolute paths (/path/to/file) or relative paths (./file.txt)\n"
-        "- ~ expands to user home directory\n"
-        "- Paths are case-sensitive\n"
-        "- Don't use quotation marks with paths"
-    )
+    # 3. Tool Usage Instructions (Always Included)
+    tool_usage = """
+To use a tool, output a block EXACTLY like this, replacing placeholders:
+@tool <tool_name>
+<argument_name_1>: <value_1>
+<argument_name_2>: <value_2>
+...
+@end
 
-    if provider == "anthropic":
-        builder.add_section("Formatting",
-            "For Anthropic, please note that special XML-like tags might be used, "
-            "but you should still prefer the @tool ... @end style in your responses."
-        )
+- `<tool_name>` must be one of the tools listed below in the "Allowed Tools" section.
+- Arguments should be listed one per line: `argument_name: value`.
+- Values should be plain text/numbers/booleans. Do NOT enclose file paths or simple strings in extra quotes unless the quotes are part of the actual value required by the tool.
+- For multi-line values (e.g., file content), you can potentially use multi-line formatting if the tool supports it, but typically provide content directly.
+- Ensure the `@end` tag is on its own line.
+- Only call tools listed under "Allowed Tools". Do not attempt to use other tools.
+- After you output a tool call, execution will pause. You will receive the tool's result in the next turn as an assistant message starting with '@result <tool_name>'. Analyze the result before proceeding.
+""".strip()
+    builder.add_section("Tool Usage Format", tool_usage)
 
-    # Detailed Tools Documentation Section
-    tools_section = ["## Available Tools"]
-    for tool_instance in discover_tools():
-        info = get_tool_info(tool_instance)
-        tools_section.append(f"### {info.name}\n{info.description}")
-        if info.args:
-            tools_section.append("**Arguments:**")
-            for arg in info.args:
-                tools_section.append(f"- {arg['name']}: {arg['description']}")
-        if info.examples:
-            tools_section.append("**Examples:**")
-            for ex in info.examples:
-                tools_section.append(f"  {ex}")
+    # 4. File Path Rules (If any file tools are allowed)
+    file_tools_allowed = any(t in config.allowed_tools for t in ['ls', 'read_file', 'write_file', 'edit_file', 'delete_file'])
+    if file_tools_allowed:
+         path_rules = """
+- Use relative paths (e.g., `my_dir/file.txt`, `./output.log`) or absolute paths (e.g., `/app/data/config.json`).
+- Assume the current working directory is the project root unless specified otherwise.
+- Paths are case-sensitive on Linux/macOS.
+- Do NOT add quotes around path arguments (e.g., use `path: my_file.txt`, NOT `path: 'my_file.txt'`).
+""".strip()
+         builder.add_section("File Path Handling", path_rules)
 
-    builder.add_section("Tools", "\n".join(tools_section))
 
-    tools_overview = generate_tools_overview()
-    builder.add_section("Tool Overview", tools_overview)
+    # 5. Allowed Tools Documentation (Filtered based on Config)
+    allowed_tools_docs = build_allowed_tools_section(all_discovered_tools, config.allowed_tools)
+    builder.add_section("Allowed Tools", allowed_tools_docs)
+
+    # 6. (Future) Add sections for Communication Protocols, Task Management Rules, etc.
 
     return builder.generate()

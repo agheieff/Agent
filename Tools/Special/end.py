@@ -1,4 +1,5 @@
 from Tools.base import Tool, Argument, ToolConfig, ErrorCodes, ArgumentType, ToolResult
+from Tools.error_codes import ConversationEnded, ErrorCodes
 
 class End(Tool):
     def __init__(self):

@@ -6,10 +6,9 @@ class Pause(Tool):
             test_mode=True,
             needs_sudo=False
         )
-
         super().__init__(
             name="pause",
-            description="Pauses the agent and waits for user input",
+            description="Pauses the agent and signals the orchestrator to wait for user input",
             args=[
                 Argument(
                     name="message",
@@ -23,7 +22,8 @@ class Pause(Tool):
         )
 
     def _run(self, args):
+        """Signals that a pause is requested, returning the message to display."""
         message = args.get("message")
-        print(f"\n{message}\n")
-        user_input = input("> ")
-        return ToolResult(success=True, code=ErrorCodes.SUCCESS, message=f"User input: {user_input}")
+        print(f"[Pause Tool Executed] Signaling pause with message: '{message}'")
+        # Return the specific message the orchestrator should show the user
+        return ToolResult(success=True, code=ErrorCodes.SUCCESS, message=message)

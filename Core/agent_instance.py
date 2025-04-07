@@ -1,102 +1,89 @@
 import asyncio
-from typing import List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 import traceback
 
 from Clients.base import BaseClient, Message
 from Core.tool_parser import ToolCallParser
 from Core.executor import Executor
 from Core.stream_manager import StreamManager
+# Make sure ConversationEnded can be caught here if needed, and ErrorCodes for check
 from Tools.error_codes import ConversationEnded, ErrorCodes
+from Tools.base import Tool, ToolResult # Import Tool and ToolResult
+from Prompts.main import build_system_prompt
 
 if TYPE_CHECKING:
     from Core.agent_config import AgentConfiguration
 
 class AgentInstance:
-    def __init__(self, config: 'AgentConfiguration', client: BaseClient, executor: Executor):
-        if not config or not client or not executor:
-             raise ValueError("AgentInstance requires config, client, and executor.")
-
+    def __init__(self, config: 'AgentConfiguration', client: BaseClient, executor: Executor, all_discovered_tools: Dict[str, Tool]):
+        if not config or not client or not executor or all_discovered_tools is None:
+             raise ValueError("AgentInstance requires config, client, executor, and all_discovered_tools.")
         self.config = config
         self.client = client
         self.executor = executor
-
+        self.all_discovered_tools = all_discovered_tools
         self.messages: List[Message] = []
         self.tool_parser = ToolCallParser()
         self.stream_manager = StreamManager()
+        self.pause_requested_by_tool = False # Flag for orchestrator
+
+        system_prompt_text = build_system_prompt(self.config, self.all_discovered_tools)
+        if system_prompt_text:
+             self.add_message('system', system_prompt_text)
+        else:
+             print(f"Warning (Agent: {self.config.agent_id}): Generated system prompt is empty.")
 
         print(f"AgentInstance '{self.config.agent_id}' ({self.config.role}) initialized.")
         print(f"  Model: {self.config.model_provider}/{self.config.model_name}")
-        print(f"  Allowed Tools: {self.config.allowed_tools or 'All'}")
+        print(f"  Allowed Tools: {self.config.allowed_tools or 'None'}")
 
-        if self.config.system_prompt:
-            self.add_message('system', self.config.system_prompt)
-
+    # --- add_message remains the same ---
     def add_message(self, role: str, content: str):
         if role not in ["user", "assistant", "system"]:
             print(f"Warning (Agent: {self.config.agent_id}): Invalid message role '{role}'. Using 'user'.")
             role = "user"
-        if not isinstance(content, str):
-            content = str(content)
-        if not content.strip() and role != 'system':
-             print(f"Warning (Agent: {self.config.agent_id}): Attempted to add empty message for role '{role}'. Skipping.")
-             return
-
+        if not isinstance(content, str): content = str(content)
+        if not content.strip() and role != 'system': return
         if role == 'user' and content == "Proceed.":
-             if self.messages and self.messages[-1].role == 'user' and self.messages[-1].content == "Proceed.":
-                  return
-
+             if self.messages and self.messages[-1].role == 'user' and self.messages[-1].content == "Proceed.": return
         self.messages.append(Message(role=role, content=content))
 
+    # --- execute_turn remains the same ---
     async def execute_turn(self) -> Optional[str]:
+        self.pause_requested_by_tool = False # Reset flag at start of turn
         accumulated_response_before_tool = ""
         stream_interrupted_by_tool = False
         stream = None
         final_turn_output = None
-
         try:
-            if not self.messages or self.messages[-1].role == 'system':
-                 print(f"Warning (Agent: {self.config.agent_id}): Cannot execute turn starting with system prompt. Add user message.")
-                 # Or add a default user message? self.add_message('user', '...')
-                 return "[ERROR: Turn cannot start with system message]"
+            if not self.messages: return "[ERROR: Turn cannot start with empty history]"
+            if len(self.messages) == 1 and self.messages[0].role == 'system': return "[ERROR: Turn cannot start with only a system message]"
+            if self.messages[-1].role == 'system': print(f"Warning (Agent: {self.config.agent_id}): Executing turn where last message is system.")
 
-            # --- Get stream from LLM ---
-            # Note: Removed 'await' based on previous debugging for Anthropic client
-            stream = self.client.chat_completion_stream(
-                messages=self.messages,
-                model=self.config.model_name # Use model from config
-            )
-
+            stream = self.client.chat_completion_stream(messages=self.messages, model=self.config.model_name)
             processed_stream_generator = self.stream_manager.process_stream(stream)
 
-            # --- Process Stream ---
             async for chunk in processed_stream_generator:
                 output_text, tool_data = self.tool_parser.feed(chunk)
-
                 if output_text:
                     accumulated_response_before_tool += output_text
                     print(output_text, end='', flush=True)
-
                 if tool_data:
                     print("\n[Tool call detected - interrupting stream]")
                     stream_interrupted_by_tool = True
                     await self.stream_manager.close_stream(stream)
-                    # Handle tool call internally, updating self.messages
                     await self._handle_tool_call(accumulated_response_before_tool, tool_data)
-                    print("[Continuing after tool execution...]")
+                    print("[Finishing turn after tool execution...]")
                     accumulated_response_before_tool = ""
-                    return None
-
+                    return None # Signal turn ended with tool use
             if not stream_interrupted_by_tool:
                 if accumulated_response_before_tool:
                     print()
                     self.add_message('assistant', accumulated_response_before_tool)
                     final_turn_output = accumulated_response_before_tool
                 else:
-                    print("\n[Agent produced no text response for this turn segment]")
                     final_turn_output = ""
-
             return final_turn_output
-
         except asyncio.TimeoutError:
             print("\n[Streaming timeout]")
             if stream: await self.stream_manager.close_stream(stream)
@@ -104,7 +91,7 @@ class AgentInstance:
             self.add_message('assistant', error_msg)
             return error_msg
         except ConversationEnded as ce:
-             print(f"\n[ConversationEnded signal received by agent '{self.config.agent_id}']")
+             print(f"\n[AgentInstance '{self.config.agent_id}' propagating ConversationEnded]")
              raise ce
         except Exception as e:
             error_msg = f"[ERROR: {type(e).__name__} - {str(e)}]"
@@ -115,39 +102,58 @@ class AgentInstance:
                 except Exception as close_err: print(f"[Error closing stream after exception: {close_err}]")
             self.add_message('assistant', error_msg)
             return error_msg
-
         return "[ERROR: Unexpected end of execute_turn]"
 
-    async def _handle_tool_call(self, partial_response: str, tool_data: dict):
-        if partial_response.strip():
-            self.add_message('assistant', partial_response.strip())
 
+    # --- Updated _handle_tool_call ---
+    async def _handle_tool_call(self, partial_response: str, tool_data: dict):
+        if partial_response.strip(): self.add_message('assistant', partial_response.strip())
         tool_name = tool_data.get('tool')
         tool_args_dict = tool_data.get('args', {})
+        result_str = ""
+        tool_succeeded = False # Track if the tool execution succeeded
+        parsed_exit_code = -99 # Default
 
-        # --- Permission Check ---
         if self.config.allowed_tools and tool_name not in self.config.allowed_tools:
              print(f"\n[Agent '{self.config.agent_id}' DENIED permission for tool: {tool_name}]")
-             result_str = f"@result {tool_name}\nexit_code: {ErrorCodes.PERMISSION_DENIED}\noutput: Agent does not have permission to use this tool.\n@end"
+             result_str = format_result(tool_name, ErrorCodes.PERMISSION_DENIED, "Agent does not have permission to use this tool.")
+             parsed_exit_code = ErrorCodes.PERMISSION_DENIED
         else:
-            # --- Execute Tool ---
-            args_str = "\n".join([f"{k}: {v}" for k, v in tool_args_dict.items()])
-            # Log the planned tool call
-            tool_call_message_content = f"Calling tool: {tool_name} with arguments:\n{args_str}"
-            self.add_message('assistant', tool_call_message_content)
+             args_str = "\n".join([f"{k}: {v}" for k, v in tool_args_dict.items()])
+             tool_call_message_content = f"Calling tool: {tool_name} with arguments:\n{args_str}"
+             self.add_message('assistant', tool_call_message_content)
+             tool_executor_input = f"@tool {tool_name}\n{args_str}\n@end"
+             print(f"\n[Agent '{self.config.agent_id}' executing tool: {tool_name}]")
+             try:
+                 # Execute and get result string. Might raise ConversationEnded.
+                 result_str = self.executor.execute(tool_executor_input, agent_config=self.config)
+                 print(f"\n[Tool result for {tool_name}]:\n{result_str}\n")
+                 # Try to parse the exit code from the result
+                 if result_str.startswith(f"@result {tool_name}"):
+                     lines = result_str.split('\n')
+                     try:
+                         for line in lines:
+                             if line.startswith("exit_code: "):
+                                 parsed_exit_code = int(line.split("exit_code: ", 1)[1])
+                                 tool_succeeded = (parsed_exit_code == ErrorCodes.SUCCESS)
+                                 break
+                     except (ValueError, IndexError):
+                         print(f"Warning: Could not parse exit code from tool result: {result_str}")
+                         parsed_exit_code = ErrorCodes.UNKNOWN_ERROR # Assume failure if unparseable
 
-            tool_executor_input = f"@tool {tool_name}\n{args_str}\n@end"
-            print(f"\n[Agent '{self.config.agent_id}' executing tool: {tool_name}]")
-            result_str = self.executor.execute(tool_executor_input) # Use shared executor
-            print(f"\n[Tool result for {tool_name}]:\n{result_str}\n")
+             except ConversationEnded as ce:
+                  print(f"[AgentInstance '{self.config.agent_id}' caught ConversationEnded during tool execution]")
+                  # Don't add result message, just re-raise
+                  raise ce
+             except Exception as exec_err:
+                  print(f"ERROR during executor.execute for tool {tool_name}: {exec_err}")
+                  result_str = format_result(tool_name, ErrorCodes.UNKNOWN_ERROR, f"Executor error: {exec_err}")
+                  parsed_exit_code = ErrorCodes.UNKNOWN_ERROR
 
-            # --- Handle Pause Tool Side-Effect ---
-            # The 'pause' tool itself still handles the input() call.
-            # The Orchestrator will need to know if pause was called to halt the main loop.
-            # This instance doesn't know about the external loop, so we just note it happened.
-            if tool_name == "pause":
-                 print(f"[Agent '{self.config.agent_id}' used Pause Tool]")
-                 # We need a way to signal this back to the orchestrator.
-                 # For now, the orchestrator won't know. We'll add this later.
+        # --- Set Pause Flag based on SUCCESSFUL pause tool execution ---
+        if tool_name == "pause" and tool_succeeded:
+             print(f"DEBUG AgentInstance: Setting pause_requested_by_tool = True for agent {self.config.agent_id}")
+             self.pause_requested_by_tool = True # Set instance flag
 
+        # Add the final tool result string to history (unless ConversationEnded was raised)
         self.add_message('assistant', f"Tool {tool_name} execution result:\n{result_str}")

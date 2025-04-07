@@ -2,174 +2,81 @@
 import os
 import sys
 import argparse
-import importlib
-import inspect
 import dotenv
-from typing import Dict, List, Tuple, Any
 import asyncio
+import traceback
 
-from Core.agent_runner import AgentRunner
+# Ensure project root is in path
+project_root = os.path.dirname(os.path.abspath(__file__))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from Core.orchestrator import Orchestrator, load_agent_configurations
 from Core.utils import get_multiline_input
-from Prompts.main import generate_system_prompt
 
 def load_env_variables():
-    env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    env_file = os.path.join(project_root, ".env")
     if os.path.isfile(env_file):
         print(f"Loading environment variables from {env_file}")
         dotenv.load_dotenv(env_file)
     else:
-        print("Warning: .env file not found. API keys will need to be set manually.")
-        print("Create a .env file with the provider API keys:")
-        print("OPENAI_API_KEY=your_key_here")
-        print("ANTHROPIC_API_KEY=your_key_here")
-        print("DEEPSEEK_API_KEY=your_key_here")
-        print("GOOGLE_API_KEY=your_key_here (for Gemini)")
-
-def discover_providers() -> Dict[str, Any]:
-    providers = {}
-    clients_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Clients", "API")
-
-    for filename in os.listdir(clients_dir):
-        if filename.endswith('.py') and not filename.startswith('__'):
-            module_name = filename[:-3]
-            try:
-                module = importlib.import_module(f"Clients.API.{module_name}")
-                provider_name = module_name.lower()
-                env_var_name = f"{provider_name.upper()}_API_KEY"
-
-                for name, obj in inspect.getmembers(module):
-                    if (inspect.isclass(obj) and 
-                        name.endswith('Client') and 
-                        name.lower().startswith(provider_name)):
-                        if os.environ.get(env_var_name):
-                            providers[provider_name] = obj
-                        break
-            except (ImportError, AttributeError) as e:
-                print(f"Warning: Could not import provider module {module_name}: {e}")
-
-    return providers
-
-def get_available_models(provider_class: Any) -> List[str]:
-    try:
-        provider_instance = provider_class()
-        return sorted(provider_instance.get_available_models())
-    except Exception as e:
-        print(f"Error getting models for provider: {e}")
-        return []
-
-def interactive_provider_selection(providers: Dict[str, Any]) -> Tuple[str, Any]:
-    if not providers:
-        print("Error: No valid providers found with API keys set.")
-        print("Please set API keys in your .env file for at least one provider:")
-        print("  ANTHROPIC_API_KEY=your_key_here")
-        print("  DEEPSEEK_API_KEY=your_key_here")
-        sys.exit(1)
-
-    provider_names = sorted(providers.keys())
-
-    print("\nAvailable providers:")
-    for i, name in enumerate(provider_names, 1):
-        print(f"  {i}. {name}")
-
-    while True:
-        try:
-            choice = input("\nSelect a provider (number or name): ")
-
-            if choice.isdigit():
-                idx = int(choice) - 1
-                if 0 <= idx < len(provider_names):
-                    provider_name = provider_names[idx]
-                    return provider_name, providers[provider_name]
-                else:
-                    print(f"Invalid selection. Please enter 1-{len(provider_names)}.")
-            elif choice.lower() in providers:
-                return choice.lower(), providers[choice.lower()]
-            else:
-                print(f"Provider '{choice}' not found. Please try again.")
-
-        except (ValueError, KeyError, IndexError):
-            print("Invalid selection. Please try again.")
-
-def interactive_model_selection(provider_name: str, provider_class: Any) -> str:
-    models = get_available_models(provider_class)
-
-    if not models:
-        print(f"Error: No models available for provider '{provider_name}'.")
-        sys.exit(1)
-
-    print(f"\nAvailable {provider_name} models:")
-    for i, model in enumerate(models, 1):
-        print(f"  {i}. {model}")
-
-    while True:
-        try:
-            choice = input("\nSelect a model (number or name): ")
-            if choice.isdigit():
-                idx = int(choice) - 1
-                if 0 <= idx < len(models):
-                    return models[idx]
-                else:
-                    print(f"Invalid selection. Please enter 1-{len(models)}.")
-            elif choice in models:
-                return choice
-            else:
-                print(f"Model '{choice}' not found. Please try again.")
-        except (ValueError, KeyError, IndexError):
-            print("Invalid selection. Please try again.")
+        print("Warning: .env file not found. API keys must be set in environment.")
 
 async def main():
     load_env_variables()
-    providers = discover_providers()
 
-    parser = argparse.ArgumentParser(description="Run an AI agent with tool execution capabilities")
-    parser.add_argument("--provider", "-p", type=str, default=None,
-                        help="The model provider to use (e.g., openai, anthropic, gemini)")
-    parser.add_argument("--model", "-m", type=str, default=None,
-                        help="The model name to use")
-    parser.add_argument("--prompt", type=str, default=None,
-                        help="Initial prompt to send to the agent")
-    parser.add_argument("--prompt-file", type=str, default=None,
-                        help="File containing the initial prompt")
+    parser = argparse.ArgumentParser(description="Run the multi-agent system orchestrator.")
+    parser.add_argument("--prompt", type=str, default=None, help="Initial prompt for the CEO agent.")
+    parser.add_argument("--agent", type=str, default="ceo", help="ID of the agent to interact with initially.")
+    parser.add_argument("--max-turns", type=int, default=10, help="Maximum number of autonomous turns.")
+    # Add args to override default model/provider for specific agents later if needed
+    # parser.add_argument("--ceo-provider", type=str, help="Override CEO provider")
+    # parser.add_argument("--ceo-model", type=str, help="Override CEO model")
+
     args = parser.parse_args()
 
-    if args.provider:
-        if args.provider.lower() in providers:
-            provider_name = args.provider.lower()
-            provider_class = providers[provider_name]
-        else:
-            print(f"Error: Provider '{args.provider}' not found.")
-            print(f"Available providers: {', '.join(providers.keys())}")
-            sys.exit(1)
-    else:
-        provider_name, provider_class = interactive_provider_selection(providers)
+    initial_prompt = args.prompt
+    if not initial_prompt:
+        initial_prompt = get_multiline_input("Enter the initial prompt for the CEO agent (press Enter twice to submit):\n")
+        if not initial_prompt:
+             print("Error: No initial prompt provided.")
+             sys.exit(1)
 
-    if args.model:
-        available = get_available_models(provider_class)
-        if args.model in available:
-            model_name = args.model
-        else:
-            print(f"Error: Model '{args.model}' not found for provider '{provider_name}'.")
-            print(f"Available models: {', '.join(available)}")
-            sys.exit(1)
-    else:
-        model_name = interactive_model_selection(provider_name, provider_class)
+    try:
+        # Load configurations (replace with file loading later)
+        agent_configs = load_agent_configurations()
 
-    initial_prompt = ""
-    if args.prompt:
-        initial_prompt = args.prompt.strip()
-    elif args.prompt_file:
-        try:
-            with open(args.prompt_file, 'r') as f:
-                initial_prompt = f.read().strip()
-        except Exception as e:
-            print(f"Error reading prompt file: {e}")
-            sys.exit(1)
-    else:
-        initial_prompt = get_multiline_input("Enter your prompt (press Enter twice to submit): ")
+        # --- Optional: Override config based on args ---
+        # Example: Override CEO model if args are provided
+        # if args.ceo_provider or args.ceo_model:
+        #     for cfg in agent_configs:
+        #         if cfg.agent_id == 'ceo':
+        #             if args.ceo_provider: cfg.model_provider = args.ceo_provider
+        #             if args.ceo_model: cfg.model_name = args.ceo_model
+        #             print(f"Overriding CEO config: Provider={cfg.model_provider}, Model={cfg.model_name}")
+        #             break
+        # --------------------------------------------
 
-    agent = AgentRunner(provider_name, model_name)
+        # Initialize and run the orchestrator
+        orchestrator = Orchestrator(agent_configs)
+        if args.agent not in orchestrator.agents:
+             print(f"Error: Initial agent '{args.agent}' not found in loaded configurations.")
+             print(f"Available agents: {list(orchestrator.agents.keys())}")
+             sys.exit(1)
 
-    await agent.run(initial_prompt)
+        await orchestrator.run_main_loop(
+            initial_prompt=initial_prompt,
+            target_agent_id=args.agent,
+            max_turns=args.max_turns
+        )
+
+    except Exception as e:
+        print(f"\nAn error occurred during orchestrator setup or execution: {e}")
+        traceback.print_exc()
+        sys.exit(1)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nExecution cancelled by user.")

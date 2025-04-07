@@ -85,7 +85,6 @@ class AnthropicClient(BaseClient):
             "model": model_to_use,
             "max_tokens": kwargs.get('max_tokens', 500),
             "temperature": kwargs.get('temperature', 0.7),
-            "stream": True
         }
         if formatted_data["system"]:
             params["system"] = formatted_data["system"]

@@ -1,6 +1,7 @@
 import asyncio
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING, Union
 import traceback
+import re # Import re for parsing
 
 from Clients.base import BaseClient, Message
 from Core.tool_parser import ToolCallParser
@@ -12,6 +13,9 @@ from Prompts.main import build_system_prompt
 
 if TYPE_CHECKING:
     from Core.agent_config import AgentConfiguration
+
+# Define a unique signal object
+TOOL_EXECUTED_SIGNAL = object()
 
 def format_result(name: str, exit_code: int, output: str) -> str:
     safe_output = str(output).replace('@end', '@_end')
@@ -29,7 +33,6 @@ class AgentInstance:
         self.messages: List[Message] = []
         self.tool_parser = ToolCallParser()
         self.stream_manager = StreamManager()
-        # self.pause_requested_by_tool = False # This flag is no longer needed
 
         system_prompt_text = build_system_prompt(self.config, self.all_discovered_tools)
         if system_prompt_text:
@@ -49,8 +52,12 @@ class AgentInstance:
         if not isinstance(content, str):
             content = str(content)
 
+        # Allow empty system messages, but generally avoid empty user/assistant messages
+        # Allow empty assistant messages only if they follow a raw tool result message
         if not content.strip() and role != 'system':
-            return
+             if not (self.messages and self.messages[-1].role == 'assistant' and self.messages[-1].content.startswith("[Tool Result for")):
+                  return
+
 
         # Prevent adding duplicate "Proceed." messages
         if role == 'user' and content == "Proceed.":
@@ -59,12 +66,12 @@ class AgentInstance:
 
         self.messages.append(Message(role=role, content=content))
 
-    async def execute_turn(self) -> Optional[str]:
-        # self.pause_requested_by_tool = False # Flag removed
+    async def execute_turn(self) -> Union[Optional[str], object]: # Updated return type hint
         accumulated_response_before_tool = ""
         stream_interrupted_by_tool = False
         stream = None
         final_turn_output = None
+        tool_call_occurred = False # Add a flag to track if any tool was called this turn
 
         try:
             if not self.messages:
@@ -88,18 +95,24 @@ class AgentInstance:
                     print(output_text, end='', flush=True)
 
                 if tool_data:
+                    tool_call_occurred = True # Mark that a tool was called
                     print("\n[Tool call detected - interrupting stream]")
                     stream_interrupted_by_tool = True
-                    await self.stream_manager.close_stream(stream)
+                    # Ensure stream is closed *before* handling the tool call
+                    if stream:
+                         await self.stream_manager.close_stream(stream)
+                         stream = None # Avoid trying to close again later
 
                     # _handle_tool_call might raise PauseRequested or ConversationEnded
+                    # It now adds the RAW tool result to history itself.
                     await self._handle_tool_call(accumulated_response_before_tool, tool_data)
 
                     # If _handle_tool_call completed *without* raising an exception
                     # (meaning it was a normal, non-pausing tool)
                     print("[Finishing turn after non-pausing tool execution...]")
-                    accumulated_response_before_tool = "" # Reset buffer after successful non-pausing tool
-                    return None # Signal orchestrator to potentially continue or add "Proceed."
+                    # _handle_tool_call added raw result to history
+                    # Pre-tool text is NO LONGER added by _handle_tool_call
+                    return TOOL_EXECUTED_SIGNAL # Return signal
 
             # --- Stream finished without interruption ---
             if not stream_interrupted_by_tool:
@@ -107,26 +120,33 @@ class AgentInstance:
                     print() # Newline after stream output
                     self.add_message('assistant', accumulated_response_before_tool)
                     final_turn_output = accumulated_response_before_tool
-                else:
-                    # Handle case where stream completes but outputs nothing
-                    final_turn_output = "" 
+                # Check if stream ended AND no tool was ever triggered this turn
+                elif not tool_call_occurred:
+                     # Handle case where stream completes but outputs nothing AND no tool was called
+                     final_turn_output = ""
+                     self.add_message('assistant', final_turn_output) # Add empty message
+                else: # Stream ended, no final text, but a tool was called earlier
+                    final_turn_output = "" # Return empty, history already updated by _handle_tool_call
 
+            # Return the final text output (could be empty)
             return final_turn_output
+
 
         except asyncio.TimeoutError:
             print("\n[Streaming timeout]")
             if stream:
                 await self.stream_manager.close_stream(stream)
             error_msg = "[ERROR: Streaming timed out]"
-            # Don't add error message here, let orchestrator handle based on return
             return error_msg
 
         # --- Catch exceptions that signal control flow changes ---
         except PauseRequested as pr:
-             print(f"[AgentInstance '{self.config.agent_id}' propagating PauseRequested]")
-             raise pr # Propagate upwards
+            print(f"[AgentInstance '{self.config.agent_id}' propagating PauseRequested]")
+            if stream: await self.stream_manager.close_stream(stream) # Ensure stream closed on pause
+            raise pr # Propagate upwards
         except ConversationEnded as ce:
             print(f"\n[AgentInstance '{self.config.agent_id}' propagating ConversationEnded]")
+            if stream: await self.stream_manager.close_stream(stream) # Ensure stream closed on end
             raise ce # Propagate upwards
 
         # --- Catch other exceptions ---
@@ -145,92 +165,91 @@ class AgentInstance:
                 except Exception as close_err:
                     print(f"[Error closing stream after exception: {close_err}]")
 
-            # Return error message for Orchestrator to handle
             return error_msg
 
-        # Fallback if somehow execution reaches here unexpectedly
-        # return "[ERROR: Unexpected end of execute_turn]"
-        # If no tool was called and stream ended, final_turn_output holds the text or ""
+        # Fallback return
         return final_turn_output
 
 
     async def _handle_tool_call(self, partial_response: str, tool_data: dict):
-        # Add any text accumulated before the tool call
-        if partial_response.strip():
-            self.add_message('assistant', partial_response.strip())
+        # --- Pre-tool text is NOT added to history in this version ---
+        # if partial_response and partial_response.strip():
+        #    self.add_message('assistant', partial_response.strip())
+
 
         tool_name = tool_data.get('tool')
         tool_args_dict = tool_data.get('args', {})
-        result_str = ""
+        result_str = "" # Will hold the raw @result string from executor
         tool_succeeded = False
         parsed_exit_code = ErrorCodes.UNKNOWN_ERROR
+        tool_output_message_for_pause = "" # Specific variable for pause message parsing
 
         # Check permissions
         if self.config.allowed_tools and tool_name not in self.config.allowed_tools:
             print(f"\n[Agent '{self.config.agent_id}' DENIED permission for tool: {tool_name}]")
-            result_str = format_result(tool_name, ErrorCodes.PERMISSION_DENIED, "Agent does not have permission to use this tool.")
-            parsed_exit_code = ErrorCodes.PERMISSION_DENIED
-            self.add_message('assistant', f"Tool {tool_name} permission denied.") # Add denial message
-        else:
-            # Format and add the *intention* to call the tool
-            args_str = "\n".join([f"{k}: {v}" for k, v in tool_args_dict.items()])
-            tool_call_intention_content = f"Calling tool: {tool_name} with arguments:\n{args_str}"
-            # Don't add this to history, LLM already generated the @tool block
-            # self.add_message('assistant', tool_call_intention_content) 
+            self.add_message('assistant', f"Permission denied for tool: {tool_name}.")
+            return
 
+        # --- If permission granted, execute the tool ---
+        else:
+            args_str = "\n".join([f"{k}: {v}" for k, v in tool_args_dict.items()])
             tool_executor_input = f"@tool {tool_name}\n{args_str}\n@end"
             print(f"\n[Agent '{self.config.agent_id}' executing tool: {tool_name}]")
 
             try:
-                # Execute the tool
-                # This might raise ConversationEnded if the tool is 'end'
+                # Execute the tool - might raise ConversationEnded
                 result_str = self.executor.execute(tool_executor_input, agent_config=self.config)
-                print(f"\n[Tool result for {tool_name}]:\n{result_str}\n")
+                print(f"\n[Tool result raw string for {tool_name}]:\n{result_str}\n") # Log raw result
 
-                # Parse exit code from the result string
+                # --- Parse exit code and output message *only needed for pause check* ---
+                # Minimal parsing just to determine success and get pause message
                 if result_str.startswith(f"@result {tool_name}"):
                     lines = result_str.split('\n')
+                    output_lines = []
+                    in_output_section = False
                     for line in lines:
                         if line.startswith("exit_code: "):
                             try:
                                 parsed_exit_code = int(line.split("exit_code: ", 1)[1])
                                 tool_succeeded = (parsed_exit_code == ErrorCodes.SUCCESS)
-                                break
                             except (ValueError, IndexError):
-                                print(f"Warning: Could not parse exit code from tool result for {tool_name}")
+                                tool_succeeded = False # Treat parse error as failure
+                        elif line.startswith("output:"):
+                            output_lines.append(line.split("output: ", 1)[1])
+                            in_output_section = True
+                        elif in_output_section and line.strip() == "@end":
+                            in_output_section = False
+                        elif in_output_section:
+                            output_lines.append(line)
+
+                    if output_lines:
+                        tool_output_message_for_pause = "\n".join(output_lines).replace('@_end', '@end').strip()
+
+                else: # Raw result string didn't start with expected format
+                     tool_succeeded = False # Assume failure if format is wrong
 
             except ConversationEnded as ce:
-                # Re-raise ConversationEnded to be caught by execute_turn/orchestrator
-                 print(f"[AgentInstance caught ConversationEnded from tool '{tool_name}', re-raising]")
-                 raise ce
-
+                print(f"[AgentInstance caught ConversationEnded from tool '{tool_name}', re-raising]")
+                raise ce
             except Exception as exec_err:
                 print(f"ERROR during executor.execute for tool {tool_name}: {exec_err}")
                 traceback.print_exc()
+                # Format an error result string if execution failed badly
                 result_str = format_result(tool_name, ErrorCodes.UNKNOWN_ERROR, f"Executor error: {exec_err}")
-                parsed_exit_code = ErrorCodes.UNKNOWN_ERROR
+                tool_succeeded = False # Ensure failure flag is set
 
-        # --- Add the actual tool result to message history ---
-        # Do this *before* raising PauseRequested
-        self.add_message('assistant', f"Tool {tool_name} execution result:\n{result_str}")
+            # --- REVERTED: Add the FULL raw tool result string to message history ---
+            history_message = f"[Tool Result for {tool_name}]:\n{result_str}" # Use the raw result_str
+            self.add_message('assistant', history_message)
+            print(f"[Added to History]: {history_message}") # Log what was added
 
-        # --- Check for Pause condition ---
+
+        # --- Check for Pause condition (using the parsed message) ---
         if tool_name == "pause" and tool_succeeded:
-            # Extract the specific output message from the tool result string
-            pause_message = "Agent paused. Please provide input or press Enter to continue." # Default
-            try:
-                lines = result_str.split('\n')
-                for line in lines:
-                    if line.startswith("output: "):
-                        # Decode potential @_end safety mechanism
-                        pause_message = line.split("output: ", 1)[1].strip().replace('@_end', '@end') 
-                        break
-            except Exception as parse_err:
-                 print(f"Warning: Error parsing pause message from result string: {parse_err}")
+            pause_display_message = tool_output_message_for_pause if tool_output_message_for_pause else \
+                                    "Agent paused. Please provide input or press Enter to continue."
+            print(f"[AgentInstance raising PauseRequested for tool '{tool_name}' with message: '{pause_display_message}']")
+            raise PauseRequested(pause_display_message)
 
-            # Raise the specific exception for the orchestrator
-            print(f"[AgentInstance raising PauseRequested for tool '{tool_name}']")
-            raise PauseRequested(pause_message)
-
-        # If it wasn't a successful pause, the method ends here,
-        # and execute_turn will return None (signalling tool completed normally).
+        # If it wasn't a successful pause or end (which raises), the method ends here,
+        # and execute_turn will return TOOL_EXECUTED_SIGNAL.

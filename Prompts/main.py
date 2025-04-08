@@ -31,7 +31,7 @@ def get_tool_info(tool_instance: Tool) -> ToolInfo:
                 "optional": arg.optional,
             }
             if arg.optional and arg.default is not None:
-                 arg_info["default"] = str(arg.default) # Include default if present
+                arg_info["default"] = str(arg.default) # Include default if present
             arg_list.append(arg_info)
 
     examples = getattr(tool_instance, "examples", [])
@@ -47,8 +47,8 @@ def discover_tools() -> Dict[str, Tool]:
     registry = ToolRegistry()
     # Ensure discovery runs if it hasn't already
     if not registry._discovered:
-         print("Running tool discovery...")
-         registry.discover_tools()
+        print("Running tool discovery...")
+        registry.discover_tools()
     return registry.get_all() # Return the dict
 
 # --- Prompt Building Logic ---
@@ -60,7 +60,7 @@ class PromptGenerator:
 
     def add_section(self, title: str, content: str):
         if content and content.strip(): # Only add sections with content
-             self.sections.append((title.strip(), content.strip()))
+            self.sections.append((title.strip(), content.strip()))
         return self
 
     def generate(self) -> str:
@@ -90,12 +90,12 @@ def build_allowed_tools_section(all_tools: Dict[str, Tool], allowed_tool_names: 
         if info.args:
             tool_docs.append("**Arguments:**")
             for arg in info.args:
-                 details = f"- `{arg['name']}` ({arg['type']})"
-                 if arg['optional']: details += " (optional"
-                 if 'default' in arg: details += f", default: `{arg['default']}`"
-                 if arg['optional']: details += ")"
-                 details += f": {arg['description']}"
-                 tool_docs.append(details)
+                details = f"- `{arg['name']}` ({arg['type']})"
+                if arg['optional']: details += " (optional"
+                if 'default' in arg: details += f", default: `{arg['default']}`"
+                if arg['optional']: details += ")"
+                details += f": {arg['description']}"
+                tool_docs.append(details)
         # Add examples if they exist
         # if info.examples:
         #     tool_docs.append("**Examples:**")
@@ -119,22 +119,23 @@ def build_system_prompt(config: 'AgentConfiguration', all_discovered_tools: Dict
     """
     builder = PromptGenerator()
 
-    # 1. Core Directives (Always Included)
+    # 1. Core Directives (Enhanced)
     core_directives = """
 You are an autonomous AI assistant.
-Think step-by-step. Plan your actions.
+Think step-by-step. Plan your actions carefully based on the user's request and conversation history.
 Use available tools when necessary by following the specified format precisely.
 Base your responses and actions *only* on the information provided in the conversation history and tool results.
 Do not hallucinate tool availability or functionality.
 If you lack necessary information or permissions, state it clearly.
-""".strip()
+**CRITICAL: After executing a tool and receiving the result, you MUST analyze the result, refer back to your original plan and the user's goal, and execute the *next* required step. Do NOT simply repeat the previous action unless explicitly instructed.**
+""".strip() # Added CRITICAL instruction
     builder.add_section("Core Directives", core_directives)
 
     # 2. Role & Goal (From Config)
     # The config.system_prompt should contain the primary role definition and high-level goals.
     builder.add_section(f"Role: {config.role}", config.system_prompt)
 
-    # 3. Tool Usage Instructions (Always Included)
+    # 3. Tool Usage Instructions (Keep as is)
     tool_usage = """
 To use a tool, output a block EXACTLY like this, replacing placeholders:
 @tool <tool_name>
@@ -149,26 +150,37 @@ To use a tool, output a block EXACTLY like this, replacing placeholders:
 - For multi-line values (e.g., file content), you can potentially use multi-line formatting if the tool supports it, but typically provide content directly.
 - Ensure the `@end` tag is on its own line.
 - Only call tools listed under "Allowed Tools". Do not attempt to use other tools.
-- After you output a tool call, execution will pause. You will receive the tool's result in the next turn as an assistant message starting with '@result <tool_name>'. Analyze the result before proceeding.
-""".strip()
+- After you output a tool call, execution will pause. You will receive the tool's result confirmation in the next turn as an assistant message. Analyze the result and your plan before proceeding.
+""".strip() # Minor rephrase at the end
     builder.add_section("Tool Usage Format", tool_usage)
 
-    # 4. File Path Rules (If any file tools are allowed)
+
+    # 4. State Management & Planning (New Section)
+    state_management = """
+- **Maintain Plan:** Keep track of the overall goal and the sequence of steps needed.
+- **Refer Back:** Frequently check the initial user request and your previously stated plan.
+- **Execute Next Step:** After a tool confirms execution, determine the *next logical step* according to your plan and execute it. Do not get stuck repeating the last tool.
+- **Ask if Unsure:** If the next step is unclear after a tool result, ask the user for clarification.
+""".strip()
+    builder.add_section("State Management & Planning", state_management)
+
+
+    # 5. File Path Rules (If any file tools are allowed - Keep as is)
     file_tools_allowed = any(t in config.allowed_tools for t in ['ls', 'read_file', 'write_file', 'edit_file', 'delete_file'])
     if file_tools_allowed:
-         path_rules = """
+        path_rules = """
 - Use relative paths (e.g., `my_dir/file.txt`, `./output.log`) or absolute paths (e.g., `/app/data/config.json`).
 - Assume the current working directory is the project root unless specified otherwise.
 - Paths are case-sensitive on Linux/macOS.
 - Do NOT add quotes around path arguments (e.g., use `path: my_file.txt`, NOT `path: 'my_file.txt'`).
 """.strip()
-         builder.add_section("File Path Handling", path_rules)
+        builder.add_section("File Path Handling", path_rules)
 
 
-    # 5. Allowed Tools Documentation (Filtered based on Config)
+    # 6. Allowed Tools Documentation (Filtered based on Config - Keep as is)
     allowed_tools_docs = build_allowed_tools_section(all_discovered_tools, config.allowed_tools)
     builder.add_section("Allowed Tools", allowed_tools_docs)
 
-    # 6. (Future) Add sections for Communication Protocols, Task Management Rules, etc.
+    # 7. (Future) Add sections for Communication Protocols, Task Management Rules, etc.
 
     return builder.generate()

@@ -7,16 +7,19 @@ from typing import Dict, List, Optional
 import yaml
 import traceback
 
-from Clients.base import BaseClient, ProviderConfig
+from Clients.base import BaseClient, ProviderConfig, Message # Import Message
 from Core.agent_config import AgentConfiguration
-from Core.agent_instance import AgentInstance
+# Import the signal from agent_instance
+from Core.agent_instance import AgentInstance, TOOL_EXECUTED_SIGNAL
 from Core.executor import Executor
-# Import the new exception
+# Import exceptions
 from Tools.error_codes import ConversationEnded, PauseRequested, ErrorCodes
-from Prompts.main import build_system_prompt, discover_tools # Removed duplicate Tool import
+from Prompts.main import build_system_prompt, discover_tools
 from Core.utils import get_multiline_input
 
+
 def load_agent_configurations(config_dir: str = "./AgentConfigs") -> List[AgentConfiguration]:
+    # ... (function remains the same) ...
     config_path = Path(config_dir)
     if not config_path.is_dir():
         print(f"Warning: Configuration directory '{config_dir}' not found.")
@@ -80,10 +83,10 @@ def load_agent_configurations(config_dir: str = "./AgentConfigs") -> List[AgentC
     if not configs:
         # Check if only default exists, maybe load it as a fallback?
         if default_config_data and 'agent_id' in default_config_data:
-             print("Warning: No specific agent YAMLs found, attempting to load default_agent.yaml as the only agent.")
-             # (Add logic similar to above to create AgentConfiguration from default_config_data)
-             # For now, raise error if truly empty.
-             pass
+            print("Warning: No specific agent YAMLs found, attempting to load default_agent.yaml as the only agent.")
+            # (Add logic similar to above to create AgentConfiguration from default_config_data)
+            # For now, raise error if truly empty.
+            pass
         else:
             raise ValueError("Failed to load any valid agent configurations.")
 
@@ -101,6 +104,7 @@ class Orchestrator:
         self._create_agents(config_list)
 
     def _initialize_clients(self, config_list: List[AgentConfiguration]):
+        # ... (function remains the same) ...
         providers_needed = {cfg.model_provider for cfg in config_list}
 
         for provider_name in providers_needed:
@@ -127,19 +131,19 @@ class Orchestrator:
                             print(f"Warning: Multiple BaseClient subclasses found in {module_name}. Using {client_class.__name__}.")
                     # Find ProviderConfig instance matching the provider name
                     elif isinstance(obj, ProviderConfig) and obj.name == provider_name:
-                         provider_config = obj
+                            provider_config = obj
                     # Fallback: Find ProviderConfig instance by constant naming convention
                     elif name == config_const_name and isinstance(obj, ProviderConfig):
-                         if provider_config is None: # Only use if not already found by name match
-                             provider_config = obj
+                            if provider_config is None: # Only use if not already found by name match
+                                provider_config = obj
                 # --- End of robust finding logic ---
 
                 if not client_class:
                     # Raise error if no suitable class was found
                     raise ValueError(f"No class inheriting from BaseClient found in {module_name}")
                 if not provider_config:
-                     # Raise error if no suitable config was found
-                     raise ValueError(f"ProviderConfig instance for '{provider_name}' not found in {module_name}")
+                    # Raise error if no suitable config was found
+                    raise ValueError(f"ProviderConfig instance for '{provider_name}' not found in {module_name}")
 
 
                 api_key = os.getenv(provider_config.api_key_env)
@@ -152,14 +156,14 @@ class Orchestrator:
                 if 'config' in sig.parameters:
                     client_instance = client_class(config=provider_config)
                 else:
-                     # Fallback for clients that don't take config in __init__
+                    # Fallback for clients that don't take config in __init__
                     client_instance = client_class()
                     # Manually set config if possible, though BaseClient usually does this
                     if hasattr(client_instance, 'config') and client_instance.config is None:
-                         client_instance.config = provider_config
-                         # Re-initialize if necessary after setting config, if the client supports it
-                         if hasattr(client_instance, '_initialize'):
-                              client_instance._initialize()
+                            client_instance.config = provider_config
+                            # Re-initialize if necessary after setting config, if the client supports it
+                            if hasattr(client_instance, '_initialize'):
+                                client_instance._initialize()
 
                 self.clients[provider_name] = client_instance
                 print(f"Initialized client for: {provider_name}")
@@ -168,7 +172,9 @@ class Orchestrator:
                 print(f"Error initializing client for provider '{provider_name}': {e}")
                 traceback.print_exc() # Print stack trace for debugging initialization errors
 
+
     def _create_agents(self, config_list: List[AgentConfiguration]):
+        # ... (function remains the same) ...
         for config in config_list:
             if config.agent_id in self.agents:
                 print(f"Warning: Duplicate agent_id '{config.agent_id}'. Skipping.")
@@ -188,6 +194,7 @@ class Orchestrator:
                 print(f"Error creating agent '{config.agent_id}': {e}")
                 traceback.print_exc()
 
+
     async def run_main_loop(self, initial_prompt: str, target_agent_id: str = "ceo", max_turns: int = 10):
         agent = self.agents.get(target_agent_id)
         if not agent:
@@ -195,37 +202,80 @@ class Orchestrator:
             print(f"Available agents: {list(self.agents.keys())}")
             return
 
-        agent.add_message('user', initial_prompt)
-        print(f"\nUser (to {target_agent_id}): {initial_prompt}")
+        # Store the initial prompt for potential reminders
+        _initial_user_prompt = initial_prompt
+        agent.add_message('user', _initial_user_prompt)
+        print(f"\nUser (to {target_agent_id}): {_initial_user_prompt}")
 
         turn_count = 0
         while turn_count < max_turns:
             try:
                 print(f"\n--- Turn {turn_count + 1}/{max_turns} ({target_agent_id}) ---")
 
-                # Add "Proceed." automatically if the last message was a non-tool assistant response
+                # --- Determine if "Proceed." should potentially be added LATER ---
+                # This checks if the *previous* turn ended with a simple assistant text response
+                should_add_proceed_later = False
                 if agent.messages:
-                    last_msg = agent.messages[-1]
-                    if last_msg.role == 'assistant' and not last_msg.content.startswith("@result"):
-                         # Check if previous was not also "Proceed." to avoid loops
-                         if not (len(agent.messages) > 1 and agent.messages[-2].role == 'user' and agent.messages[-2].content == "Proceed."):
-                            agent.add_message('user', "Proceed.")
-                            print("User: Proceed.") # Make it visible
+                    # Check message before the last one (if it exists)
+                    # Because the last one might now be the reminder we add after a tool call
+                    potential_last_assistant_msg_index = -1
+                    if agent.messages[-1].role == 'user' and agent.messages[-1].content.startswith("[SYSTEM REMINDER]"):
+                        if len(agent.messages) > 1:
+                           potential_last_assistant_msg_index = -2
+                    else:
+                        potential_last_assistant_msg_index = -1
 
-                # Execute the agent's turn
+                    if potential_last_assistant_msg_index < 0 and len(agent.messages) > abs(potential_last_assistant_msg_index):
+                        last_msg = agent.messages[potential_last_assistant_msg_index]
+                        # Condition: The message was from assistant AND it wasn't a tool result/special message
+                        if last_msg.role == 'assistant' and not last_msg.content.startswith(("Tool '", "[Tool Result", "@result", "!!! IMPORTANT", "✓ CONVERSATION ENDED", "✗ CONVERSATION ENDED", "⚠ CONVERSATION ENDED")):
+                            # Avoid adding Proceed. after Proceed.
+                            if not (len(agent.messages) > 1 and agent.messages[-2].role == 'user' and agent.messages[-2].content == "Proceed."):
+                                should_add_proceed_later = True # Mark potential need
+
+                # --- Execute the agent's turn ---
                 result = await agent.execute_turn()
-                turn_count += 1 # Increment turn counter regardless of outcome (pause, error, success)
+                turn_count += 1
 
-                # --- Handle non-exception results from execute_turn ---
-                if isinstance(result, str) and result.startswith("[ERROR:"):
+                # --- Handle results and inject reminder if necessary ---
+                reminder_added_this_turn = False
+                if result is TOOL_EXECUTED_SIGNAL:
+                    print("[Orchestrator] Non-pausing tool executed.")
+                    # --- ADD REMINDER ---
+                    # Find the last *actual* user message (not 'Proceed.' or reminder)
+                    last_real_user_prompt = _initial_user_prompt # Default to initial
+                    for i in range(len(agent.messages) - 1, -1, -1):
+                         msg = agent.messages[i]
+                         # Look for user messages that are not Proceed or our own reminder
+                         if msg.role == 'user' and not msg.content.startswith(("Proceed.", "[SYSTEM REMINDER]")):
+                              last_real_user_prompt = msg.content
+                              break
+                    # Construct a concise reminder
+                    reminder_text = f"[SYSTEM REMINDER] Previous step completed. Recall the goal: \"{last_real_user_prompt[:100].strip()}...\" Now execute the *next* step based on your plan."
+                    agent.add_message('user', reminder_text) # Add as user message to force attention
+                    print(f"User: {reminder_text}") # Make reminder visible
+                    reminder_added_this_turn = True
+                    # --- END REMINDER ---
+                    pass # Continue loop
+
+                elif isinstance(result, str) and result.startswith("[ERROR:"):
                     print(f"\n[Orchestrator] Agent '{target_agent_id}' reported error: {result}. Stopping loop.")
                     break
-                elif result == "" and agent.messages and not agent.messages[-1].content.startswith("@result"):
-                     # If the agent produced no text output and didn't run a tool (last message isn't @result)
-                     print(f"\n[Orchestrator] Agent '{target_agent_id}' produced no text output and no tool was run. Stopping loop.")
+                elif isinstance(result, str):
+                    # Agent returned text without tool call/error
+                    pass # Loop continues naturally
+                elif result is None:
+                     print(f"\n[Orchestrator] Agent '{target_agent_id}' returned None unexpectedly. Stopping loop.")
                      break
-                # If result is None, it means a non-pausing tool was run successfully. Loop continues.
-                # If result is text, it means the LLM responded without a tool. Loop continues.
+
+
+                # --- Add "Proceed." ONLY if needed AND turn didn't run a tool AND no reminder was just added ---
+                if should_add_proceed_later and result is not TOOL_EXECUTED_SIGNAL and not reminder_added_this_turn:
+                    # Ensure we don't add "Proceed." if the last message IS ALREADY "Proceed."
+                    # (This check might be redundant due to AgentInstance.add_message, but good for safety)
+                    if not (agent.messages and agent.messages[-1].role == 'user' and agent.messages[-1].content == "Proceed."):
+                        agent.add_message('user', "Proceed.")
+                        print("User: Proceed.")
 
             # --- Handle control flow exceptions ---
             except PauseRequested as pr:
@@ -242,7 +292,9 @@ class Orchestrator:
                     agent.add_message('user', user_input)
                 else:
                     print("[Empty input received. Resuming autonomous run...]")
-                # No need to add "Proceed." here, the loop will handle it next iteration if needed.
+                    # Explicitly add Proceed if user just hits Enter after a pause
+                    agent.add_message('user', "Proceed.")
+                    print("User: Proceed.")
                 # Don't break, continue the loop to process next turn or user input
                 continue
 

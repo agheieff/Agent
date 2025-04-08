@@ -13,10 +13,15 @@ from Prompts.main import build_system_prompt
 if TYPE_CHECKING:
     from Core.agent_config import AgentConfiguration
 
+def format_result(name: str, exit_code: int, output: str) -> str:
+    safe_output = str(output).replace('@end', '@_end')
+    return f"@result {name}\nexit_code: {exit_code}\noutput: {safe_output}\n@end"
+
 class AgentInstance:
     def __init__(self, config: 'AgentConfiguration', client: BaseClient, executor: Executor, all_discovered_tools: Dict[str, Tool]):
         if not config or not client or not executor or all_discovered_tools is None:
              raise ValueError("AgentInstance requires config, client, executor, and all_discovered_tools.")
+             
         self.config = config
         self.client = client
         self.executor = executor
@@ -40,12 +45,18 @@ class AgentInstance:
         if role not in ["user", "assistant", "system"]:
             print(f"Warning (Agent: {self.config.agent_id}): Invalid message role '{role}'. Using 'user'.")
             role = "user"
-        if not isinstance(content, str): content = str(content)
-        if not content.strip() and role != 'system': return
+            
+        if not isinstance(content, str):
+            content = str(content)
+            
+        if not content.strip() and role != 'system':
+            return
+            
         if role == 'user' and content == "Proceed.":
-             if self.messages and self.messages[-1].role == 'user' and self.messages[-1].content == "Proceed.": return
+             if self.messages and self.messages[-1].role == 'user' and self.messages[-1].content == "Proceed.":
+                 return
+                 
         self.messages.append(Message(role=role, content=content))
-
 
     async def execute_turn(self) -> Optional[str]:
         self.pause_requested_by_tool = False
@@ -53,11 +64,14 @@ class AgentInstance:
         stream_interrupted_by_tool = False
         stream = None
         final_turn_output = None
+        
         try:
-            if not self.messages: return "[ERROR: Turn cannot start with empty history]"
-            if len(self.messages) == 1 and self.messages[0].role == 'system': return "[ERROR: Turn cannot start with only a system message]"
-            if self.messages[-1].role == 'system': print(f"Warning (Agent: {self.config.agent_id}): Executing turn where last message is system.")
-
+            if not self.messages:
+                return "[ERROR: Turn cannot start with empty history]"
+                
+            if len(self.messages) == 1 and self.messages[0].role == 'system':
+                return "[ERROR: Turn cannot start with only a system message]"
+                
             stream = self.client.chat_completion_stream(
                 messages=self.messages,
                 model=self.config.model_name
@@ -67,9 +81,11 @@ class AgentInstance:
 
             async for chunk in processed_stream_generator:
                 output_text, tool_data = self.tool_parser.feed(chunk)
+                
                 if output_text:
                     accumulated_response_before_tool += output_text
                     print(output_text, end='', flush=True)
+                    
                 if tool_data:
                     print("\n[Tool call detected - interrupting stream]")
                     stream_interrupted_by_tool = True
@@ -78,6 +94,7 @@ class AgentInstance:
                     print("[Finishing turn after tool execution...]")
                     accumulated_response_before_tool = ""
                     return None
+                    
             if not stream_interrupted_by_tool:
                 if accumulated_response_before_tool:
                     print()
@@ -85,16 +102,21 @@ class AgentInstance:
                     final_turn_output = accumulated_response_before_tool
                 else:
                     final_turn_output = ""
+                    
             return final_turn_output
+            
         except asyncio.TimeoutError:
             print("\n[Streaming timeout]")
-            if stream: await self.stream_manager.close_stream(stream)
+            if stream:
+                await self.stream_manager.close_stream(stream)
             error_msg = "[ERROR: Streaming timed out]"
             self.add_message('assistant', error_msg)
             return error_msg
+            
         except ConversationEnded as ce:
              print(f"\n[AgentInstance '{self.config.agent_id}' propagating ConversationEnded]")
              raise ce
+             
         except Exception as e:
             if isinstance(e, TypeError) and "async_generator" in str(e) and "await" in str(e):
                  error_msg = "[ERROR: Client stream method returned generator directly - code needs adjustment]"
@@ -103,21 +125,28 @@ class AgentInstance:
                  error_msg = f"[ERROR: {type(e).__name__} - {str(e)}]"
                  print(f"\n[Agent '{self.config.agent_id}' processing error: {error_msg}]")
                  traceback.print_exc()
+                 
             if stream:
-                try: await self.stream_manager.close_stream(stream)
-                except Exception as close_err: print(f"[Error closing stream after exception: {close_err}]")
+                try:
+                    await self.stream_manager.close_stream(stream)
+                except Exception as close_err:
+                    print(f"[Error closing stream after exception: {close_err}]")
+                    
             self.add_message('assistant', error_msg)
             return error_msg
+            
         return "[ERROR: Unexpected end of execute_turn]"
 
-
     async def _handle_tool_call(self, partial_response: str, tool_data: dict):
-        if partial_response.strip(): self.add_message('assistant', partial_response.strip())
+        if partial_response.strip():
+            self.add_message('assistant', partial_response.strip())
+            
         tool_name = tool_data.get('tool')
         tool_args_dict = tool_data.get('args', {})
         result_str = ""
         tool_succeeded = False
         parsed_exit_code = ErrorCodes.UNKNOWN_ERROR
+        
         if self.config.allowed_tools and tool_name not in self.config.allowed_tools:
             print(f"\n[Agent '{self.config.agent_id}' DENIED permission for tool: {tool_name}]")
             result_str = format_result(tool_name, ErrorCodes.PERMISSION_DENIED, "Agent does not have permission to use this tool.")
@@ -126,29 +155,34 @@ class AgentInstance:
             args_str = "\n".join([f"{k}: {v}" for k, v in tool_args_dict.items()])
             tool_call_message_content = f"Calling tool: {tool_name} with arguments:\n{args_str}"
             self.add_message('assistant', tool_call_message_content)
+            
             tool_executor_input = f"@tool {tool_name}\n{args_str}\n@end"
             print(f"\n[Agent '{self.config.agent_id}' executing tool: {tool_name}]")
+            
             try:
                 result_str = self.executor.execute(tool_executor_input, agent_config=self.config)
                 print(f"\n[Tool result for {tool_name}]:\n{result_str}\n")
+                
                 if result_str.startswith(f"@result {tool_name}"):
                     lines = result_str.split('\n')
-                    try:
-                        for line in lines:
-                            if line.startswith("exit_code: "):
+                    for line in lines:
+                        if line.startswith("exit_code: "):
+                            try:
                                 parsed_exit_code = int(line.split("exit_code: ", 1)[1])
                                 tool_succeeded = (parsed_exit_code == ErrorCodes.SUCCESS)
                                 break
-                    except (ValueError, IndexError):
-                        print(f"Warning: Could not parse exit code from tool result: {result_str}")
+                            except (ValueError, IndexError):
+                                print(f"Warning: Could not parse exit code from tool result")
+                                
             except ConversationEnded as ce:
-                 print(f"[AgentInstance '{self.config.agent_id}' re-raising ConversationEnded from executor]")
                  raise ce
+                 
             except Exception as exec_err:
                  print(f"ERROR during executor.execute for tool {tool_name}: {exec_err}")
                  result_str = format_result(tool_name, ErrorCodes.UNKNOWN_ERROR, f"Executor error: {exec_err}")
                  parsed_exit_code = ErrorCodes.UNKNOWN_ERROR
+                 
         if tool_name == "pause" and tool_succeeded:
-             print(f"DEBUG AgentInstance: Setting pause_requested_by_tool = True for agent {self.config.agent_id}")
              self.pause_requested_by_tool = True
+             
         self.add_message('assistant', f"Tool {tool_name} execution result:\n{result_str}")

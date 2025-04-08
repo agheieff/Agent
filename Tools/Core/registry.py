@@ -1,8 +1,7 @@
 import importlib
 import inspect
-import os
 import pkgutil
-from typing import Dict, List, Type, Optional
+from typing import Dict, Optional
 from pathlib import Path
 from Tools.base import Tool
 
@@ -31,11 +30,11 @@ class ToolRegistry:
         return self._tools
 
     def discover_tools(self) -> Dict[str, Tool]:
+        """Discover all available tools by scanning tool directories."""
         if self._discovered:
             return self._tools
 
         tools_dir = Path(__file__).parent.parent
-
         tool_dirs = [
             tools_dir / "File",
             tools_dir / "Special"
@@ -46,28 +45,27 @@ class ToolRegistry:
                 continue
 
             package_name = f"Tools.{tool_dir.name}"
-
             for _, module_name, is_pkg in pkgutil.iter_modules([str(tool_dir)]):
                 if module_name.startswith("__") or is_pkg:
                     continue
 
                 try:
                     module = importlib.import_module(f"{package_name}.{module_name}")
+                    
                     for name, obj in inspect.getmembers(module):
-                        if (
-                            inspect.isclass(obj)
-                            and issubclass(obj, Tool)
-                            and obj is not Tool
-                            and not inspect.isabstract(obj)
-                        ):
+                        if (inspect.isclass(obj) 
+                            and issubclass(obj, Tool) 
+                            and obj is not Tool 
+                            and not inspect.isabstract(obj)):
                             try:
                                 tool_instance = obj()
                                 self.register(tool_instance)
                             except Exception as e:
                                 print(f"Error instantiating tool {name}: {e}")
+                                
                 except ImportError as e:
                     print(f"Error importing module {module_name}: {e}")
 
         self._discovered = True
-        print(f"Discovered tools: {self._tools.keys()}")
+        print(f"Discovered tools: {list(self._tools.keys())}")
         return self._tools

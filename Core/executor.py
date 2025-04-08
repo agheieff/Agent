@@ -14,38 +14,48 @@ def parse_tool_call(text: str) -> Dict[str, Any]:
     match = re.search(tool_pattern, text, re.DOTALL)
     if not match:
         raise ValueError("Invalid tool call format")
+        
     args = {}
     current_key = None
     current_value = []
+    
     for line in match.group('body').strip().split('\n'):
         line = line.strip()
-        if not line: continue
+        if not line:
+            continue
+            
         if ': ' in line:
             if current_key and current_value:
                 args[current_key] = '\n'.join(current_value).strip()
+                
             key, val = line.split(': ', 1)
             current_key = key.strip()
             val = val.strip()
+            
             if val == '<<<':
-                 current_value = []
-                 continue
+                current_value = []
+                continue
+                
             args[current_key] = val
             current_key = None
+            
         elif line == '>>>':
             if current_key:
                 args[current_key] = '\n'.join(current_value).strip()
                 current_key = None
                 current_value = []
+                
         elif current_key:
             current_value.append(line)
+            
     if current_key and current_value:
         args[current_key] = '\n'.join(current_value).strip()
+        
     return {'tool': match.group('name'), 'args': args}
 
 def format_result(name: str, exit_code: int, output: str) -> str:
     safe_output = str(output).replace('@end', '@_end')
     return f"@result {name}\nexit_code: {exit_code}\noutput: {safe_output}\n@end"
-
 
 class Executor:
     def __init__(self):
@@ -58,19 +68,20 @@ class Executor:
     def execute(self, tool_call: str, agent_config: Optional['AgentConfiguration'] = None) -> str:
         tool_name = "error"
         parsed = None
+        
         try:
             try:
                 parsed = parse_tool_call(tool_call)
                 tool_name = parsed.get('tool', 'unknown_tool')
             except ValueError as e:
                 if "@tool" in tool_call and "@end" not in tool_call:
-                     try:
-                          parsed = parse_tool_call(tool_call + "\n@end")
-                          tool_name = parsed.get('tool', 'unknown_tool')
-                     except ValueError:
-                          return format_result("parse_error", ErrorCodes.INVALID_ARGUMENTS, f"Invalid tool call format - {str(e)}")
+                    try:
+                        parsed = parse_tool_call(tool_call + "\n@end")
+                        tool_name = parsed.get('tool', 'unknown_tool')
+                    except ValueError:
+                        return format_result("parse_error", ErrorCodes.INVALID_ARGUMENTS, f"Invalid tool call format - {str(e)}")
                 else:
-                     return format_result("parse_error", ErrorCodes.INVALID_ARGUMENTS, f"Invalid tool call format - {str(e)}")
+                    return format_result("parse_error", ErrorCodes.INVALID_ARGUMENTS, f"Invalid tool call format - {str(e)}")
 
             tool = self.tools.get(parsed['tool'])
             if not tool:
@@ -80,11 +91,9 @@ class Executor:
             return format_result(parsed['tool'], result.code, result.message)
 
         except ConversationEnded as ce:
-            print(f"DEBUG Executor: Caught specific ConversationEnded for tool '{tool_name}'. RE-RAISING.") # DEBUG
             raise ce
 
         except Exception as e:
-            print(f"DEBUG Executor: Caught GENERIC Exception for tool '{tool_name}': {type(e).__name__}") # DEBUG
             print(f"ERROR during tool execution ({tool_name}): {type(e).__name__} - {e}")
             traceback.print_exc()
             return format_result(tool_name, ErrorCodes.UNKNOWN_ERROR, f"Unexpected error executing tool: {str(e)}")

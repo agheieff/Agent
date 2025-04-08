@@ -7,19 +7,21 @@ from typing import Dict, List, Optional
 import yaml
 import traceback
 
-from Clients.base import BaseClient, ProviderConfig, Message # Import Message
+# Import configuration helpers
+import config as app_config
+
+from Clients.base import BaseClient, ProviderConfig, Message
 from Core.agent_config import AgentConfiguration
-# Import the signal from agent_instance
 from Core.agent_instance import AgentInstance, TOOL_EXECUTED_SIGNAL
 from Core.executor import Executor
-# Import exceptions
 from Tools.error_codes import ConversationEnded, PauseRequested, ErrorCodes
 from Prompts.main import build_system_prompt, discover_tools
 from Core.utils import get_multiline_input
 
 
 def load_agent_configurations(config_dir: str = "./AgentConfigs") -> List[AgentConfiguration]:
-    # ... (function remains the same) ...
+    # This function remains largely the same, as it loads agent-specific overrides/definitions
+    # It doesn't need the detailed provider config from config.py itself.
     config_path = Path(config_dir)
     if not config_path.is_dir():
         print(f"Warning: Configuration directory '{config_dir}' not found.")
@@ -49,14 +51,14 @@ def load_agent_configurations(config_dir: str = "./AgentConfigs") -> List[AgentC
                 continue
 
             final_data = default_config_data.copy()
-            final_data.update(agent_data)
+            final_data.update(agent_data) # Override defaults with specific agent data
 
-            if 'agent_id' not in final_data:
-                final_data['agent_id'] = file_path.stem
-
+            # Ensure agent_id is set (from filename if not specified)
+            final_data.setdefault('agent_id', file_path.stem)
+            # Ensure required fields have defaults if not provided
             final_data.setdefault('role', final_data['agent_id'])
-            final_data.setdefault('model_provider', 'deepseek') # Consider making this truly default
-            final_data.setdefault('model_name', 'deepseek-chat') # Consider making this truly default
+            final_data.setdefault('model_provider', 'anthropic') # Sensible default?
+            final_data.setdefault('model_name', app_config.get_provider_config(final_data['model_provider']).default_model if app_config.get_provider_config(final_data['model_provider']) else 'default') # Default model from central config
             final_data.setdefault('system_prompt', f"You are an AI assistant with the role: {final_data['role']}.")
             final_data.setdefault('allowed_tools', [])
 
@@ -64,31 +66,39 @@ def load_agent_configurations(config_dir: str = "./AgentConfigs") -> List[AgentC
             if final_data['allowed_tools'] is None:
                 final_data['allowed_tools'] = []
 
-            config = AgentConfiguration(
+            # Validate provider/model exist in central config
+            provider_conf = app_config.get_provider_config(final_data['model_provider'])
+            if not provider_conf:
+                 print(f"Warning: Provider '{final_data['model_provider']}' defined for agent '{final_data['agent_id']}' not found in config.py. Skipping agent.")
+                 continue
+            model_conf = app_config.get_model_config(final_data['model_provider'], final_data['model_name'])
+            if not model_conf:
+                 print(f"Warning: Model '{final_data['model_name']}' for provider '{final_data['model_provider']}' (Agent: '{final_data['agent_id']}') not found in config.py. Using provider default '{provider_conf.default_model}' instead.")
+                 final_data['model_name'] = provider_conf.default_model # Fallback to provider default
+                 # Double-check default exists
+                 if not app_config.get_model_config(final_data['model_provider'], final_data['model_name']):
+                     print(f"Error: Default model '{final_data['model_name']}' for provider '{final_data['model_provider']}' also not found. Skipping agent '{final_data['agent_id']}'.")
+                     continue
+
+
+            agent_config_obj = AgentConfiguration(
                 agent_id=final_data['agent_id'],
                 role=final_data['role'],
                 model_provider=final_data['model_provider'],
-                model_name=final_data['model_name'],
+                model_name=final_data['model_name'], # Use the (potentially corrected) model name
                 system_prompt=final_data['system_prompt'],
                 allowed_tools=final_data['allowed_tools'],
             )
 
-            configs.append(config)
-            print(f"Loaded config for agent: {config.agent_id} (Provider: {config.model_provider}, Model: {config.model_name})")
+            configs.append(agent_config_obj)
+            print(f"Loaded config for agent: {agent_config_obj.agent_id} (Provider: {agent_config_obj.model_provider}, Model: {agent_config_obj.model_name})")
 
         except Exception as e:
             print(f"Error loading config file {file_path.name}: {e}")
             traceback.print_exc()
 
     if not configs:
-        # Check if only default exists, maybe load it as a fallback?
-        if default_config_data and 'agent_id' in default_config_data:
-            print("Warning: No specific agent YAMLs found, attempting to load default_agent.yaml as the only agent.")
-            # (Add logic similar to above to create AgentConfiguration from default_config_data)
-            # For now, raise error if truly empty.
-            pass
-        else:
-            raise ValueError("Failed to load any valid agent configurations.")
+        raise ValueError("Failed to load any valid agent configurations from YAML files.")
 
     return configs
 
@@ -98,73 +108,54 @@ class Orchestrator:
         self.agents: Dict[str, AgentInstance] = {}
         self.clients: Dict[str, BaseClient] = {}
         self.executor = Executor()
-        self.all_discovered_tools = self.executor.tools # Get tools directly from initialized Executor
+        # Discover tools once during initialization
+        self.all_discovered_tools = discover_tools()
 
         self._initialize_clients(config_list)
         self._create_agents(config_list)
 
     def _initialize_clients(self, config_list: List[AgentConfiguration]):
-        # ... (function remains the same) ...
+        """Initializes clients based on providers needed by agent configs."""
         providers_needed = {cfg.model_provider for cfg in config_list}
+        print(f"Providers needed based on agent configs: {providers_needed}")
 
         for provider_name in providers_needed:
             if provider_name in self.clients:
                 continue
 
+            # Get provider config from the central config.py
+            provider_config = app_config.get_provider_config(provider_name)
+            if not provider_config:
+                print(f"Warning: Configuration for provider '{provider_name}' not found in config.py. Cannot initialize client.")
+                continue
+
+            # Check for API key
+            api_key = os.getenv(provider_config.api_key_env)
+            if not api_key:
+                print(f"Warning: API key env var '{provider_config.api_key_env}' not found for provider '{provider_name}'. Client initialization might fail.")
+                # Allow to proceed, BaseClient will raise error if key is truly needed later
+
             try:
-                # Load the module dynamically
+                # Dynamically import the specific client module based on provider name convention
+                # (Assumes client file is named like the provider in Clients/API/)
                 module_name = f"Clients.API.{provider_name}"
                 module = importlib.import_module(module_name)
 
                 client_class = None
-                provider_config = None
-                config_const_name = f"{provider_name.upper()}_CONFIG"
-
-                # --- Find the Client class and Config more robustly ---
+                # Find the class inheriting from BaseClient in the imported module
                 for name, obj in inspect.getmembers(module):
-                    # Find class inheriting from BaseClient (but not BaseClient itself)
                     if inspect.isclass(obj) and issubclass(obj, BaseClient) and obj is not BaseClient:
                         if client_class is None: # Take the first one found
                             client_class = obj
                         else:
-                            # Handle case where multiple client classes might be defined (unlikely but possible)
                             print(f"Warning: Multiple BaseClient subclasses found in {module_name}. Using {client_class.__name__}.")
-                    # Find ProviderConfig instance matching the provider name
-                    elif isinstance(obj, ProviderConfig) and obj.name == provider_name:
-                            provider_config = obj
-                    # Fallback: Find ProviderConfig instance by constant naming convention
-                    elif name == config_const_name and isinstance(obj, ProviderConfig):
-                            if provider_config is None: # Only use if not already found by name match
-                                provider_config = obj
-                # --- End of robust finding logic ---
+                            break # Stop after finding the first one
 
                 if not client_class:
-                    # Raise error if no suitable class was found
-                    raise ValueError(f"No class inheriting from BaseClient found in {module_name}")
-                if not provider_config:
-                    # Raise error if no suitable config was found
-                    raise ValueError(f"ProviderConfig instance for '{provider_name}' not found in {module_name}")
+                    raise ImportError(f"No class inheriting from BaseClient found in module {module_name}")
 
-
-                api_key = os.getenv(provider_config.api_key_env)
-                if not api_key:
-                    # Allow initialization without key for now, BaseClient handles error later if needed
-                    print(f"Warning: API key env var '{provider_config.api_key_env}' not found for provider '{provider_name}'. Client might fail if used.")
-
-                # Instantiate client - pass config if constructor accepts it
-                sig = inspect.signature(client_class.__init__)
-                if 'config' in sig.parameters:
-                    client_instance = client_class(config=provider_config)
-                else:
-                    # Fallback for clients that don't take config in __init__
-                    client_instance = client_class()
-                    # Manually set config if possible, though BaseClient usually does this
-                    if hasattr(client_instance, 'config') and client_instance.config is None:
-                            client_instance.config = provider_config
-                            # Re-initialize if necessary after setting config, if the client supports it
-                            if hasattr(client_instance, '_initialize'):
-                                client_instance._initialize()
-
+                # Instantiate the client, passing the loaded ProviderConfig
+                client_instance = client_class(config=provider_config)
                 self.clients[provider_name] = client_instance
                 print(f"Initialized client for: {provider_name}")
 
@@ -174,28 +165,36 @@ class Orchestrator:
 
 
     def _create_agents(self, config_list: List[AgentConfiguration]):
-        # ... (function remains the same) ...
-        for config in config_list:
-            if config.agent_id in self.agents:
-                print(f"Warning: Duplicate agent_id '{config.agent_id}'. Skipping.")
+        """Creates AgentInstance objects from configurations."""
+        if not self.all_discovered_tools:
+             print("Warning: Tool discovery yielded no tools.")
+
+        for agent_config in config_list:
+            if agent_config.agent_id in self.agents:
+                print(f"Warning: Duplicate agent_id '{agent_config.agent_id}'. Skipping.")
                 continue
 
-            client = self.clients.get(config.model_provider)
+            client = self.clients.get(agent_config.model_provider)
             if not client:
-                print(f"Warning: Client for provider '{config.model_provider}' not initialized or failed to initialize. Cannot create agent '{config.agent_id}'.")
+                print(f"Warning: Client for provider '{agent_config.model_provider}' not initialized for agent '{agent_config.agent_id}'. Skipping agent creation.")
                 continue
 
             try:
-                # Pass the already discovered tools
-                agent_instance = AgentInstance(config, client, self.executor, self.all_discovered_tools)
-                self.agents[config.agent_id] = agent_instance
+                # Pass the agent-specific config, the initialized client, executor, and discovered tools
+                agent_instance = AgentInstance(
+                    config=agent_config,
+                    client=client,
+                    executor=self.executor,
+                    all_discovered_tools=self.all_discovered_tools
+                )
+                self.agents[agent_config.agent_id] = agent_instance
 
             except Exception as e:
-                print(f"Error creating agent '{config.agent_id}': {e}")
+                print(f"Error creating agent instance '{agent_config.agent_id}': {e}")
                 traceback.print_exc()
 
-
     async def run_main_loop(self, initial_prompt: str, target_agent_id: str = "ceo", max_turns: int = 10):
+        # This function remains the same as the previous version with the SYSTEM REMINDER logic
         agent = self.agents.get(target_agent_id)
         if not agent:
             print(f"Error: Target agent '{target_agent_id}' not found.")
@@ -213,11 +212,8 @@ class Orchestrator:
                 print(f"\n--- Turn {turn_count + 1}/{max_turns} ({target_agent_id}) ---")
 
                 # --- Determine if "Proceed." should potentially be added LATER ---
-                # This checks if the *previous* turn ended with a simple assistant text response
                 should_add_proceed_later = False
                 if agent.messages:
-                    # Check message before the last one (if it exists)
-                    # Because the last one might now be the reminder we add after a tool call
                     potential_last_assistant_msg_index = -1
                     if agent.messages[-1].role == 'user' and agent.messages[-1].content.startswith("[SYSTEM REMINDER]"):
                         if len(agent.messages) > 1:
@@ -227,11 +223,9 @@ class Orchestrator:
 
                     if potential_last_assistant_msg_index < 0 and len(agent.messages) > abs(potential_last_assistant_msg_index):
                         last_msg = agent.messages[potential_last_assistant_msg_index]
-                        # Condition: The message was from assistant AND it wasn't a tool result/special message
                         if last_msg.role == 'assistant' and not last_msg.content.startswith(("Tool '", "[Tool Result", "@result", "!!! IMPORTANT", "✓ CONVERSATION ENDED", "✗ CONVERSATION ENDED", "⚠ CONVERSATION ENDED")):
-                            # Avoid adding Proceed. after Proceed.
                             if not (len(agent.messages) > 1 and agent.messages[-2].role == 'user' and agent.messages[-2].content == "Proceed."):
-                                should_add_proceed_later = True # Mark potential need
+                                should_add_proceed_later = True
 
                 # --- Execute the agent's turn ---
                 result = await agent.execute_turn()
@@ -242,37 +236,30 @@ class Orchestrator:
                 if result is TOOL_EXECUTED_SIGNAL:
                     print("[Orchestrator] Non-pausing tool executed.")
                     # --- ADD REMINDER ---
-                    # Find the last *actual* user message (not 'Proceed.' or reminder)
-                    last_real_user_prompt = _initial_user_prompt # Default to initial
+                    last_real_user_prompt = _initial_user_prompt
                     for i in range(len(agent.messages) - 1, -1, -1):
                          msg = agent.messages[i]
-                         # Look for user messages that are not Proceed or our own reminder
                          if msg.role == 'user' and not msg.content.startswith(("Proceed.", "[SYSTEM REMINDER]")):
                               last_real_user_prompt = msg.content
                               break
-                    # Construct a concise reminder
                     reminder_text = f"[SYSTEM REMINDER] Previous step completed. Recall the goal: \"{last_real_user_prompt[:100].strip()}...\" Now execute the *next* step based on your plan."
-                    agent.add_message('user', reminder_text) # Add as user message to force attention
-                    print(f"User: {reminder_text}") # Make reminder visible
+                    agent.add_message('user', reminder_text)
+                    print(f"User: {reminder_text}")
                     reminder_added_this_turn = True
                     # --- END REMINDER ---
-                    pass # Continue loop
+                    pass
 
                 elif isinstance(result, str) and result.startswith("[ERROR:"):
                     print(f"\n[Orchestrator] Agent '{target_agent_id}' reported error: {result}. Stopping loop.")
                     break
                 elif isinstance(result, str):
-                    # Agent returned text without tool call/error
-                    pass # Loop continues naturally
+                    pass
                 elif result is None:
                      print(f"\n[Orchestrator] Agent '{target_agent_id}' returned None unexpectedly. Stopping loop.")
                      break
 
-
                 # --- Add "Proceed." ONLY if needed AND turn didn't run a tool AND no reminder was just added ---
                 if should_add_proceed_later and result is not TOOL_EXECUTED_SIGNAL and not reminder_added_this_turn:
-                    # Ensure we don't add "Proceed." if the last message IS ALREADY "Proceed."
-                    # (This check might be redundant due to AgentInstance.add_message, but good for safety)
                     if not (agent.messages and agent.messages[-1].role == 'user' and agent.messages[-1].content == "Proceed."):
                         agent.add_message('user', "Proceed.")
                         print("User: Proceed.")
@@ -280,11 +267,10 @@ class Orchestrator:
             # --- Handle control flow exceptions ---
             except PauseRequested as pr:
                 print("\n-----------------------------------------------------")
-                print(f"[Orchestrator] {pr.message}") # Use message directly from exception
+                print(f"[Orchestrator] {pr.message}")
                 print("-----------------------------------------------------")
-
                 user_input = get_multiline_input("> ")
-                if user_input is None: # Handle Ctrl+D or EOF
+                if user_input is None:
                     print("\nExiting loop due to user input (EOF).")
                     break
                 elif user_input.strip():
@@ -292,30 +278,28 @@ class Orchestrator:
                     agent.add_message('user', user_input)
                 else:
                     print("[Empty input received. Resuming autonomous run...]")
-                    # Explicitly add Proceed if user just hits Enter after a pause
                     agent.add_message('user', "Proceed.")
                     print("User: Proceed.")
-                # Don't break, continue the loop to process next turn or user input
                 continue
 
             except ConversationEnded as ce:
                 print(f"\n[Orchestrator] Caught ConversationEnded signal: {ce}")
-                break # Exit the main loop
+                break
 
             except KeyboardInterrupt:
                 print("\n[Orchestrator] Keyboard interrupt detected. Stopping.")
-                break # Exit the main loop
+                break
 
             except Exception as e:
                 print(f"\n[Orchestrator] An unexpected error occurred in the main loop: {type(e).__name__}: {e}")
                 traceback.print_exc()
-                break # Exit on unexpected errors
+                break
 
             # --- Max turns check ---
             if turn_count >= max_turns:
                 print(f"\n[Orchestrator] Reached max turns ({max_turns}). Stopping loop.")
                 break
 
-            await asyncio.sleep(0.1) # Small delay between turns
+            await asyncio.sleep(0.1)
 
         print(f"\n--- Main Loop Finished ({target_agent_id}) ---")

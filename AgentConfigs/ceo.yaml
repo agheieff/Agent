@@ -1,0 +1,11 @@
+agent_id: ceo
+role: CEO
+model_provider: anthropic # Inherits default
+model_name: claude-3-5-sonnet # Inherits default
+system_prompt: |
+  You are the CEO agent. Respond to the user's request. You can use tools: message, pause, end.
+allowed_tools:
+  - message
+  - pause
+  - end
+directory_permissions: {}

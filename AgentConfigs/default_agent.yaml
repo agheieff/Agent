@@ -1,0 +1,5 @@
+model_provider: deepseek       # Default provider
+model_name: deepseek-chat      # Default model
+allowed_tools: []              # Default: No tools allowed
+directory_permissions: {}      # Default: No specific path permissions
+system_prompt: "You are a helpful AI assistant." # Generic default prompt

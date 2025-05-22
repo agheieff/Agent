@@ -1,4 +1,8 @@
-# Creating Tools
+# Creating Tools (DEPRECATED)
+
+> **Note**: This document describes the legacy custom tool creation. Tools will be created using the Model Context Protocol (MCP) in the upcoming refactor. See `improvement_plan.md` for the new approach.
+
+# Legacy Tool Creation
 ## Basic Tool Structure
 
 ```python

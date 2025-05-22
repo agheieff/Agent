@@ -2,6 +2,8 @@
 
 A lightweight framework for building AI agents with tool usage capabilities.
 
+> **Note**: This project is undergoing a major refactor to adopt the Model Context Protocol (MCP). See [Docs/improvement_plan.md](Docs/improvement_plan.md) for details.
+
 ## Key Features
 
 - **Simplified Architecture**: Single core class (`AgentRunner`)
@@ -46,17 +48,35 @@ agent.run("Say hello to John using the greeter tool")
 
 ## Architecture Overview
 
-1. AgentRunner: Main controller that:
+1. **AgentRunner**: Main controller that:
     - Manages conversation state
     - Handles model interactions
     - Coordinates tool usage
 
-2. Tools: Self-contained operations that:
+2. **Tools**: Self-contained operations that:
     - Declare their interface
     - Implement single functions
     - Return simple data structures
 
-3. Clients: Provider-specific implementations that:
+3. **Clients**: Provider-specific implementations that:
     - Handle API communication
     - Normalize responses
     - Manage rate limiting
+
+## Development
+
+### Setup
+```bash
+./setup.sh  # Creates virtual environment and installs dependencies
+```
+
+### Testing
+```bash
+pytest Tests/  # Run all tests
+```
+
+### Documentation
+See the [Docs/](Docs/) directory for detailed documentation:
+- [Improvement Plan](Docs/improvement_plan.md) - Modernization roadmap
+- [Directory Structure](Docs/directory_structure.md) - Project layout
+- [CLAUDE.md](CLAUDE.md) - Development commands and architecture notes

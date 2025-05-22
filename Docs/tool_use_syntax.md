@@ -1,4 +1,8 @@
-# Tool Use Syntax
+# Tool Use Syntax (DEPRECATED)
+
+> **Note**: This document describes the legacy custom tool syntax. This will be replaced by the Model Context Protocol (MCP) in the upcoming refactor. See `improvement_plan.md` for details.
+
+# Legacy Tool Use Syntax
 ## Calling Tools (LLM → Agent)
 
 ```

@@ -1,3 +1,7 @@
+# OUTDATED - Original Development Plan
+
+> **Note**: This document represents the original ambitious roadmap. Much of this has been implemented but proven overly complex. See `improvement_plan.md` for the current simplification strategy.
+
 Phase 1: Foundational Multi-Agent Architecture
 
     Goal: Enable multiple, distinct agent instances to run and communicate, managed by a central orchestrator.
